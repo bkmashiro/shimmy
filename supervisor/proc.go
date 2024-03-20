@@ -11,7 +11,7 @@ import (
 	"go.uber.org/zap"
 )
 
-type proc[T any] struct {
+type proc[I, O any] struct {
 	pid         int
 	termination chan struct{}
 	stdout      io.ReadCloser
@@ -24,12 +24,11 @@ type proc[T any] struct {
 	log *zap.Logger
 }
 
-func (p *proc[T]) Terminate() {
+func (p *proc[I, O]) Terminate() {
 	p.kill(syscall.SIGTERM)
 }
 
-// TODO: check if we need this
-func (p *proc[T]) Kill(timeout time.Duration) error {
+func (p *proc[I, O]) Kill(timeout time.Duration) error {
 	// kill should report success if the process terminated by the time
 	// supervisor receives the request.
 	select {
@@ -55,7 +54,7 @@ func (p *proc[T]) Kill(timeout time.Duration) error {
 	}
 }
 
-func (p *proc[T]) kill(signal syscall.Signal) {
+func (p *proc[I, O]) kill(signal syscall.Signal) {
 	log := p.log.With(zap.Stringer("signal", signal))
 
 	// close stdin before killing the process, to
@@ -72,7 +71,7 @@ func (p *proc[T]) kill(signal syscall.Signal) {
 	}
 }
 
-func (p *proc[T]) sendKillSignal(signal syscall.Signal) error {
+func (p *proc[I, O]) sendKillSignal(signal syscall.Signal) error {
 	if pgid, err := syscall.Getpgid(p.pid); err == nil {
 		// Negative pid sends signal to all in process group
 		return syscall.Kill(-pgid, signal)
@@ -81,10 +80,10 @@ func (p *proc[T]) sendKillSignal(signal syscall.Signal) error {
 	}
 }
 
-func (p *proc[T]) Write(ctx context.Context, data T) (int, error) {
+func (p *proc[I, O]) Write(ctx context.Context, data I) (int, error) {
 	reqID := p.nextMsgID()
 
-	req := Message[T]{
+	req := Message[I]{
 		ID:   reqID,
 		Data: data,
 	}
@@ -97,7 +96,7 @@ func (p *proc[T]) Write(ctx context.Context, data T) (int, error) {
 	return reqID, nil
 }
 
-func (p *proc[T]) nextMsgID() int {
+func (p *proc[I, O]) nextMsgID() int {
 	p.msgidLock.Lock()
 	defer p.msgidLock.Unlock()
 
@@ -107,8 +106,8 @@ func (p *proc[T]) nextMsgID() int {
 	return id
 }
 
-func (p *proc[T]) Read(ctx context.Context, timeout time.Duration) (Message[T], error) {
-	var result Message[T]
+func (p *proc[I, O]) Read(ctx context.Context, timeout time.Duration) (Message[O], error) {
+	var result Message[O]
 
 	// Create a channel to signal the completion of reading and decoding.
 	done := make(chan error, 1)

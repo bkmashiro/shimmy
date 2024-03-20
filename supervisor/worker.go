@@ -27,25 +27,25 @@ type Message[T any] struct {
 	Data T `json:"data"`
 }
 
-type Worker[T any] interface {
+type Worker[I any, O any] interface {
 	Start(context.Context, StartParams) error
 	Terminate() error
 	// Kill(KillParams) error
-	Read(context.Context, ReadParams) (T, error)
-	Write(context.Context, T) error
-	Send(context.Context, T, SendParams) (T, error)
+	Read(context.Context, ReadParams) (O, error)
+	Write(context.Context, I) error
+	Send(context.Context, I, SendParams) (O, error)
 	Wait(context.Context) (ExitEvent, error)
 	WaitFor(context.Context, time.Duration) (ExitEvent, error)
 }
 
-type ProcessWorker[T any] struct {
+type ProcessWorker[I any, O any] struct {
 	processLock sync.Mutex
-	process     *proc[T]
+	process     *proc[I, O]
 	exitChan    chan ExitEvent
 	log         *zap.Logger
 }
 
-var _ = Worker[any](&ProcessWorker[any]{})
+var _ = Worker[any, any](&ProcessWorker[any, any]{})
 
 var (
 	ErrKillTimeout          = fmt.Errorf("kill timeout")
@@ -55,7 +55,7 @@ var (
 )
 
 // Start starts the worker process.
-func (w *ProcessWorker[T]) Start(ctx context.Context, params StartParams) error {
+func (w *ProcessWorker[I, O]) Start(ctx context.Context, params StartParams) error {
 	process := w.acquireProcess()
 
 	if process != nil {
@@ -98,7 +98,7 @@ func (w *ProcessWorker[T]) Start(ctx context.Context, params StartParams) error 
 		return err
 	}
 
-	process = &proc[T]{
+	process = &proc[I, O]{
 		pid:         cmd.Process.Pid,
 		termination: make(chan struct{}),
 		stdout:      stdout,
@@ -127,8 +127,9 @@ func (w *ProcessWorker[T]) Start(ctx context.Context, params StartParams) error 
 		// block until the context is done
 		<-ctx.Done()
 
-		// terminate the process
-		process.Terminate()
+		// kill the process without further ado
+		// TODO: check
+		process.Kill(0)
 	}()
 
 	return nil
@@ -137,7 +138,7 @@ func (w *ProcessWorker[T]) Start(ctx context.Context, params StartParams) error 
 // Wait waits for the worker process to exit. The method blocks until the process
 // exits. The method returns an ExitEvent object that contains the exit status of
 // the process. If the process is already terminated, the method returns immediately.
-func (w *ProcessWorker[T]) Wait(ctx context.Context) (ExitEvent, error) {
+func (w *ProcessWorker[I, O]) Wait(ctx context.Context) (ExitEvent, error) {
 	select {
 	case <-ctx.Done():
 		return ExitEvent{}, ctx.Err()
@@ -150,7 +151,7 @@ func (w *ProcessWorker[T]) Wait(ctx context.Context) (ExitEvent, error) {
 // or the timeout is reached. The method returns an ExitEvent that contains the exit
 // status of the process. If the process is already terminated, the method returns
 // immediately.
-func (w *ProcessWorker[T]) WaitFor(
+func (w *ProcessWorker[I, O]) WaitFor(
 	ctx context.Context,
 	deadline time.Duration,
 ) (ExitEvent, error) {
@@ -162,7 +163,7 @@ func (w *ProcessWorker[T]) WaitFor(
 
 // Terminate sends a SIGTERM signal to the worker process to request it to stop.
 // The method returns immediately, without waiting for the process to stop.
-func (w *ProcessWorker[T]) Terminate() error {
+func (w *ProcessWorker[I, O]) Terminate() error {
 	process := w.acquireProcess()
 
 	if process == nil {
@@ -194,10 +195,10 @@ func (w *ProcessWorker[T]) Terminate() error {
 // Read tries to read a message from the worker process. The message
 // is expected to be a JSON-serializable object. The worker process is
 // expected to send the message on its stdout.
-func (w *ProcessWorker[T]) Read(ctx context.Context, params ReadParams) (T, error) {
+func (w *ProcessWorker[I, O]) Read(ctx context.Context, params ReadParams) (O, error) {
 	process := w.acquireProcess()
 
-	var result T
+	var result O
 
 	if process == nil {
 		return result, ErrWorkerNotStarted
@@ -214,7 +215,7 @@ func (w *ProcessWorker[T]) Read(ctx context.Context, params ReadParams) (T, erro
 // Write writes a message to the worker process. The message is
 // expected to be a JSON-serializable object. The worker process
 // is expected to read the message from stdin and process it.
-func (w *ProcessWorker[T]) Write(ctx context.Context, data T) error {
+func (w *ProcessWorker[I, O]) Write(ctx context.Context, data I) error {
 	process := w.acquireProcess()
 
 	if process == nil {
@@ -234,14 +235,14 @@ func (w *ProcessWorker[T]) Write(ctx context.Context, data T) error {
 // be a JSON-serializable object. The worker process is expected
 // to read the message from stdin and process it. The worker
 // process may send a response to the message on its stdout.
-func (w *ProcessWorker[T]) Send(
+func (w *ProcessWorker[I, O]) Send(
 	ctx context.Context,
-	data T,
+	data I,
 	params SendParams,
-) (T, error) {
+) (O, error) {
 	process := w.acquireProcess()
 
-	var result T
+	var result O
 
 	if process == nil {
 		return result, ErrWorkerNotStarted
@@ -265,7 +266,7 @@ func (w *ProcessWorker[T]) Send(
 }
 
 // getProcess returns the worker process. The method is thread-safe.
-func (w *ProcessWorker[T]) setProcess(p *proc[T]) {
+func (w *ProcessWorker[I, O]) setProcess(p *proc[I, O]) {
 	w.processLock.Lock()
 	defer w.processLock.Unlock()
 
@@ -273,7 +274,7 @@ func (w *ProcessWorker[T]) setProcess(p *proc[T]) {
 }
 
 // acquireProcess returns the worker process. The method is thread-safe.
-func (w *ProcessWorker[T]) acquireProcess() *proc[T] {
+func (w *ProcessWorker[I, O]) acquireProcess() *proc[I, O] {
 	w.processLock.Lock()
 	defer w.processLock.Unlock()
 

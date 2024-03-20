@@ -14,6 +14,8 @@ type Manager[I, O any] struct {
 }
 
 type ManagerParams struct {
+	supervisor.SupervisorConfig
+
 	// Context is the context to use for the manager
 	Context context.Context
 
@@ -30,6 +32,7 @@ func New[I, O any](params ManagerParams) (*Manager[I, O], error) {
 	pool, err := createPool[I, O](
 		params.Context,
 		params.MaxCapacity,
+		params.SupervisorConfig,
 		log,
 	)
 	if err != nil {
@@ -92,12 +95,14 @@ func (m *Manager[I, O]) Shutdown() {
 func createPool[I, O any](
 	ctx context.Context,
 	maxSize int,
+	params supervisor.SupervisorConfig,
 	log *zap.Logger,
 ) (*puddle.Pool[*supervisor.Supervisor[I, O]], error) {
 	constructor := func(ctx context.Context) (*supervisor.Supervisor[I, O], error) {
-		sv, err := supervisor.New[I, O](supervisor.Params{
-			Log: log, // TODO: rename
-		})
+		// make sure the supervisor has a logger
+		params.Log = log
+
+		sv, err := supervisor.New[I, O](params)
 		if err != nil {
 			return nil, err
 		}

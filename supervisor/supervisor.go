@@ -23,7 +23,7 @@ type Supervisor[I, O any] struct {
 	log *zap.Logger
 }
 
-type Params struct {
+type SupervisorConfig struct {
 	// Persistent indicates whether the underlying worker can handle
 	// multiple messages, or if it is transient. Only valid for stdio
 	// based workers. Default is `false`.
@@ -60,7 +60,7 @@ type Params struct {
 	Log *zap.Logger
 }
 
-func New[I, O any](params Params) (*Supervisor[I, O], error) {
+func New[I, O any](params SupervisorConfig) (*Supervisor[I, O], error) {
 	// validate params
 	if params.Mode == FileIO && params.Persistent {
 		return nil, errors.New("persistent workers are not supported for file IO yet")

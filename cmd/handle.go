@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"github.com/lambda-feedback/evaluation-function-shim/lambda"
+	"github.com/lambda-feedback/shimmy/lambda"
 	"github.com/urfave/cli/v2"
 )
 

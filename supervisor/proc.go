@@ -28,10 +28,8 @@ func (p *proc[T]) Terminate() {
 	p.kill(syscall.SIGTERM)
 }
 
-func (p *proc[T]) Kill(
-	ctx context.Context,
-	timeout time.Duration,
-) error {
+// TODO: check if we need this
+func (p *proc[T]) Kill(timeout time.Duration) error {
 	// kill should report success if the process terminated by the time
 	// supervisor receives the request.
 	select {
@@ -45,9 +43,6 @@ func (p *proc[T]) Kill(
 	// kill the process
 	p.kill(syscall.SIGKILL)
 
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
 	// block until either:
 	//  * the main process exits (parent ctx is cancelled)
 	//  * the child process exits (w.termination is closed)
@@ -55,7 +50,7 @@ func (p *proc[T]) Kill(
 	select {
 	case <-p.termination:
 		return nil
-	case <-ctx.Done():
+	case <-time.After(timeout):
 		return ErrKillTimeout
 	}
 }
@@ -127,9 +122,12 @@ func (p *proc[T]) Read(ctx context.Context, timeout time.Duration) (Message[T], 
 		done <- nil
 	}()
 
-	// Create a context with the specified timeout.
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+	if timeout > 0 {
+		// Create a context with the specified timeout.
+		timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		ctx = timeoutCtx
+	}
 
 	select {
 	case <-ctx.Done(): // Context was cancelled or timed out

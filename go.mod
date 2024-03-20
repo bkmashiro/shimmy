@@ -1,9 +1,10 @@
-module github.com/lambda-feedback/evaluation-function-shim
+module github.com/lambda-feedback/shimmy
 
 go 1.22.0
 
 require (
 	github.com/aws/aws-lambda-go v1.46.0
+	github.com/jackc/puddle/v2 v2.2.1
 	github.com/knadh/koanf/parsers/dotenv v0.1.0
 	github.com/knadh/koanf/parsers/json v0.1.0
 	github.com/knadh/koanf/providers/confmap v0.1.0
@@ -14,16 +15,19 @@ require (
 	go.uber.org/zap v1.27.0
 )
 
-require golang.org/x/text v0.8.0 // indirect
+require (
+	golang.org/x/sync v0.1.0 // indirect
+	golang.org/x/text v0.8.0 // indirect
+)
 
 require (
+	github.com/alitto/pond v1.8.3
 	github.com/cpuguy83/go-md2man/v2 v2.0.2 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/getsentry/sentry-go v0.27.0
 	github.com/go-viper/mapstructure/v2 v2.0.0-alpha.1 // indirect
-	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1 // indirect
-	github.com/knadh/koanf/maps v0.1.1 // indirect
+	github.com/knadh/koanf/maps v0.1.1
 	github.com/mitchellh/copystructure v1.2.0 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect

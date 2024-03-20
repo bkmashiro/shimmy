@@ -11,54 +11,37 @@ import (
 	"go.uber.org/zap"
 )
 
-type StartParams struct {
-	// Cmd is the path or name of the binary to execute
-	Cmd string
-
-	// Cwd is the working directory in which
-	// the binary should be executed
-	Cwd string
-
-	// Args is the list of arguments to pass to the command
-	Args []string
-
-	// Env is a map of environment variables
-	// to set when running the command
-	Env map[string]any
-}
-
-type KillParams struct {
-	// Timeout is the duration to wait for the worker to stop
-	Timeout time.Duration
-}
-
-type ReadParams struct {
-	// Timeout is the duration to wait for the worker to send a message
-	Timeout time.Duration
-}
-
 type ExitEvent struct {
-	Code   *int32
+	// Code is the exit code of the process
+	Code *int32
+
+	// Signal is the signal that caused the process to exit
 	Signal *int32
 }
 
 type Message[T any] struct {
-	ID   int `json:"id"`
-	Data T   `json:"data"`
+	// ID is the message identifier
+	ID int `json:"id"`
+
+	// Data is the message payload
+	Data T `json:"data"`
 }
 
 type Worker[T any] interface {
-	Start(context.Context, StartParams) (chan ExitEvent, error)
-	Terminate(context.Context) error
-	Kill(context.Context, KillParams) error
+	Start(context.Context, StartParams) error
+	Terminate() error
+	// Kill(KillParams) error
 	Read(context.Context, ReadParams) (T, error)
 	Write(context.Context, T) error
-	Send(context.Context, T, ReadParams) (T, error)
+	Send(context.Context, T, SendParams) (T, error)
+	Wait(context.Context) (ExitEvent, error)
+	WaitFor(context.Context, time.Duration) (ExitEvent, error)
 }
 
 type ProcessWorker[T any] struct {
 	processLock sync.Mutex
 	process     *proc[T]
+	exitChan    chan ExitEvent
 	log         *zap.Logger
 }
 
@@ -72,12 +55,11 @@ var (
 )
 
 // Start starts the worker process.
-func (w *ProcessWorker[T]) Start(ctx context.Context, params StartParams) (chan ExitEvent, error) {
-	w.processLock.Lock()
-	defer w.processLock.Unlock()
+func (w *ProcessWorker[T]) Start(ctx context.Context, params StartParams) error {
+	process := w.acquireProcess()
 
-	if w.process != nil {
-		return nil, ErrWorkerAlreadyStarted
+	if process != nil {
+		return ErrWorkerAlreadyStarted
 	}
 
 	cmd := exec.Command(params.Cmd, params.Args...)
@@ -96,27 +78,27 @@ func (w *ProcessWorker[T]) Start(ctx context.Context, params StartParams) (chan 
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	err = cmd.Start()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	w.process = &proc[T]{
+	process = &proc[T]{
 		pid:         cmd.Process.Pid,
 		termination: make(chan struct{}),
 		stdout:      stdout,
@@ -125,7 +107,9 @@ func (w *ProcessWorker[T]) Start(ctx context.Context, params StartParams) (chan 
 		log:         w.log.Named("worker_proc").With(zap.Int("pid", cmd.Process.Pid)),
 	}
 
-	exitChan := make(chan ExitEvent)
+	w.setProcess(process)
+
+	w.exitChan = make(chan ExitEvent)
 
 	go func() {
 		// block until the process exits
@@ -134,60 +118,92 @@ func (w *ProcessWorker[T]) Start(ctx context.Context, params StartParams) (chan 
 		// close the termination channel,
 		close(w.process.termination)
 
-		exitChan <- getExitEvent(err)
+		w.exitChan <- getExitEvent(err)
 
-		close(exitChan)
+		close(w.exitChan)
 	}()
 
-	return exitChan, nil
+	go func() {
+		// block until the context is done
+		<-ctx.Done()
+
+		// terminate the process
+		process.Terminate()
+	}()
+
+	return nil
+}
+
+// Wait waits for the worker process to exit. The method blocks until the process
+// exits. The method returns an ExitEvent object that contains the exit status of
+// the process. If the process is already terminated, the method returns immediately.
+func (w *ProcessWorker[T]) Wait(ctx context.Context) (ExitEvent, error) {
+	select {
+	case <-ctx.Done():
+		return ExitEvent{}, ctx.Err()
+	case exitEvent := <-w.exitChan:
+		return exitEvent, nil
+	}
+}
+
+// WaitFor waits for the worker process to exit. It blocks until the process exits
+// or the timeout is reached. The method returns an ExitEvent that contains the exit
+// status of the process. If the process is already terminated, the method returns
+// immediately.
+func (w *ProcessWorker[T]) WaitFor(
+	ctx context.Context,
+	deadline time.Duration,
+) (ExitEvent, error) {
+	ctx, cancel := context.WithTimeout(ctx, deadline)
+	defer cancel()
+
+	return w.Wait(ctx)
 }
 
 // Terminate sends a SIGTERM signal to the worker process to request it to stop.
 // The method returns immediately, without waiting for the process to stop.
-func (w *ProcessWorker[T]) Terminate(ctx context.Context) error {
-	w.processLock.Lock()
-	defer w.processLock.Unlock()
+func (w *ProcessWorker[T]) Terminate() error {
+	process := w.acquireProcess()
 
-	if w.process == nil {
+	if process == nil {
 		return ErrWorkerNotStarted
 	}
 
-	w.process.Terminate()
+	process.Terminate()
 
 	return nil
 }
 
 // Kill sends a SIGKILL signal to the worker process to force-terminate it.
 // The method blocks until the process is terminated or the timeout is reached.
-func (w *ProcessWorker[T]) Kill(ctx context.Context, params KillParams) error {
-	w.processLock.Lock()
-	defer w.processLock.Unlock()
+// TODO: see what to do with this method
+// func (w *ProcessWorker[T]) Kill(params KillParams) error {
+// 	process := w.acquireProcess()
 
-	if params.Timeout <= 0 {
-		return ErrInvalidTimeout
-	}
+// 	if params.Timeout <= 0 {
+// 		return ErrInvalidTimeout
+// 	}
 
-	if w.process == nil {
-		return ErrWorkerNotStarted
-	}
+// 	if process == nil {
+// 		return ErrWorkerNotStarted
+// 	}
 
-	return w.process.Kill(ctx, params.Timeout)
-}
+// 	return process.Kill(params.Timeout)
+// }
 
 // Read tries to read a message from the worker process. The message
 // is expected to be a JSON-serializable object. The worker process is
 // expected to send the message on its stdout.
 func (w *ProcessWorker[T]) Read(ctx context.Context, params ReadParams) (T, error) {
-	w.processLock.Lock()
-	defer w.processLock.Unlock()
+	process := w.acquireProcess()
 
 	var result T
 
-	if w.process == nil {
+	if process == nil {
 		return result, ErrWorkerNotStarted
 	}
 
-	msg, err := w.process.Read(ctx, params.Timeout)
+	msg, err := process.Read(ctx, params.Timeout)
 	if err != nil {
 		return result, err
 	}
@@ -199,14 +215,13 @@ func (w *ProcessWorker[T]) Read(ctx context.Context, params ReadParams) (T, erro
 // expected to be a JSON-serializable object. The worker process
 // is expected to read the message from stdin and process it.
 func (w *ProcessWorker[T]) Write(ctx context.Context, data T) error {
-	w.processLock.Lock()
-	defer w.processLock.Unlock()
+	process := w.acquireProcess()
 
-	if w.process == nil {
+	if process == nil {
 		return ErrWorkerNotStarted
 	}
 
-	_, err := w.process.Write(ctx, data)
+	_, err := process.Write(ctx, data)
 	if err != nil {
 		return err
 	}
@@ -222,23 +237,22 @@ func (w *ProcessWorker[T]) Write(ctx context.Context, data T) error {
 func (w *ProcessWorker[T]) Send(
 	ctx context.Context,
 	data T,
-	params ReadParams,
+	params SendParams,
 ) (T, error) {
-	w.processLock.Lock()
-	defer w.processLock.Unlock()
+	process := w.acquireProcess()
 
 	var result T
 
-	if w.process == nil {
+	if process == nil {
 		return result, ErrWorkerNotStarted
 	}
 
-	msgId, err := w.process.Write(ctx, data)
+	msgId, err := process.Write(ctx, data)
 	if err != nil {
 		return result, err
 	}
 
-	msg, err := w.process.Read(ctx, params.Timeout)
+	msg, err := process.Read(ctx, params.Timeout)
 	if err != nil {
 		return result, err
 	}
@@ -248,6 +262,22 @@ func (w *ProcessWorker[T]) Send(
 	}
 
 	return msg.Data, nil
+}
+
+// getProcess returns the worker process. The method is thread-safe.
+func (w *ProcessWorker[T]) setProcess(p *proc[T]) {
+	w.processLock.Lock()
+	defer w.processLock.Unlock()
+
+	w.process = p
+}
+
+// acquireProcess returns the worker process. The method is thread-safe.
+func (w *ProcessWorker[T]) acquireProcess() *proc[T] {
+	w.processLock.Lock()
+	defer w.processLock.Unlock()
+
+	return w.process
 }
 
 func getExitEvent(err error) ExitEvent {

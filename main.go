@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/getsentry/sentry-go"
-	"github.com/lambda-feedback/evaluation-function-shim/cmd"
-	"github.com/lambda-feedback/evaluation-function-shim/util"
+	"github.com/lambda-feedback/shimmy/cmd"
+	"github.com/lambda-feedback/shimmy/util"
 )
 
 var Version string

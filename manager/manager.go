@@ -13,8 +13,8 @@ type Manager[I, O any] struct {
 	log  *zap.Logger
 }
 
-type ManagerParams struct {
-	supervisor.SupervisorConfig
+type ManagerConfig[I, O any] struct {
+	supervisor.SupervisorConfig[I, O]
 
 	// Context is the context to use for the manager
 	Context context.Context
@@ -26,7 +26,7 @@ type ManagerParams struct {
 	Log *zap.Logger
 }
 
-func New[I, O any](params ManagerParams) (*Manager[I, O], error) {
+func New[I, O any](params ManagerConfig[I, O]) (*Manager[I, O], error) {
 	log := params.Log.Named("manager")
 
 	pool, err := createPool[I, O](
@@ -46,23 +46,32 @@ func New[I, O any](params ManagerParams) (*Manager[I, O], error) {
 }
 
 func (m *Manager[I, O]) Send(ctx context.Context, data I) (O, error) {
-	var res O
+	var res supervisor.Result[O]
 
 	resource, err := m.pool.Acquire(ctx)
 	if err != nil {
 		m.log.Error("error acquiring supervisor", zap.Error(err))
-		return res, err
+		return res.Data, err
 	}
 
 	sup := resource.Value()
 
 	release := func() {
-		if err := sup.Suspend(ctx); err != nil {
+		if res.Wait == nil {
+			// if there is no wait function, we can release the resource
+			resource.Release()
+			return
+		}
+
+		if err := res.Wait(); err != nil {
+			// if there is an error destroying the supervisor, we need to
+			// log it and destroy the resource
 			m.log.Error("error suspending supervisor", zap.Error(err))
 			resource.Destroy()
 			return
 		}
 
+		// if the supervisor was suspended, we release the resource
 		resource.Release()
 	}
 
@@ -79,10 +88,10 @@ func (m *Manager[I, O]) Send(ctx context.Context, data I) (O, error) {
 	if err != nil {
 		// TODO: probably destroy the resource here in case it is a unrecoverable error
 		m.log.Error("error sending data to supervisor", zap.Error(err))
-		return res, err
+		return res.Data, err
 	}
 
-	return res, nil
+	return res.Data, nil
 }
 
 // Shutdown stops the manager and waits for all workers to finish.
@@ -95,7 +104,7 @@ func (m *Manager[I, O]) Shutdown() {
 func createPool[I, O any](
 	ctx context.Context,
 	maxSize int,
-	params supervisor.SupervisorConfig,
+	params supervisor.SupervisorConfig[I, O],
 	log *zap.Logger,
 ) (*puddle.Pool[*supervisor.Supervisor[I, O]], error) {
 	constructor := func(ctx context.Context) (*supervisor.Supervisor[I, O], error) {
@@ -115,8 +124,13 @@ func createPool[I, O any](
 	}
 
 	destructor := func(s *supervisor.Supervisor[I, O]) {
-		if err := s.Shutdown(ctx); err != nil {
+		wait, err := s.Shutdown(ctx)
+		if err != nil {
 			log.Error("error shutting down supervisor", zap.Error(err))
+		}
+
+		if err := wait(); err != nil {
+			log.Error("error waiting for supervisor to shut down", zap.Error(err))
 		}
 	}
 

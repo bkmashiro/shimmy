@@ -1,4 +1,4 @@
-package supervisor
+package worker
 
 import (
 	"context"
@@ -30,7 +30,7 @@ type Message[T any] struct {
 type Worker[I any, O any] interface {
 	Start(context.Context, StartParams) error
 	Terminate() error
-	// Kill(KillParams) error
+	// Kill(StopParams) error
 	Read(context.Context, ReadParams) (O, error)
 	Write(context.Context, I) error
 	Send(context.Context, I, SendParams) (O, error)
@@ -45,14 +45,13 @@ type ProcessWorker[I any, O any] struct {
 	log         *zap.Logger
 }
 
-var _ = Worker[any, any](&ProcessWorker[any, any]{})
+func NewProcessWorker[I, O any](log *zap.Logger) *ProcessWorker[I, O] {
+	return &ProcessWorker[I, O]{
+		log: log,
+	}
+}
 
-var (
-	ErrKillTimeout          = fmt.Errorf("kill timeout")
-	ErrInvalidTimeout       = fmt.Errorf("invalid timeout")
-	ErrWorkerNotStarted     = fmt.Errorf("worker not started")
-	ErrWorkerAlreadyStarted = fmt.Errorf("worker already started")
-)
+var _ = Worker[any, any](&ProcessWorker[any, any]{})
 
 // Start starts the worker process.
 func (w *ProcessWorker[I, O]) Start(ctx context.Context, params StartParams) error {

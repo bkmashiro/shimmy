@@ -14,12 +14,19 @@ type stdioAdapter[I, O any] struct {
 	log *zap.Logger
 }
 
-func (a *stdioAdapter[I, O]) Start(ctx context.Context, params worker.StartParams) error {
-	if a.worker != nil {
-		return errors.New("worker already started")
-	}
+func newStdioAdapter[I, O any](log *zap.Logger) *stdioAdapter[I, O] {
+	worker := worker.NewProcessWorker[I, O](log)
 
-	a.worker = worker.NewProcessWorker[I, O](a.log)
+	return &stdioAdapter[I, O]{
+		worker: worker,
+		log:    log,
+	}
+}
+
+func (a *stdioAdapter[I, O]) Start(ctx context.Context, params worker.StartParams) error {
+	if a.worker == nil {
+		return errors.New("no worker provided")
+	}
 
 	// for stdio, we can already start the worker, as we do not need to pass
 	// any additional, message-specific data to the worker via arguments
@@ -39,7 +46,7 @@ func (a *stdioAdapter[I, O]) Send(
 	var res O
 
 	if a.worker == nil {
-		return res, errors.New("worker not started")
+		return res, errors.New("no worker provided")
 	}
 
 	// send data to worker
@@ -57,7 +64,7 @@ func (a *stdioAdapter[I, O]) Stop(
 	params worker.StopParams,
 ) (WaitFunc, error) {
 	if a.worker == nil {
-		return nil, errors.New("worker not started")
+		return nil, errors.New("no worker provided")
 	}
 
 	return stopWorker(ctx, a.worker, params)

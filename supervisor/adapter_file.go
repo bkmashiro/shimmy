@@ -18,16 +18,21 @@ type fileAdapter[I, O any] struct {
 	log *zap.Logger
 }
 
-func (a *fileAdapter[I, O]) Start(ctx context.Context, params worker.StartParams) error {
-	if a.worker != nil {
-		return errors.New("worker already started")
+func newFileAdapter[I, O any](log *zap.Logger) *fileAdapter[I, O] {
+	worker := worker.NewProcessWorker[any, any](log)
+
+	return &fileAdapter[I, O]{
+		worker: worker,
+		log:    log,
 	}
+}
 
-	a.worker = worker.NewProcessWorker[any, any](a.log)
-	a.startParams = params
-
+func (a *fileAdapter[I, O]) Start(ctx context.Context, params worker.StartParams) error {
 	// for fileio, we can't yet start the worker, as we do need to pass
 	// the file path with the request data to the worker via arguments.
+
+	// however, we do store the start params and use them in Send later.
+	a.startParams = params
 
 	return nil
 }
@@ -40,7 +45,7 @@ func (a *fileAdapter[I, O]) Send(
 	var res O
 
 	if a.worker == nil {
-		return res, errors.New("worker not started")
+		return res, errors.New("no worker provided")
 	}
 
 	// create temp files for request and response data
@@ -103,7 +108,7 @@ func (a *fileAdapter[I, O]) Stop(
 	params worker.StopParams,
 ) (WaitFunc, error) {
 	if a.worker == nil {
-		return nil, errors.New("worker not started")
+		return nil, errors.New("no worker provided")
 	}
 
 	return stopWorker(ctx, a.worker, params)

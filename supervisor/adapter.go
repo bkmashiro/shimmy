@@ -25,9 +25,9 @@ func defaultAdapterFactory[I, O any](
 ) (Adapter[I, O], error) {
 	switch mode {
 	case FileIO:
-		return &fileAdapter[I, O]{log: log}, nil
+		return newFileAdapter[I, O](log), nil
 	case StdIO:
-		return &stdioAdapter[I, O]{log: log}, nil
+		return newStdioAdapter[I, O](log), nil
 	// case SocketIO:
 	// 	return &socketAdapter[I, O]{log: log}, nil
 	default:

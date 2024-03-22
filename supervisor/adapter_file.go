@@ -76,6 +76,10 @@ func (a *fileAdapter[I, O]) Send(
 	// append req and res file names to worker arguments
 	startParams.Args = append(startParams.Args, reqFile.Name(), resFile.Name())
 
+	if startParams.Env == nil {
+		startParams.Env = make(map[string]string)
+	}
+
 	// append req and res file names to worker env
 	startParams.Env["REQUEST_FILE_NAME"] = reqFile.Name()
 	startParams.Env["RESPONSE_FILE_NAME"] = resFile.Name()

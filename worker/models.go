@@ -25,7 +25,7 @@ type StartParams struct {
 
 	// Env is a map of environment variables
 	// to set when running the command
-	Env map[string]any
+	Env map[string]string
 }
 
 type StopParams struct {

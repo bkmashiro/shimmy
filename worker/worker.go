@@ -51,7 +51,7 @@ func NewProcessWorker[I, O any](log *zap.Logger) *ProcessWorker[I, O] {
 	}
 }
 
-var _ = Worker[any, any](&ProcessWorker[any, any]{})
+var _ Worker[any, any] = (*ProcessWorker[any, any])(nil)
 
 // Start starts the worker process.
 func (w *ProcessWorker[I, O]) Start(ctx context.Context, params StartParams) error {

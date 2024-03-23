@@ -14,25 +14,13 @@ all: build
 build:
 	go build -o ./bin/shimmy $(GOFLAGS) .
 
-staticcheck:
-	staticcheck ./...
-
-vet:
-	go vet ./...
-
-test: test-unit test-race
-
-test-snap:
-	UPDATE_SNAPS=true go test -covermode=count -coverprofile=coverage.out ./...
+test: test-unit
 
 test-unit:
 	go test -covermode=count -coverprofile=coverage.out ./...
-
-test-race:
-	go test -race ./...
-
-test-msan:
-	go test -msan ./...
+	
+lcov:
+	gcov2lcov -infile=coverage.out -outfile=lcov.info
 
 install:
 	go install

@@ -2,17 +2,16 @@ package supervisor
 
 import (
 	"context"
-	"errors"
 	"testing"
 
+	worker_mocks "github.com/lambda-feedback/shimmy/mocks/worker"
 	"github.com/lambda-feedback/shimmy/worker"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
 )
 
-func createStdioAdapter() (*stdioAdapter[any, any], *mockWorker) {
-	worker := &mockWorker{}
+func createStdioAdapter(t *testing.T) (*stdioAdapter[any, any], *worker_mocks.MockWorker[any, any]) {
+	worker := worker_mocks.NewMockWorker[any, any](t)
 
 	adapter := &stdioAdapter[any, any]{
 		worker: worker,
@@ -23,116 +22,102 @@ func createStdioAdapter() (*stdioAdapter[any, any], *mockWorker) {
 }
 
 func TestStdioAdapter_Start(t *testing.T) {
-	a, w := createStdioAdapter()
-
-	w.On("Start", mock.Anything, mock.Anything).Return(nil)
+	a, w := createStdioAdapter(t)
 
 	ctx := context.Background()
 	params := worker.StartParams{}
 
+	w.EXPECT().Start(ctx, params).Return(nil)
+
 	err := a.Start(ctx, params)
 	assert.NoError(t, err)
-
-	w.AssertCalled(t, "Start", ctx, params)
 }
 
 func TestStdioAdapter_Start_PassesError(t *testing.T) {
-	a, w := createStdioAdapter()
-
-	w.On("Start", mock.Anything, mock.Anything).Return(errors.New("test error"))
+	a, w := createStdioAdapter(t)
 
 	ctx := context.Background()
 	params := worker.StartParams{}
 
-	err := a.Start(ctx, params)
-	assert.ErrorContains(t, err, "test error")
+	w.EXPECT().Start(ctx, params).Return(assert.AnError)
 
-	w.AssertCalled(t, "Start", ctx, params)
+	err := a.Start(ctx, params)
+	assert.ErrorIs(t, err, assert.AnError)
 }
 
 func TestStdioAdapter_Stop(t *testing.T) {
-	a, w := createStdioAdapter()
+	a, w := createStdioAdapter(t)
 
-	w.On("Terminate").Return(nil)
+	w.EXPECT().Terminate().Return(nil)
 
 	_, err := a.Stop(context.Background(), worker.StopParams{})
 	assert.NoError(t, err)
-
-	w.AssertCalled(t, "Terminate")
 }
 
 func TestStdioAdapter_Stop_PassesError(t *testing.T) {
-	a, w := createStdioAdapter()
+	a, w := createStdioAdapter(t)
 
-	w.On("Terminate").Return(errors.New("test error"))
+	w.EXPECT().Terminate().Return(assert.AnError)
 
 	_, err := a.Stop(context.Background(), worker.StopParams{})
-	assert.ErrorContains(t, err, "test error")
-
-	w.AssertCalled(t, "Terminate")
+	assert.ErrorIs(t, err, assert.AnError)
 }
 
 func TestStdioAdapter_Stop_WaitFor(t *testing.T) {
-	a, w := createStdioAdapter()
-
-	w.On("Terminate").Return(nil)
-	w.On("WaitFor", mock.Anything, mock.Anything).Return(worker.ExitEvent{}, nil)
+	a, w := createStdioAdapter(t)
 
 	ctx := context.Background()
 	params := worker.StopParams{Timeout: 10}
+
+	w.EXPECT().Terminate().Return(nil)
+	w.EXPECT().WaitFor(ctx, params.Timeout).Return(worker.ExitEvent{}, nil)
 
 	wait, err := a.Stop(ctx, params)
 	assert.NoError(t, err)
 
 	err = wait()
 	assert.NoError(t, err)
+}
 
-	w.AssertCalled(t, "Terminate")
-	w.AssertCalled(t, "WaitFor", ctx, params.Timeout)
+func TestStdioAdapter_Stop_WaitForError(t *testing.T) {
+	a, w := createStdioAdapter(t)
+
+	ctx := context.Background()
+	params := worker.StopParams{Timeout: 10}
+
+	w.EXPECT().Terminate().Return(nil)
+	w.EXPECT().WaitFor(ctx, params.Timeout).Return(worker.ExitEvent{}, assert.AnError)
+
+	wait, err := a.Stop(ctx, params)
+	assert.NoError(t, err)
+
+	err = wait()
+	assert.ErrorIs(t, err, assert.AnError)
 }
 
 func TestStdioAdapter_Send(t *testing.T) {
-	a, w := createStdioAdapter()
-
-	w.On("Send", mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
+	a, w := createStdioAdapter(t)
 
 	ctx := context.Background()
 	data := "test"
 	params := worker.SendParams{}
 
-	_, err := a.Send(ctx, data, params)
-	assert.NoError(t, err)
-
-	w.AssertCalled(t, "Send", ctx, data, params)
-}
-
-func TestStdioAdapter_Send_PassesError(t *testing.T) {
-	a, w := createStdioAdapter()
-
-	w.On("Send", mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("test error"))
-
-	ctx := context.Background()
-	data := "test"
-	params := worker.SendParams{}
-
-	_, err := a.Send(ctx, data, params)
-	assert.ErrorContains(t, err, "test error")
-
-	w.AssertCalled(t, "Send", ctx, data, params)
-}
-
-func TestStdioAdapter_Send_PassesResult(t *testing.T) {
-	a, w := createStdioAdapter()
-
-	w.On("Send", mock.Anything, mock.Anything, mock.Anything).Return("result", nil)
-
-	ctx := context.Background()
-	data := "test"
-	params := worker.SendParams{}
+	w.EXPECT().Send(ctx, data, params).Return("result", nil)
 
 	res, err := a.Send(ctx, data, params)
 	assert.NoError(t, err)
 	assert.Equal(t, "result", res)
+}
 
-	w.AssertCalled(t, "Send", ctx, data, params)
+func TestStdioAdapter_Send_PassesError(t *testing.T) {
+	a, w := createStdioAdapter(t)
+
+	ctx := context.Background()
+	data := "test"
+	params := worker.SendParams{}
+
+	w.EXPECT().Send(ctx, data, params).Return("result", assert.AnError)
+
+	_, err := a.Send(ctx, data, params)
+	assert.ErrorIs(t, err, assert.AnError)
 }

@@ -8,7 +8,30 @@ import (
 	"go.uber.org/zap"
 )
 
-type Supervisor[I, O any] struct {
+type Supervisor[I, O any] interface {
+	// Start starts the supervisor. If the supervisor is persistent,
+	// this will boot the worker. If the supervisor is transient, this
+	// is a no-op.
+	Start(ctx context.Context) error
+
+	// Send sends a message to the worker. If the worker is persistent,
+	// this will acquire the worker and send the message. If the worker
+	// is transient, this will boot a new worker, send the message, and
+	// terminate the worker.
+	Send(ctx context.Context, data I) (*Result[O], error)
+
+	// Suspend suspends the worker. If the worker is persistent, this
+	// will release the worker. If the worker is transient, this will
+	// terminate the worker.
+	Suspend(ctx context.Context) (WaitFunc, error)
+
+	// Shutdown shuts down the worker. If the worker is persistent, this
+	// will terminate the worker. If the worker is transient, this will
+	// terminate the worker.
+	Shutdown(ctx context.Context) (WaitFunc, error)
+}
+
+type WorkerSupervisor[I, O any] struct {
 	persistent bool
 	mode       IOMode
 
@@ -24,6 +47,8 @@ type Supervisor[I, O any] struct {
 
 	log *zap.Logger
 }
+
+var _ Supervisor[any, any] = (*WorkerSupervisor[any, any])(nil)
 
 type SupervisorConfig[I, O any] struct {
 	// Persistent indicates whether the underlying worker can handle
@@ -66,7 +91,12 @@ type SupervisorConfig[I, O any] struct {
 	Log *zap.Logger
 }
 
-func New[I, O any](params SupervisorConfig[I, O]) (*Supervisor[I, O], error) {
+type Result[O any] struct {
+	Data O
+	Wait WaitFunc
+}
+
+func New[I, O any](params SupervisorConfig[I, O]) (Supervisor[I, O], error) {
 	// validate params
 	if params.Mode == FileIO && params.Persistent {
 		return nil, ErrInvalidPersistentFileIO
@@ -76,7 +106,7 @@ func New[I, O any](params SupervisorConfig[I, O]) (*Supervisor[I, O], error) {
 		params.WorkerFactory = defaultAdapterFactory
 	}
 
-	return &Supervisor[I, O]{
+	return &WorkerSupervisor[I, O]{
 		persistent:        params.Persistent,
 		mode:              params.Mode,
 		workerFactory:     params.WorkerFactory,
@@ -87,7 +117,7 @@ func New[I, O any](params SupervisorConfig[I, O]) (*Supervisor[I, O], error) {
 	}, nil
 }
 
-func (s *Supervisor[I, O]) Start(ctx context.Context) error {
+func (s *WorkerSupervisor[I, O]) Start(ctx context.Context) error {
 	// if the worker is transient, this is a no-op
 	if !s.persistent {
 		return nil
@@ -102,32 +132,25 @@ func (s *Supervisor[I, O]) Start(ctx context.Context) error {
 	return nil
 }
 
-type Result[O any] struct {
-	Data O
-	Wait WaitFunc
-}
-
-func (s *Supervisor[I, O]) Send(ctx context.Context, data I) (Result[O], error) {
+func (s *WorkerSupervisor[I, O]) Send(ctx context.Context, data I) (*Result[O], error) {
 	// acquire send lock. should not be necessary as supervisors
 	// are managed by a resource pool, but it does no harm to make
 	// the supervisor thread-safe and serialize access.
 	s.sendLock.Lock()
 	defer s.sendLock.Unlock()
 
-	var res Result[O]
-
 	// acquire worker
 	worker, err := s.acquireWorker(ctx)
 	if err != nil {
 		s.log.Error("error acquiring worker", zap.Error(err))
-		return res, err
+		return nil, err
 	}
 
 	// send data to worker
 	resData, err := worker.Send(ctx, data, s.workerSendParams)
 	if err != nil {
 		s.log.Error("error sending data to worker", zap.Error(err))
-		return res, err
+		return nil, err
 	}
 
 	wait, err := s.releaseWorker(ctx)
@@ -135,23 +158,21 @@ func (s *Supervisor[I, O]) Send(ctx context.Context, data I) (Result[O], error) 
 		s.log.Error("error releasing worker", zap.Error(err))
 	}
 
-	res = Result[O]{
+	return &Result[O]{
 		Data: resData,
 		Wait: wait,
-	}
-
-	return res, nil
+	}, nil
 }
 
-func (s *Supervisor[I, O]) Suspend(ctx context.Context) (WaitFunc, error) {
+func (s *WorkerSupervisor[I, O]) Suspend(ctx context.Context) (WaitFunc, error) {
 	return s.releaseWorker(ctx)
 }
 
-func (s *Supervisor[I, O]) Shutdown(ctx context.Context) (WaitFunc, error) {
+func (s *WorkerSupervisor[I, O]) Shutdown(ctx context.Context) (WaitFunc, error) {
 	return s.terminateWorker(ctx)
 }
 
-func (s *Supervisor[I, O]) acquireWorker(ctx context.Context) (Adapter[I, O], error) {
+func (s *WorkerSupervisor[I, O]) acquireWorker(ctx context.Context) (Adapter[I, O], error) {
 	s.workerLock.Lock()
 	defer s.workerLock.Unlock()
 
@@ -171,23 +192,23 @@ func (s *Supervisor[I, O]) acquireWorker(ctx context.Context) (Adapter[I, O], er
 	return worker, nil
 }
 
-func (s *Supervisor[I, O]) releaseWorker(ctx context.Context) (WaitFunc, error) {
+func (s *WorkerSupervisor[I, O]) releaseWorker(ctx context.Context) (WaitFunc, error) {
 	// if the worker is persistent, this is a no-op, as we
 	// want to keep the worker alive for future messages
 	if s.persistent {
-		return nil, nil
+		return noWaitFunc, nil
 	}
 
 	return s.terminateWorker(ctx)
 }
 
-func (s *Supervisor[I, O]) terminateWorker(ctx context.Context) (WaitFunc, error) {
+func (s *WorkerSupervisor[I, O]) terminateWorker(ctx context.Context) (WaitFunc, error) {
 	s.workerLock.Lock()
 	defer s.workerLock.Unlock()
 
 	// if there is no worker, we have nothing to release
 	if s.worker == nil {
-		return nil, nil
+		return noWaitFunc, nil
 	}
 
 	// ensure we set the worker to nil
@@ -198,7 +219,7 @@ func (s *Supervisor[I, O]) terminateWorker(ctx context.Context) (WaitFunc, error
 	return s.worker.Stop(ctx, s.workerStopParams)
 }
 
-func (s *Supervisor[I, O]) bootWorker(ctx context.Context) (Adapter[I, O], error) {
+func (s *WorkerSupervisor[I, O]) bootWorker(ctx context.Context) (Adapter[I, O], error) {
 	worker, err := s.workerFactory(s.mode, s.log)
 	if err != nil {
 		return nil, err
@@ -211,3 +232,5 @@ func (s *Supervisor[I, O]) bootWorker(ctx context.Context) (Adapter[I, O], error
 
 	return worker, nil
 }
+
+var noWaitFunc = func() error { return nil }

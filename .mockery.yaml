@@ -1,0 +1,15 @@
+# inpackage: True
+with-expecter: True
+outpkg: "{{.PackageName}}_mocks"
+filename: "{{.InterfaceName | firstLower}}_mock.go"
+dir: "mocks/{{.InterfaceDirRelative}}"
+# dir: "{{.InterfaceDir}}"
+packages:
+  github.com/lambda-feedback/shimmy/worker:
+    interfaces:
+      Worker:
+  github.com/lambda-feedback/shimmy/supervisor:
+    interfaces:
+      Adapter:
+      Supervisor:
+# testonly: True

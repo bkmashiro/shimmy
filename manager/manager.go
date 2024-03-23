@@ -9,8 +9,14 @@ import (
 )
 
 type Manager[I, O any] struct {
-	pool *puddle.Pool[*supervisor.Supervisor[I, O]]
+	pool *puddle.Pool[supervisor.Supervisor[I, O]]
 	log  *zap.Logger
+}
+
+type SupervisorFactory[I, O any] func(supervisor.SupervisorConfig[I, O]) (supervisor.Supervisor[I, O], error)
+
+func defaultSupervisorFactory[I, O any](params supervisor.SupervisorConfig[I, O]) (supervisor.Supervisor[I, O], error) {
+	return supervisor.New(params)
 }
 
 type ManagerConfig[I, O any] struct {
@@ -22,6 +28,9 @@ type ManagerConfig[I, O any] struct {
 	// MaxCapacity is the maximum number of tasks that can be queued
 	MaxCapacity int
 
+	// SupervisorFactory is the factory function to create a new supervisor
+	SupervisorFactory SupervisorFactory[I, O]
+
 	// Log is the logger to use for the manager
 	Log *zap.Logger
 }
@@ -29,12 +38,11 @@ type ManagerConfig[I, O any] struct {
 func New[I, O any](params ManagerConfig[I, O]) (*Manager[I, O], error) {
 	log := params.Log.Named("manager")
 
-	pool, err := createPool[I, O](
-		params.Context,
-		params.MaxCapacity,
-		params.SupervisorConfig,
-		log,
-	)
+	if params.SupervisorFactory == nil {
+		params.SupervisorFactory = defaultSupervisorFactory
+	}
+
+	pool, err := createPool(params)
 	if err != nil {
 		return nil, err
 	}
@@ -46,18 +54,19 @@ func New[I, O any](params ManagerConfig[I, O]) (*Manager[I, O], error) {
 }
 
 func (m *Manager[I, O]) Send(ctx context.Context, data I) (O, error) {
-	var res supervisor.Result[O]
-
 	resource, err := m.pool.Acquire(ctx)
 	if err != nil {
 		m.log.Error("error acquiring supervisor", zap.Error(err))
-		return res.Data, err
+		var zero O
+		return zero, err
 	}
 
 	sup := resource.Value()
 
+	var res *supervisor.Result[O]
+
 	release := func() {
-		if res.Wait == nil {
+		if res == nil || res.Wait == nil {
 			// if there is no wait function, we can release the resource
 			resource.Release()
 			return
@@ -88,7 +97,8 @@ func (m *Manager[I, O]) Send(ctx context.Context, data I) (O, error) {
 	if err != nil {
 		// TODO: probably destroy the resource here in case it is a unrecoverable error
 		m.log.Error("error sending data to supervisor", zap.Error(err))
-		return res.Data, err
+		var zero O
+		return zero, err
 	}
 
 	return res.Data, nil
@@ -101,17 +111,16 @@ func (m *Manager[I, O]) Shutdown() {
 
 // MARK: - Pool
 
-func createPool[I, O any](
-	ctx context.Context,
-	maxSize int,
-	params supervisor.SupervisorConfig[I, O],
-	log *zap.Logger,
-) (*puddle.Pool[*supervisor.Supervisor[I, O]], error) {
-	constructor := func(ctx context.Context) (*supervisor.Supervisor[I, O], error) {
-		// make sure the supervisor has a logger
-		params.Log = log
+func createPool[I, O any](params ManagerConfig[I, O]) (*puddle.Pool[supervisor.Supervisor[I, O]], error) {
+	constructor := func(ctx context.Context) (supervisor.Supervisor[I, O], error) {
+		supervisorConfig := params.SupervisorConfig
 
-		sv, err := supervisor.New[I, O](params)
+		// make sure the supervisor has a logger
+		if supervisorConfig.Log == nil {
+			supervisorConfig.Log = params.Log
+		}
+
+		sv, err := params.SupervisorFactory(params.SupervisorConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -123,20 +132,26 @@ func createPool[I, O any](
 		return sv, nil
 	}
 
-	destructor := func(s *supervisor.Supervisor[I, O]) {
-		wait, err := s.Shutdown(ctx)
+	destructor := func(s supervisor.Supervisor[I, O]) {
+		wait, err := s.Shutdown(params.Context)
 		if err != nil {
-			log.Error("error shutting down supervisor", zap.Error(err))
+			params.Log.Error("error shutting down supervisor", zap.Error(err))
+			return
+		}
+
+		if wait == nil {
+			params.Log.Warn("supervisor did not return a wait function")
+			return
 		}
 
 		if err := wait(); err != nil {
-			log.Error("error waiting for supervisor to shut down", zap.Error(err))
+			params.Log.Error("error waiting for supervisor to shut down", zap.Error(err))
 		}
 	}
 
-	return puddle.NewPool(&puddle.Config[*supervisor.Supervisor[I, O]]{
+	return puddle.NewPool(&puddle.Config[supervisor.Supervisor[I, O]]{
 		Constructor: constructor,
 		Destructor:  destructor,
-		MaxSize:     int32(maxSize),
+		MaxSize:     int32(params.MaxCapacity),
 	})
 }

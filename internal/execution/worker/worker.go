@@ -211,6 +211,12 @@ func (w *ProcessWorker[I, O]) Send(
 		return result, err
 	}
 
+	if params.CloseAfterSend {
+		if err := process.Close(); err != nil {
+			return result, err
+		}
+	}
+
 	msg, err := process.Read(ctx, params.Timeout)
 	if err != nil {
 		return result, err

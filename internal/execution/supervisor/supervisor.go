@@ -153,8 +153,13 @@ func (s *WorkerSupervisor[I, O]) Send(ctx context.Context, data I) (*Result[O], 
 		return nil, err
 	}
 
+	params := s.workerSendParams
+	if !s.persistent {
+		params.CloseAfterSend = true
+	}
+
 	// send data to worker
-	resData, err := worker.Send(ctx, data, s.workerSendParams)
+	resData, err := worker.Send(ctx, data, params)
 	if err != nil {
 		s.log.Error("error sending data to worker", zap.Error(err))
 		return nil, err

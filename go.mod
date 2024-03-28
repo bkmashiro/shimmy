@@ -17,6 +17,7 @@ require (
 	github.com/urfave/cli/v2 v2.27.1
 	go.uber.org/fx v1.21.0
 	go.uber.org/zap v1.27.0
+	golang.org/x/net v0.22.0
 )
 
 require (
@@ -33,7 +34,6 @@ require (
 	github.com/xrash/smetrics v0.0.0-20201216005158-039620a65673 // indirect
 	go.uber.org/dig v1.17.1 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
-	golang.org/x/net v0.22.0
 	golang.org/x/sync v0.1.0 // indirect
 	golang.org/x/sys v0.18.0 // indirect
 	golang.org/x/text v0.14.0 // indirect

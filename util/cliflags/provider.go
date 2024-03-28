@@ -9,9 +9,9 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
-// CLIFlags implements a raw map[string]interface{} provider.
+// CLIFlags implements a raw map[string]any provider.
 type CLIFlags struct {
-	mp map[string]interface{}
+	mp map[string]any
 }
 
 // Provider returns a CLI Provider that takes a CLI context.
@@ -22,7 +22,7 @@ func Provider(ctx *cli.Context, delim string, cb func(string) string) *CLIFlags 
 	flags := ctx.App.VisibleFlags()
 
 	// create a map to store the flag values
-	mp := make(map[string]interface{})
+	mp := make(map[string]any)
 
 	// iterate over the flags and store the values in the map,
 	// transforming the flag names if a callback is provided
@@ -48,7 +48,7 @@ func (e *CLIFlags) ReadBytes() ([]byte, error) {
 	return nil, errors.New("cli provider does not support this method")
 }
 
-// Read returns the loaded map[string]interface{}.
-func (e *CLIFlags) Read() (map[string]interface{}, error) {
+// Read returns the loaded map[string]any.
+func (e *CLIFlags) Read() (map[string]any, error) {
 	return e.mp, nil
 }

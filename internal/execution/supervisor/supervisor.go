@@ -33,7 +33,7 @@ type Supervisor[I, O any] interface {
 
 type WorkerSupervisor[I, O any] struct {
 	persistent bool
-	mode       IOMode
+	mode       IOInterface
 
 	sendLock sync.Mutex
 
@@ -56,7 +56,7 @@ type Config[I, O any] struct {
 	// based workers. Default is `false`.
 	Persistent bool `conf:"persistent"`
 
-	// Mode describes the mode of communication between the supervisor
+	// Interface describes the communication between the supervisor
 	// and the worker. It can be either "stdio" or "file".
 	//
 	// If "stdio", the supervisor will communicate with the worker over
@@ -69,19 +69,19 @@ type Config[I, O any] struct {
 	// to the worker process.
 	//
 	// Default is "stdio".
-	Mode IOMode `conf:"mode"`
+	Interface IOInterface `conf:"interface"`
 
 	// WorkerStartParams are the parameters to pass to the worker when
 	// starting it. This can be used to pass configuration to the worker.
-	WorkerStartParams worker.StartConfig `conf:"worker_start"`
+	WorkerStartParams worker.StartConfig `conf:"start,squash"`
 
 	// WorkerStopParams are the parameters to pass to the worker when
 	// terminating it.
-	WorkerStopParams worker.StopConfig `conf:"worker_stop"`
+	WorkerStopParams worker.StopConfig `conf:"stop"`
 
 	// WorkerSendParams are the parameters to pass to the worker when
 	// sending a message to it.
-	WorkerSendParams worker.SendConfig `conf:"worker_send"`
+	WorkerSendParams worker.SendConfig `conf:"send"`
 }
 
 type Params[I, O any] struct {
@@ -105,7 +105,7 @@ func New[I, O any](params Params[I, O]) (Supervisor[I, O], error) {
 	config := params.Config
 
 	// validate params
-	if config.Mode == FileIO && config.Persistent {
+	if config.Interface == FileIO && config.Persistent {
 		return nil, ErrInvalidPersistentFileIO
 	}
 
@@ -115,7 +115,7 @@ func New[I, O any](params Params[I, O]) (Supervisor[I, O], error) {
 
 	return &WorkerSupervisor[I, O]{
 		persistent:        config.Persistent,
-		mode:              config.Mode,
+		mode:              config.Interface,
 		workerFactory:     params.WorkerFactory,
 		workerStartParams: config.WorkerStartParams,
 		workerStopParams:  config.WorkerStopParams,

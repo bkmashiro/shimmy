@@ -1,5 +1,7 @@
 package config
 
+import "github.com/lambda-feedback/shimmy/runtime"
+
 type MessageEncoding string
 
 const (
@@ -14,20 +16,23 @@ type Config struct {
 	LogFormat string `conf:"log_format"`
 
 	// LogOutput is the log output for the application
-	Interface string `conf:"interface"`
+	// Interface string `conf:"interface"`
 
 	// Command is the command to execute
-	Command string `conf:"command"`
+	// Command string `conf:"command"`
 
 	// Args are the arguments to pass to the command
-	Args []string `conf:"arg"`
+	// Args []string `conf:"arg"`
 
 	// Disposable indicates if the command terminates after one message
-	Disposable bool `conf:"disposable"`
+	// Disposable bool `conf:"disposable"`
 
 	// Encoding is the encoding to use for the message
-	Encoding MessageEncoding `conf:"encoding"`
+	// Encoding MessageEncoding `conf:"encoding"`
 
 	// MaxProcs is the maximum number of processes to run concurrently
-	MaxProcs int `conf:"max_procs"`
+	// MaxProcs int `conf:"max_procs"`
+
+	// Runtime is the runtime configuration
+	Runtime runtime.Config `conf:"runtime"`
 }

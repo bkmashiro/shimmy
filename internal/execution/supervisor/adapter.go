@@ -7,7 +7,7 @@ import (
 	"go.uber.org/zap"
 )
 
-type AdapterFactoryFn[I, O any] func(IOMode, *zap.Logger) (Adapter[I, O], error)
+type AdapterFactoryFn[I, O any] func(IOInterface, *zap.Logger) (Adapter[I, O], error)
 
 type WaitFunc func() error
 
@@ -20,7 +20,7 @@ type Adapter[I, O any] interface {
 // MARK: - factory
 
 func defaultAdapterFactory[I, O any](
-	mode IOMode,
+	mode IOInterface,
 	log *zap.Logger,
 ) (Adapter[I, O], error) {
 	switch mode {

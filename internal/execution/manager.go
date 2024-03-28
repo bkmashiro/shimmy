@@ -26,11 +26,11 @@ var _ Manager[any, any] = (*WorkerManager[any, any])(nil)
 type SupervisorFactory[I, O any] func(supervisor.Params[I, O]) (supervisor.Supervisor[I, O], error)
 
 type Config[I, O any] struct {
-	// MaxCapacity is the maximum number of tasks that can be queued
-	MaxCapacity int `conf:"max_capacity"`
+	// MaxWorkers is the maximum number of concurrent workers
+	MaxWorkers int `conf:"max_workers"`
 
 	// SupervisorConfig is the configuration to use for the supervisor
-	Supervisor supervisor.Config[I, O] `conf:"supervisor"`
+	Supervisor supervisor.Config[I, O] `conf:"supervisor,squash"`
 }
 
 type Params[I, O any] struct {
@@ -160,7 +160,7 @@ func createPool[I, O any](params Params[I, O]) (*puddle.Pool[supervisor.Supervis
 	return puddle.NewPool(&puddle.Config[supervisor.Supervisor[I, O]]{
 		Constructor: constructor,
 		Destructor:  destructor,
-		MaxSize:     int32(params.Config.MaxCapacity),
+		MaxSize:     int32(params.Config.MaxWorkers),
 	})
 }
 

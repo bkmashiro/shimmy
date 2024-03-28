@@ -7,7 +7,7 @@ import (
 )
 
 func TestDefaultAdapterFactory(t *testing.T) {
-	cases := []IOMode{FileIO, StdIO}
+	cases := []IOInterface{FileIO, StdIO}
 	for _, mode := range cases {
 		_, err := defaultAdapterFactory[any, any](mode, nil)
 		assert.NoError(t, err)

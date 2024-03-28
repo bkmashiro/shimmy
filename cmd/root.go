@@ -58,24 +58,23 @@ functions on arbitrary, serverless platforms.`
 				Category: "function",
 				EnvVars:  []string{"FUNCTION_ARGS"},
 			},
-			// TODO: probable use `reusable` or `recycle`, depending on what the default case is
 			&cli.BoolFlag{
-				Name:     "disposable",
-				Usage:    "stop the worker process after handling a single event.",
+				Name:     "persistent",
+				Usage:    "the worker process is capable of handling more than one event.",
 				Aliases:  []string{"d"},
 				Category: "function",
 				EnvVars:  []string{"FUNCTION_DISPOSABLE"},
 			},
-			&cli.StringFlag{
-				Name:     "encoding",
-				Usage:    "the encoding of the event data. Options: json.",
-				Aliases:  []string{"e"},
-				Value:    "json",
-				Category: "function",
-				EnvVars:  []string{"FUNCTION_ENCODING"},
-			},
+			// &cli.StringFlag{
+			// 	Name:     "encoding",
+			// 	Usage:    "the encoding of the event data. Options: json.",
+			// 	Aliases:  []string{"e"},
+			// 	Value:    "json",
+			// 	Category: "function",
+			// 	EnvVars:  []string{"FUNCTION_ENCODING"},
+			// },
 			&cli.IntFlag{
-				Name:     "max-procs",
+				Name:     "max-workers",
 				Usage:    "",
 				Aliases:  []string{"n"},
 				Value:    0,
@@ -93,10 +92,23 @@ functions on arbitrary, serverless platforms.`
 			// inject logger into cli context
 			ctx.Context = logging.ContextWithLogger(ctx.Context, log)
 
+			// map cli flags to config fields
+			cliMap := map[string]string{
+				"max-workers": "runtime.max_workers",
+				"persistent":  "runtime.persistent",
+				"interface":   "runtime.interface",
+				"cmd":         "runtime.cmd",
+				"cwd":         "runtime.cwd",
+				"arg":         "runtime.arg",
+				"env":         "runtime.env",
+			}
+
 			// parse config using env
 			cfg, err := conf.Parse[config.Config](conf.ParseOptions{
 				Defaults: config.DefaultConfig,
 				Log:      log,
+				Cli:      ctx,
+				CliMap:   cliMap,
 			})
 			if err != nil {
 				return err

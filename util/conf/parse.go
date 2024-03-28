@@ -15,7 +15,8 @@ import (
 )
 
 type ParseOptions struct {
-	CLI      *cli.Context
+	Cli      *cli.Context
+	CliMap   map[string]string
 	Defaults DefaultConfig
 	Prefix   string
 	FileName string
@@ -52,8 +53,19 @@ func Parse[C any](opt ParseOptions) (*C, error) {
 		return nil, err
 	}
 
-	if opt.CLI != nil {
-		if err := k.Load(cliflags.Provider(opt.CLI, ".", transformFlag), nil); err != nil {
+	if opt.Cli != nil {
+		transformFlag := func(s string) string {
+			if opt.CliMap != nil {
+				if name, ok := opt.CliMap[s]; ok {
+					return name
+				}
+			}
+
+			// replace - with _
+			return strings.ReplaceAll(strings.ToLower(s), "-", "_")
+		}
+
+		if err := k.Load(cliflags.Provider(opt.Cli, ".", transformFlag), nil); err != nil {
 			log.Error("error parsing cli flags", zap.Error(err))
 			return nil, err
 		}
@@ -78,9 +90,4 @@ func transformEnv(s string) string {
 	_, parts = parts[0], parts[1:]
 	// create final string
 	return strings.Join(parts, ".")
-}
-
-func transformFlag(s string) string {
-	// replace - with _
-	return strings.ReplaceAll(strings.ToLower(s), "-", "_")
 }

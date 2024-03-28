@@ -15,7 +15,7 @@ import (
 func TestManager_New_FailsInvalidCapacity(t *testing.T) {
 	m, err := execution.NewManager(execution.Params[any, any]{
 		Config: execution.Config[any, any]{
-			MaxCapacity: 0,
+			MaxWorkers: 0,
 		},
 		Context: context.Background(),
 		Log:     zap.NewNop(),
@@ -222,7 +222,7 @@ func createManagerWithFactory(
 ) (*execution.WorkerManager[any, any], error) {
 	return execution.NewManager(execution.Params[any, any]{
 		Config: execution.Config[any, any]{
-			MaxCapacity: 1,
+			MaxWorkers: 1,
 		},
 		Context:           context.Background(),
 		SupervisorFactory: factory,

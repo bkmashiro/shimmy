@@ -21,7 +21,7 @@ type StartConfig struct {
 	Cwd string `conf:"cwd"`
 
 	// Args is the list of arguments to pass to the command
-	Args []string `conf:"args"`
+	Args []string `conf:"arg"`
 
 	// Env is a map of environment variables
 	// to set when running the command

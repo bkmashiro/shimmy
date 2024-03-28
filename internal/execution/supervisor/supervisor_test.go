@@ -20,7 +20,7 @@ func TestSupervisor_New_DefaultWorkerFactory(t *testing.T) {
 	s, err := supervisor.New(supervisor.Params[any, any]{
 		Config: supervisor.Config[any, any]{
 			Persistent: false,
-			Mode:       supervisor.StdIO,
+			Interface:  supervisor.StdIO,
 		},
 		WorkerFactory: nil,
 		Log:           zap.NewNop(),
@@ -33,7 +33,7 @@ func TestSupervisor_New_DefaultWorkerFactory(t *testing.T) {
 }
 
 func TestSupervisor_Start_FailsToAcquireWorker(t *testing.T) {
-	mockFactory := func(i supervisor.IOMode, l *zap.Logger) (supervisor.Adapter[any, any], error) {
+	mockFactory := func(i supervisor.IOInterface, l *zap.Logger) (supervisor.Adapter[any, any], error) {
 		return nil, assert.AnError
 	}
 
@@ -47,7 +47,7 @@ func TestSupervisor_Start_FailsToAcquireWorker(t *testing.T) {
 func TestSupervisor_Start_Transient_DoesNotAcquireWorker(t *testing.T) {
 	var called bool
 
-	mockFactory := func(i supervisor.IOMode, l *zap.Logger) (supervisor.Adapter[any, any], error) {
+	mockFactory := func(i supervisor.IOInterface, l *zap.Logger) (supervisor.Adapter[any, any], error) {
 		called = true
 		return nil, nil
 	}
@@ -66,7 +66,7 @@ func TestSupervisor_Start_Persistent_AcquiresWorker(t *testing.T) {
 	a := supervisor.NewMockAdapter[any, any](t)
 	a.EXPECT().Start(mock.Anything, mock.Anything).Return(nil)
 
-	mockFactory := func(i supervisor.IOMode, l *zap.Logger) (supervisor.Adapter[any, any], error) {
+	mockFactory := func(i supervisor.IOInterface, l *zap.Logger) (supervisor.Adapter[any, any], error) {
 		called = true
 		return a, nil
 	}
@@ -229,7 +229,7 @@ func TestSupervisor_Send_SendsData(t *testing.T) {
 }
 
 func TestSupervisor_Send_FailsToAcquireWorker(t *testing.T) {
-	mockFactory := func(i supervisor.IOMode, l *zap.Logger) (supervisor.Adapter[any, any], error) {
+	mockFactory := func(i supervisor.IOInterface, l *zap.Logger) (supervisor.Adapter[any, any], error) {
 		return nil, assert.AnError
 	}
 
@@ -272,14 +272,14 @@ func TestSupervisor_Send_Fails(t *testing.T) {
 
 // MARK: - mocks
 
-func createSupervisor(t *testing.T, persistent bool, mode supervisor.IOMode) (
+func createSupervisor(t *testing.T, persistent bool, mode supervisor.IOInterface) (
 	supervisor.Supervisor[any, any],
 	*supervisor.MockAdapter[any, any],
 	error,
 ) {
 	adapter := supervisor.NewMockAdapter[any, any](t)
 
-	workerFactory := func(mode supervisor.IOMode, log *zap.Logger) (supervisor.Adapter[any, any], error) {
+	workerFactory := func(mode supervisor.IOInterface, log *zap.Logger) (supervisor.Adapter[any, any], error) {
 		return adapter, nil
 	}
 
@@ -293,13 +293,13 @@ func createSupervisor(t *testing.T, persistent bool, mode supervisor.IOMode) (
 
 func createSupervisorWithFactory(
 	persistent bool,
-	mode supervisor.IOMode,
+	mode supervisor.IOInterface,
 	factory supervisor.AdapterFactoryFn[any, any],
 ) (supervisor.Supervisor[any, any], error) {
 	return supervisor.New(supervisor.Params[any, any]{
 		Config: supervisor.Config[any, any]{
 			Persistent: persistent,
-			Mode:       mode,
+			Interface:  mode,
 		},
 		WorkerFactory: factory,
 		Log:           zap.NewNop(),

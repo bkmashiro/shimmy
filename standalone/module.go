@@ -1,15 +1,21 @@
 package standalone
 
-import "go.uber.org/fx"
+import (
+	"github.com/lambda-feedback/shimmy/util/logging"
+	"go.uber.org/fx"
+)
 
 func Module(config HttpConfig) fx.Option {
 	return fx.Module(
-		"lambda",
+		"serve",
+		// rename logger for module
+		logging.DecorateLogger("serve"),
 		// provide config
 		fx.Supply(config),
+		// provide handlers
+		fx.Provide(NewCommandHandler),
 		// provide server
 		fx.Provide(NewLifecycleServer),
-		// TODO: add handlers
 		// invoke server
 		fx.Invoke(func(*HttpServer) {}),
 	)

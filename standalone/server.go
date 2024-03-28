@@ -6,24 +6,11 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/lambda-feedback/shimmy/runtime"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 )
-
-type ServerHandler struct {
-	Name    string
-	Handler http.Handler
-}
-
-func NewServerHandler(name string, handler http.Handler) *ServerHandler {
-	return &ServerHandler{
-		Name:    name,
-		Handler: handler,
-	}
-}
 
 type HttpConfig struct {
 	Host string
@@ -38,18 +25,16 @@ type HttpServerParams struct {
 
 	Config HttpConfig
 
-	Handlers []*ServerHandler `group:"handlers"`
-	Runtime  runtime.Runtime
+	Handlers []*HttpHandler `group:"handlers"`
 	Logger   *zap.Logger
 }
 
 type HttpServer struct {
-	ctx     context.Context
-	host    string
-	port    int
-	server  *http.Server
-	runtime runtime.Runtime
-	log     *zap.Logger
+	ctx    context.Context
+	host   string
+	port   int
+	server *http.Server
+	log    *zap.Logger
 }
 
 func NewHttpServer(params HttpServerParams) *HttpServer {
@@ -72,12 +57,11 @@ func NewHttpServer(params HttpServerParams) *HttpServer {
 	}
 
 	return &HttpServer{
-		ctx:     params.Context,
-		host:    params.Config.Host,
-		port:    params.Config.Port,
-		server:  server,
-		runtime: params.Runtime,
-		log:     params.Logger,
+		ctx:    params.Context,
+		host:   params.Config.Host,
+		port:   params.Config.Port,
+		server: server,
+		log:    params.Logger,
 	}
 }
 

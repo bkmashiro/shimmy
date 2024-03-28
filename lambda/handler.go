@@ -3,6 +3,7 @@ package lambda
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
@@ -56,48 +57,49 @@ func (s *LambdaHandler) Handle(
 	ctx context.Context,
 	evt events.APIGatewayProxyRequest,
 ) (events.APIGatewayProxyResponse, error) {
-	if evt.HTTPMethod != "POST" {
+	if evt.HTTPMethod != http.MethodPost {
 		s.log.Debug("invalid http method", zap.String("method", evt.HTTPMethod))
-		return events.APIGatewayProxyResponse{StatusCode: 405}, nil
+		return events.APIGatewayProxyResponse{StatusCode: http.StatusMethodNotAllowed}, nil
 	}
 
 	commandStr, ok := evt.PathParameters["command"]
 	if !ok {
 		s.log.Debug("missing command")
-		return events.APIGatewayProxyResponse{StatusCode: 404}, nil
+		return events.APIGatewayProxyResponse{StatusCode: http.StatusNotFound}, nil
 	}
 
 	command, ok := runtime.ParseCommand(commandStr)
 	if !ok {
 		s.log.Debug("invalid command", zap.String("command", commandStr))
-		return events.APIGatewayProxyResponse{StatusCode: 404}, nil
+		return events.APIGatewayProxyResponse{StatusCode: http.StatusNotFound}, nil
 	}
 
 	var message runtime.Message
 	if err := json.Unmarshal([]byte(evt.Body), &message); err != nil {
 		s.log.Debug("failed to unmarshal body", zap.Error(err))
-		return events.APIGatewayProxyResponse{StatusCode: 400}, nil
+		return events.APIGatewayProxyResponse{StatusCode: http.StatusBadRequest}, nil
 	}
 
 	message.Command = command
 
-	message, err := s.runtime.Handle(
-		ctx,
-		message,
-	)
+	message, err := s.runtime.Handle(ctx, message)
 	if err != nil {
 		s.log.Debug("failed to handle message", zap.Error(err))
-		return events.APIGatewayProxyResponse{StatusCode: 500}, nil
+		return events.APIGatewayProxyResponse{
+			StatusCode: http.StatusInternalServerError,
+		}, nil
 	}
 
 	responseData, err := json.Marshal(message)
 	if err != nil {
 		s.log.Debug("failed to marshal response", zap.Error(err))
-		return events.APIGatewayProxyResponse{StatusCode: 500}, nil
+		return events.APIGatewayProxyResponse{
+			StatusCode: http.StatusInternalServerError,
+		}, nil
 	}
 
 	return events.APIGatewayProxyResponse{
-		StatusCode: 200,
+		StatusCode: http.StatusOK,
 		Body:       string(responseData),
 	}, nil
 }

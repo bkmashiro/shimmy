@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/lambda-feedback/shimmy/worker"
+	"github.com/lambda-feedback/shimmy/internal/execution/worker"
 	"go.uber.org/zap"
 )
 
@@ -41,20 +41,20 @@ type WorkerSupervisor[I, O any] struct {
 	workerFactory AdapterFactoryFn[I, O]
 	workerLock    sync.Mutex
 
-	workerStartParams worker.StartParams
-	workerStopParams  worker.StopParams
-	workerSendParams  worker.SendParams
+	workerStartParams worker.StartConfig
+	workerStopParams  worker.StopConfig
+	workerSendParams  worker.SendConfig
 
 	log *zap.Logger
 }
 
 var _ Supervisor[any, any] = (*WorkerSupervisor[any, any])(nil)
 
-type SupervisorConfig[I, O any] struct {
+type Config[I, O any] struct {
 	// Persistent indicates whether the underlying worker can handle
 	// multiple messages, or if it is transient. Only valid for stdio
 	// based workers. Default is `false`.
-	Persistent bool
+	Persistent bool `conf:"persistent"`
 
 	// Mode describes the mode of communication between the supervisor
 	// and the worker. It can be either "stdio" or "file".
@@ -69,23 +69,28 @@ type SupervisorConfig[I, O any] struct {
 	// to the worker process.
 	//
 	// Default is "stdio".
-	Mode IOMode
+	Mode IOMode `conf:"mode"`
+
+	// WorkerStartParams are the parameters to pass to the worker when
+	// starting it. This can be used to pass configuration to the worker.
+	WorkerStartParams worker.StartConfig `conf:"worker_start"`
+
+	// WorkerStopParams are the parameters to pass to the worker when
+	// terminating it.
+	WorkerStopParams worker.StopConfig `conf:"worker_stop"`
+
+	// WorkerSendParams are the parameters to pass to the worker when
+	// sending a message to it.
+	WorkerSendParams worker.SendConfig `conf:"worker_send"`
+}
+
+type Params[I, O any] struct {
+	// Config is the config used to set up the supervisor and its workers.
+	Config Config[I, O]
 
 	// WorkerFactory the a factory function to create a new worker.
 	// This is called when the supervisor needs to boot a new worker.
 	WorkerFactory AdapterFactoryFn[I, O]
-
-	// WorkerStartParams are the parameters to pass to the worker when
-	// starting it. This can be used to pass configuration to the worker.
-	WorkerStartParams worker.StartParams
-
-	// WorkerStopParams are the parameters to pass to the worker when
-	// terminating it.
-	WorkerStopParams worker.StopParams
-
-	// WorkerSendParams are the parameters to pass to the worker when
-	// sending a message to it.
-	WorkerSendParams worker.SendParams
 
 	// Log is the logger to use for the supervisor
 	Log *zap.Logger
@@ -96,9 +101,11 @@ type Result[O any] struct {
 	Wait WaitFunc
 }
 
-func New[I, O any](params SupervisorConfig[I, O]) (Supervisor[I, O], error) {
+func New[I, O any](params Params[I, O]) (Supervisor[I, O], error) {
+	config := params.Config
+
 	// validate params
-	if params.Mode == FileIO && params.Persistent {
+	if config.Mode == FileIO && config.Persistent {
 		return nil, ErrInvalidPersistentFileIO
 	}
 
@@ -107,12 +114,12 @@ func New[I, O any](params SupervisorConfig[I, O]) (Supervisor[I, O], error) {
 	}
 
 	return &WorkerSupervisor[I, O]{
-		persistent:        params.Persistent,
-		mode:              params.Mode,
+		persistent:        config.Persistent,
+		mode:              config.Mode,
 		workerFactory:     params.WorkerFactory,
-		workerStartParams: params.WorkerStartParams,
-		workerStopParams:  params.WorkerStopParams,
-		workerSendParams:  params.WorkerSendParams,
+		workerStartParams: config.WorkerStartParams,
+		workerStopParams:  config.WorkerStopParams,
+		workerSendParams:  config.WorkerSendParams,
 		log:               params.Log,
 	}, nil
 }

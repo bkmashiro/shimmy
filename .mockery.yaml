@@ -5,11 +5,26 @@ filename: "{{.InterfaceName | firstLower}}_mock.go"
 dir: "mocks/{{.InterfaceDirRelative}}"
 # dir: "{{.InterfaceDir}}"
 packages:
-  github.com/lambda-feedback/shimmy/worker:
+  github.com/lambda-feedback/shimmy/internal/execution/worker:
+    config:
+      outpkg: "{{.PackageName}}"
+      inpackage: True
+      dir: "{{.InterfaceDir}}"
     interfaces:
       Worker:
-  github.com/lambda-feedback/shimmy/supervisor:
+  github.com/lambda-feedback/shimmy/internal/execution/supervisor:
+    config:
+      outpkg: "{{.PackageName}}"
+      inpackage: True
+      dir: "{{.InterfaceDir}}"
     interfaces:
       Adapter:
       Supervisor:
+  github.com/lambda-feedback/shimmy/internal/execution/manager:
+    config:
+      outpkg: "{{.PackageName}}"
+      inpackage: True
+      dir: "{{.InterfaceDir}}"
+    interfaces:
+      Manager:
 # testonly: True

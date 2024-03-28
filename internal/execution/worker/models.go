@@ -12,33 +12,33 @@ var (
 	ErrWorkerAlreadyStarted = fmt.Errorf("worker already started")
 )
 
-type StartParams struct {
+type StartConfig struct {
 	// Cmd is the path or name of the binary to execute
-	Cmd string
+	Cmd string `conf:"cmd"`
 
 	// Cwd is the working directory in which
 	// the binary should be executed
-	Cwd string
+	Cwd string `conf:"cwd"`
 
 	// Args is the list of arguments to pass to the command
-	Args []string
+	Args []string `conf:"args"`
 
 	// Env is a map of environment variables
 	// to set when running the command
-	Env map[string]string
+	Env map[string]string `conf:"env"`
 }
 
-type StopParams struct {
+type StopConfig struct {
 	// Timeout is the duration to wait for the worker to stop
-	Timeout time.Duration
+	Timeout time.Duration `conf:"timeout"`
 }
 
-type SendParams struct {
+type SendConfig struct {
 	// Timeout is the duration to wait for the worker to send a message
-	Timeout time.Duration
+	Timeout time.Duration `conf:"timeout"`
 }
 
-type ReadParams struct {
+type ReadConfig struct {
 	// Timeout is the duration to wait for the worker to send a message
-	Timeout time.Duration
+	Timeout time.Duration `conf:"timeout"`
 }

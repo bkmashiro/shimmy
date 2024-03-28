@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"github.com/lambda-feedback/shimmy/internal/shell"
+	"github.com/lambda-feedback/shimmy/util/logging"
 	"github.com/urfave/cli/v2"
 )
 
@@ -21,8 +23,15 @@ var (
 )
 
 func serveAction(ctx *cli.Context) error {
-	// TODO: start http server, handle requests and pass to manager
-	return nil
+	log, err := logging.LoggerFromContext(ctx.Context)
+	if err != nil {
+		return err
+	}
+
+	// TODO: inject http server module
+	app := shell.New(log)
+
+	return app.Run(ctx.Context)
 }
 
 func init() {

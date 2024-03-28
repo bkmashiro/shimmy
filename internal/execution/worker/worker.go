@@ -28,12 +28,12 @@ type Message[T any] struct {
 }
 
 type Worker[I any, O any] interface {
-	Start(context.Context, StartParams) error
+	Start(context.Context, StartConfig) error
 	Terminate() error
 	// Kill(StopParams) error
-	Read(context.Context, ReadParams) (O, error)
+	Read(context.Context, ReadConfig) (O, error)
 	Write(context.Context, I) error
-	Send(context.Context, I, SendParams) (O, error)
+	Send(context.Context, I, SendConfig) (O, error)
 	Wait(context.Context) (ExitEvent, error)
 	WaitFor(context.Context, time.Duration) (ExitEvent, error)
 }
@@ -54,56 +54,16 @@ func NewProcessWorker[I, O any](log *zap.Logger) *ProcessWorker[I, O] {
 var _ Worker[any, any] = (*ProcessWorker[any, any])(nil)
 
 // Start starts the worker process.
-func (w *ProcessWorker[I, O]) Start(ctx context.Context, params StartParams) error {
+func (w *ProcessWorker[I, O]) Start(ctx context.Context, config StartConfig) error {
 	process := w.acquireProcess()
 
 	if process != nil {
 		return ErrWorkerAlreadyStarted
 	}
 
-	cmd := exec.Command(params.Cmd, params.Args...)
-
-	if params.Env != nil {
-		env := make([]string, 0, len(params.Env))
-		for k, v := range params.Env {
-			env = append(env, fmt.Sprintf("%s=%s", k, v))
-		}
-		cmd.Env = env
-	}
-
-	if params.Cwd != "" {
-		cmd.Dir = params.Cwd
-	}
-
-	stdin, err := cmd.StdinPipe()
+	process, err := startProc[I, O](config, w.log)
 	if err != nil {
 		return err
-	}
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return err
-	}
-
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
-	err = cmd.Start()
-	if err != nil {
-		return err
-	}
-
-	process = &proc[I, O]{
-		pid:         cmd.Process.Pid,
-		termination: make(chan struct{}),
-		stdout:      stdout,
-		stderr:      stderr,
-		stdin:       stdin,
-		log:         w.log.Named("worker_proc").With(zap.Int("pid", cmd.Process.Pid)),
 	}
 
 	w.setProcess(process)
@@ -111,11 +71,7 @@ func (w *ProcessWorker[I, O]) Start(ctx context.Context, params StartParams) err
 	w.exitChan = make(chan ExitEvent)
 
 	go func() {
-		// block until the process exits
-		err := cmd.Wait()
-
-		// close the termination channel,
-		close(w.process.termination)
+		err := <-process.termination
 
 		w.exitChan <- getExitEvent(err)
 
@@ -128,7 +84,7 @@ func (w *ProcessWorker[I, O]) Start(ctx context.Context, params StartParams) err
 
 		// kill the process without further ado
 		// TODO: check
-		process.Kill(0)
+		process.Kill(-1)
 	}()
 
 	return nil
@@ -169,7 +125,10 @@ func (w *ProcessWorker[I, O]) Terminate() error {
 		return ErrWorkerNotStarted
 	}
 
-	process.Terminate()
+	err := process.Terminate(-1)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -194,7 +153,7 @@ func (w *ProcessWorker[I, O]) Terminate() error {
 // Read tries to read a message from the worker process. The message
 // is expected to be a JSON-serializable object. The worker process is
 // expected to send the message on its stdout.
-func (w *ProcessWorker[I, O]) Read(ctx context.Context, params ReadParams) (O, error) {
+func (w *ProcessWorker[I, O]) Read(ctx context.Context, params ReadConfig) (O, error) {
 	process := w.acquireProcess()
 
 	var result O
@@ -237,7 +196,7 @@ func (w *ProcessWorker[I, O]) Write(ctx context.Context, data I) error {
 func (w *ProcessWorker[I, O]) Send(
 	ctx context.Context,
 	data I,
-	params SendParams,
+	params SendConfig,
 ) (O, error) {
 	process := w.acquireProcess()
 

@@ -6,14 +6,14 @@ import (
 	"errors"
 	"os"
 
-	"github.com/lambda-feedback/shimmy/worker"
+	"github.com/lambda-feedback/shimmy/internal/execution/worker"
 	"go.uber.org/zap"
 )
 
 type fileAdapter[I, O any] struct {
 	worker worker.Worker[any, any]
 
-	startParams worker.StartParams
+	startParams worker.StartConfig
 
 	log *zap.Logger
 }
@@ -27,7 +27,7 @@ func newFileAdapter[I, O any](log *zap.Logger) *fileAdapter[I, O] {
 	}
 }
 
-func (a *fileAdapter[I, O]) Start(ctx context.Context, params worker.StartParams) error {
+func (a *fileAdapter[I, O]) Start(ctx context.Context, params worker.StartConfig) error {
 	// for fileio, we can't yet start the worker, as we do need to pass
 	// the file path with the request data to the worker via arguments.
 
@@ -40,7 +40,7 @@ func (a *fileAdapter[I, O]) Start(ctx context.Context, params worker.StartParams
 func (a *fileAdapter[I, O]) Send(
 	ctx context.Context,
 	data I,
-	params worker.SendParams,
+	params worker.SendConfig,
 ) (O, error) {
 	var res O
 
@@ -109,7 +109,7 @@ func (a *fileAdapter[I, O]) Send(
 
 func (a *fileAdapter[I, O]) Stop(
 	ctx context.Context,
-	params worker.StopParams,
+	params worker.StopConfig,
 ) (WaitFunc, error) {
 	if a.worker == nil {
 		return nil, errors.New("no worker provided")

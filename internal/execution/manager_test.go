@@ -1,23 +1,24 @@
-package manager_test
+package execution_test
 
 import (
 	"context"
 	"testing"
 	"time"
 
-	"github.com/lambda-feedback/shimmy/manager"
-	supervisor_mocks "github.com/lambda-feedback/shimmy/mocks/supervisor"
-	"github.com/lambda-feedback/shimmy/supervisor"
+	"github.com/lambda-feedback/shimmy/internal/execution"
+	"github.com/lambda-feedback/shimmy/internal/execution/supervisor"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
 )
 
 func TestManager_New_FailsInvalidCapacity(t *testing.T) {
-	m, err := manager.New(manager.ManagerConfig[any, any]{
-		Context:     context.Background(),
-		MaxCapacity: 0,
-		Log:         zap.NewNop(),
+	m, err := execution.NewManager(execution.Params[any, any]{
+		Config: execution.Config[any, any]{
+			MaxCapacity: 0,
+		},
+		Context: context.Background(),
+		Log:     zap.NewNop(),
 	})
 	assert.Error(t, err)
 	assert.Nil(t, m)
@@ -40,7 +41,7 @@ func TestManager_Send(t *testing.T) {
 }
 
 func TestManager_Send_FailsToAcquireSupervisor(t *testing.T) {
-	factory := func(params supervisor.SupervisorConfig[any, any]) (supervisor.Supervisor[any, any], error) {
+	factory := func(params supervisor.Params[any, any]) (supervisor.Supervisor[any, any], error) {
 		return nil, assert.AnError
 	}
 
@@ -201,14 +202,14 @@ func TestManager_Shutdown_DestroysSupervisor(t *testing.T) {
 
 // MARK: - helpers
 
-func createManager(t *testing.T) (*manager.Manager[any, any], *supervisor_mocks.MockSupervisor[any, any], error) {
-	sv := supervisor_mocks.NewMockSupervisor[any, any](t)
+func createManager(t *testing.T) (*execution.WorkerManager[any, any], *supervisor.MockSupervisor[any, any], error) {
+	sv := supervisor.NewMockSupervisor[any, any](t)
 
-	supervisorFactory := func(params supervisor.SupervisorConfig[any, any]) (supervisor.Supervisor[any, any], error) {
+	factory := func(params supervisor.Params[any, any]) (supervisor.Supervisor[any, any], error) {
 		return sv, nil
 	}
 
-	m, err := createManagerWithFactory(supervisorFactory)
+	m, err := createManagerWithFactory(factory)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -217,12 +218,14 @@ func createManager(t *testing.T) (*manager.Manager[any, any], *supervisor_mocks.
 }
 
 func createManagerWithFactory(
-	factory manager.SupervisorFactory[any, any],
-) (*manager.Manager[any, any], error) {
-	return manager.New(manager.ManagerConfig[any, any]{
+	factory execution.SupervisorFactory[any, any],
+) (*execution.WorkerManager[any, any], error) {
+	return execution.NewManager(execution.Params[any, any]{
+		Config: execution.Config[any, any]{
+			MaxCapacity: 1,
+		},
 		Context:           context.Background(),
 		SupervisorFactory: factory,
-		MaxCapacity:       1,
 		Log:               zap.NewNop(),
 	})
 }

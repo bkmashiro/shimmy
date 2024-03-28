@@ -3,7 +3,7 @@ package supervisor
 import (
 	"context"
 
-	"github.com/lambda-feedback/shimmy/worker"
+	"github.com/lambda-feedback/shimmy/internal/execution/worker"
 	"go.uber.org/zap"
 )
 
@@ -12,9 +12,9 @@ type AdapterFactoryFn[I, O any] func(IOMode, *zap.Logger) (Adapter[I, O], error)
 type WaitFunc func() error
 
 type Adapter[I, O any] interface {
-	Start(context.Context, worker.StartParams) error
-	Stop(context.Context, worker.StopParams) (WaitFunc, error)
-	Send(context.Context, I, worker.SendParams) (O, error)
+	Start(context.Context, worker.StartConfig) error
+	Stop(context.Context, worker.StopConfig) (WaitFunc, error)
+	Send(context.Context, I, worker.SendConfig) (O, error)
 }
 
 // MARK: - factory
@@ -40,7 +40,7 @@ func defaultAdapterFactory[I, O any](
 func stopWorker[I, O any](
 	ctx context.Context,
 	w worker.Worker[I, O],
-	params worker.StopParams,
+	params worker.StopConfig,
 ) (WaitFunc, error) {
 
 	// TODO: what if shutdown fails? we have a zombie worker then...

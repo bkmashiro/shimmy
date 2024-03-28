@@ -4,8 +4,7 @@ import (
 	"context"
 	"testing"
 
-	supervisor_mocks "github.com/lambda-feedback/shimmy/mocks/supervisor"
-	"github.com/lambda-feedback/shimmy/supervisor"
+	"github.com/lambda-feedback/shimmy/internal/execution/supervisor"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
@@ -18,9 +17,11 @@ func TestSupervisor_New_PersistentFileIO_Fails(t *testing.T) {
 }
 
 func TestSupervisor_New_DefaultWorkerFactory(t *testing.T) {
-	s, err := supervisor.New(supervisor.SupervisorConfig[any, any]{
-		Persistent:    false,
-		Mode:          supervisor.StdIO,
+	s, err := supervisor.New(supervisor.Params[any, any]{
+		Config: supervisor.Config[any, any]{
+			Persistent: false,
+			Mode:       supervisor.StdIO,
+		},
 		WorkerFactory: nil,
 		Log:           zap.NewNop(),
 	})
@@ -62,7 +63,7 @@ func TestSupervisor_Start_Transient_DoesNotAcquireWorker(t *testing.T) {
 func TestSupervisor_Start_Persistent_AcquiresWorker(t *testing.T) {
 	var called bool
 
-	a := supervisor_mocks.NewMockAdapter[any, any](t)
+	a := supervisor.NewMockAdapter[any, any](t)
 	a.EXPECT().Start(mock.Anything, mock.Anything).Return(nil)
 
 	mockFactory := func(i supervisor.IOMode, l *zap.Logger) (supervisor.Adapter[any, any], error) {
@@ -273,10 +274,10 @@ func TestSupervisor_Send_Fails(t *testing.T) {
 
 func createSupervisor(t *testing.T, persistent bool, mode supervisor.IOMode) (
 	supervisor.Supervisor[any, any],
-	*supervisor_mocks.MockAdapter[any, any],
+	*supervisor.MockAdapter[any, any],
 	error,
 ) {
-	adapter := supervisor_mocks.NewMockAdapter[any, any](t)
+	adapter := supervisor.NewMockAdapter[any, any](t)
 
 	workerFactory := func(mode supervisor.IOMode, log *zap.Logger) (supervisor.Adapter[any, any], error) {
 		return adapter, nil
@@ -295,9 +296,11 @@ func createSupervisorWithFactory(
 	mode supervisor.IOMode,
 	factory supervisor.AdapterFactoryFn[any, any],
 ) (supervisor.Supervisor[any, any], error) {
-	return supervisor.New(supervisor.SupervisorConfig[any, any]{
-		Persistent:    persistent,
-		Mode:          mode,
+	return supervisor.New(supervisor.Params[any, any]{
+		Config: supervisor.Config[any, any]{
+			Persistent: persistent,
+			Mode:       mode,
+		},
 		WorkerFactory: factory,
 		Log:           zap.NewNop(),
 	})

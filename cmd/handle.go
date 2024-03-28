@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"github.com/lambda-feedback/shimmy/internal/shell"
 	"github.com/lambda-feedback/shimmy/lambda"
+	"github.com/lambda-feedback/shimmy/util/logging"
 	"github.com/urfave/cli/v2"
 )
 
@@ -23,9 +25,14 @@ blocks indefinitely, processing incoming AWS Lambda events.`
 )
 
 func handleAction(ctx *cli.Context) error {
-	// start the blocking AWS lambda runtime interface client
-	lambda.Start()
-	return nil
+	log, err := logging.LoggerFromContext(ctx.Context)
+	if err != nil {
+		return err
+	}
+
+	app := shell.New(log)
+
+	return app.Run(ctx.Context, lambda.Module())
 }
 
 func init() {

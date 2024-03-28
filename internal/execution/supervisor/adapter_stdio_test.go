@@ -4,14 +4,13 @@ import (
 	"context"
 	"testing"
 
-	worker_mocks "github.com/lambda-feedback/shimmy/mocks/worker"
-	"github.com/lambda-feedback/shimmy/worker"
+	"github.com/lambda-feedback/shimmy/internal/execution/worker"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 )
 
-func createStdioAdapter(t *testing.T) (*stdioAdapter[any, any], *worker_mocks.MockWorker[any, any]) {
-	worker := worker_mocks.NewMockWorker[any, any](t)
+func createStdioAdapter(t *testing.T) (*stdioAdapter[any, any], *worker.MockWorker[any, any]) {
+	worker := worker.NewMockWorker[any, any](t)
 
 	adapter := &stdioAdapter[any, any]{
 		worker: worker,
@@ -25,7 +24,7 @@ func TestStdioAdapter_Start(t *testing.T) {
 	a, w := createStdioAdapter(t)
 
 	ctx := context.Background()
-	params := worker.StartParams{}
+	params := worker.StartConfig{}
 
 	w.EXPECT().Start(ctx, params).Return(nil)
 
@@ -37,7 +36,7 @@ func TestStdioAdapter_Start_PassesError(t *testing.T) {
 	a, w := createStdioAdapter(t)
 
 	ctx := context.Background()
-	params := worker.StartParams{}
+	params := worker.StartConfig{}
 
 	w.EXPECT().Start(ctx, params).Return(assert.AnError)
 
@@ -50,7 +49,7 @@ func TestStdioAdapter_Stop(t *testing.T) {
 
 	w.EXPECT().Terminate().Return(nil)
 
-	_, err := a.Stop(context.Background(), worker.StopParams{})
+	_, err := a.Stop(context.Background(), worker.StopConfig{})
 	assert.NoError(t, err)
 }
 
@@ -59,7 +58,7 @@ func TestStdioAdapter_Stop_PassesError(t *testing.T) {
 
 	w.EXPECT().Terminate().Return(assert.AnError)
 
-	_, err := a.Stop(context.Background(), worker.StopParams{})
+	_, err := a.Stop(context.Background(), worker.StopConfig{})
 	assert.ErrorIs(t, err, assert.AnError)
 }
 
@@ -67,7 +66,7 @@ func TestStdioAdapter_Stop_WaitFor(t *testing.T) {
 	a, w := createStdioAdapter(t)
 
 	ctx := context.Background()
-	params := worker.StopParams{Timeout: 10}
+	params := worker.StopConfig{Timeout: 10}
 
 	w.EXPECT().Terminate().Return(nil)
 	w.EXPECT().WaitFor(ctx, params.Timeout).Return(worker.ExitEvent{}, nil)
@@ -83,7 +82,7 @@ func TestStdioAdapter_Stop_WaitForError(t *testing.T) {
 	a, w := createStdioAdapter(t)
 
 	ctx := context.Background()
-	params := worker.StopParams{Timeout: 10}
+	params := worker.StopConfig{Timeout: 10}
 
 	w.EXPECT().Terminate().Return(nil)
 	w.EXPECT().WaitFor(ctx, params.Timeout).Return(worker.ExitEvent{}, assert.AnError)
@@ -100,7 +99,7 @@ func TestStdioAdapter_Send(t *testing.T) {
 
 	ctx := context.Background()
 	data := "test"
-	params := worker.SendParams{}
+	params := worker.SendConfig{}
 
 	w.EXPECT().Send(ctx, data, params).Return("result", nil)
 
@@ -114,7 +113,7 @@ func TestStdioAdapter_Send_PassesError(t *testing.T) {
 
 	ctx := context.Background()
 	data := "test"
-	params := worker.SendParams{}
+	params := worker.SendConfig{}
 
 	w.EXPECT().Send(ctx, data, params).Return("result", assert.AnError)
 

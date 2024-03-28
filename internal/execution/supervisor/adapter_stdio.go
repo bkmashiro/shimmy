@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/lambda-feedback/shimmy/worker"
+	"github.com/lambda-feedback/shimmy/internal/execution/worker"
 	"go.uber.org/zap"
 )
 
@@ -23,7 +23,7 @@ func newStdioAdapter[I, O any](log *zap.Logger) *stdioAdapter[I, O] {
 	}
 }
 
-func (a *stdioAdapter[I, O]) Start(ctx context.Context, params worker.StartParams) error {
+func (a *stdioAdapter[I, O]) Start(ctx context.Context, params worker.StartConfig) error {
 	if a.worker == nil {
 		return errors.New("no worker provided")
 	}
@@ -41,7 +41,7 @@ func (a *stdioAdapter[I, O]) Start(ctx context.Context, params worker.StartParam
 func (a *stdioAdapter[I, O]) Send(
 	ctx context.Context,
 	data I,
-	params worker.SendParams,
+	params worker.SendConfig,
 ) (O, error) {
 	var res O
 
@@ -61,7 +61,7 @@ func (a *stdioAdapter[I, O]) Send(
 
 func (a *stdioAdapter[I, O]) Stop(
 	ctx context.Context,
-	params worker.StopParams,
+	params worker.StopConfig,
 ) (WaitFunc, error) {
 	if a.worker == nil {
 		return nil, errors.New("no worker provided")

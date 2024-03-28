@@ -1,9 +1,8 @@
 package cmd
 
 import (
-	"github.com/lambda-feedback/shimmy/internal/shell"
+	"github.com/lambda-feedback/shimmy/app"
 	"github.com/lambda-feedback/shimmy/lambda"
-	"github.com/lambda-feedback/shimmy/util/logging"
 	"github.com/urfave/cli/v2"
 )
 
@@ -25,12 +24,10 @@ blocks indefinitely, processing incoming AWS Lambda events.`
 )
 
 func handleAction(ctx *cli.Context) error {
-	log, err := logging.LoggerFromContext(ctx.Context)
+	app, err := app.New(ctx)
 	if err != nil {
 		return err
 	}
-
-	app := shell.New(log)
 
 	return app.Run(ctx.Context, lambda.Module())
 }

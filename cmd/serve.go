@@ -1,8 +1,8 @@
 package cmd
 
 import (
-	"github.com/lambda-feedback/shimmy/internal/shell"
-	"github.com/lambda-feedback/shimmy/util/logging"
+	"github.com/lambda-feedback/shimmy/app"
+	"github.com/lambda-feedback/shimmy/standalone"
 	"github.com/urfave/cli/v2"
 )
 
@@ -19,19 +19,47 @@ var (
 		Usage:       "Start a http server and listen for events.",
 		Description: serveCmdDescription,
 		Action:      serveAction,
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:     "host",
+				Aliases:  []string{"H"},
+				Usage:    "The host to listen on.",
+				Value:    "localhost",
+				Category: "http",
+				EnvVars:  []string{"HTTP_HOST"},
+			},
+			&cli.IntFlag{
+				Name:     "port",
+				Aliases:  []string{"P"},
+				Usage:    "The port to listen on.",
+				Value:    8080,
+				Category: "http",
+				EnvVars:  []string{"HTTP_PORT"},
+			},
+			&cli.BoolFlag{
+				Name:     "h2c",
+				Usage:    "Enable HTTP/2 cleartext upgrade.",
+				Value:    false,
+				Category: "http",
+				EnvVars:  []string{"HTTP_H2C"},
+			},
+		},
 	}
 )
 
 func serveAction(ctx *cli.Context) error {
-	log, err := logging.LoggerFromContext(ctx.Context)
+	app, err := app.New(ctx)
 	if err != nil {
 		return err
 	}
 
-	// TODO: inject http server module
-	app := shell.New(log)
+	httpConfig := standalone.HttpConfig{
+		Host: ctx.String("host"),
+		Port: ctx.Int("port"),
+		H2c:  ctx.Bool("h2c"),
+	}
 
-	return app.Run(ctx.Context)
+	return app.Run(ctx.Context, standalone.Module(httpConfig))
 }
 
 func init() {

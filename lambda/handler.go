@@ -27,20 +27,42 @@ import (
 type LambdaHandlerParams struct {
 	fx.In
 
+	Context context.Context
 	Runtime runtime.Runtime
 	Logger  *zap.Logger
 }
 
 type LambdaHandler struct {
+	ctx     context.Context
+	cancel  context.CancelFunc
 	runtime runtime.Runtime
 	log     *zap.Logger
 }
 
 func NewLambdaHandler(params LambdaHandlerParams) *LambdaHandler {
+	ctx, cancel := context.WithCancel(params.Context)
+
 	return &LambdaHandler{
+		ctx:     ctx,
+		cancel:  cancel,
 		runtime: params.Runtime,
 		log:     params.Logger,
 	}
+}
+
+func NewLifecycleHandler(params LambdaHandlerParams, lc fx.Lifecycle) *LambdaHandler {
+	handler := NewLambdaHandler(params)
+	lc.Append(fx.Hook{
+		OnStart: func(context.Context) error {
+			go handler.Start()
+			return nil
+		},
+		OnStop: func(context.Context) error {
+			handler.Shutdown()
+			return nil
+		},
+	})
+	return handler
 }
 
 func (s *LambdaHandler) Handle(
@@ -93,9 +115,10 @@ func (s *LambdaHandler) Handle(
 	}, nil
 }
 
-func (s *LambdaHandler) Start(ctx context.Context) {
-	lambda.StartWithOptions(
-		s.Handle,
-		lambda.WithContext(ctx),
-	)
+func (s *LambdaHandler) Start() {
+	lambda.StartWithOptions(s.Handle, lambda.WithContext(s.ctx))
+}
+
+func (s *LambdaHandler) Shutdown() {
+	s.cancel()
 }

@@ -37,7 +37,7 @@ type RuntimeParams struct {
 	Log *zap.Logger
 }
 
-func NewRuntime(params RuntimeParams) (Runtime, error) {
+func New(params RuntimeParams) (Runtime, error) {
 	manager, err := execution.NewManager(ManagerParams{
 		Context: params.Context,
 		Config:  params.Config,

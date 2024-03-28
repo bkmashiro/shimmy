@@ -24,7 +24,9 @@ func New(ctx *cli.Context) (*shell.Shell, error) {
 	sharedModule := fx.Module(
 		"shared",
 		// provide global config
-		fx.Provide(config),
+		fx.Supply(config),
+		// provide runtime config
+		fx.Supply(config.Runtime),
 		// provide runtime
 		fx.Provide(runtime.New),
 	)

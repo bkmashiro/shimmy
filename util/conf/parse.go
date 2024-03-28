@@ -23,7 +23,8 @@ type ParseOptions struct {
 	Log      *zap.Logger
 }
 
-func Parse[C any](opt ParseOptions) (*C, error) {
+func Parse[C any](opt ParseOptions) (C, error) {
+
 	var log *zap.Logger
 	if opt.Log != nil {
 		log = opt.Log
@@ -48,9 +49,11 @@ func Parse[C any](opt ParseOptions) (*C, error) {
 		log.Debug(".env not found", zap.Error(err))
 	}
 
+	var config C
+
 	if err := k.Load(env.Provider(opt.Prefix, ".", transformEnv), nil); err != nil {
 		log.Error("error parsing env vars", zap.Error(err))
-		return nil, err
+		return config, err
 	}
 
 	if opt.Cli != nil {
@@ -67,18 +70,16 @@ func Parse[C any](opt ParseOptions) (*C, error) {
 
 		if err := k.Load(cliflags.Provider(opt.Cli, ".", transformFlag), nil); err != nil {
 			log.Error("error parsing cli flags", zap.Error(err))
-			return nil, err
+			return config, err
 		}
 	}
 
-	var config C
-
 	if err := k.UnmarshalWithConf("", &config, koanf.UnmarshalConf{Tag: "conf"}); err != nil {
 		log.Error("error unmarshalling config", zap.Error(err))
-		return nil, err
+		return config, err
 	}
 
-	return &config, nil
+	return config, nil
 }
 
 func transformEnv(s string) string {

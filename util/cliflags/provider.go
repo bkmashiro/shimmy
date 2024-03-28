@@ -4,6 +4,7 @@ package cliflags
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/knadh/koanf/maps"
 	"github.com/urfave/cli/v2"
@@ -28,10 +29,17 @@ func Provider(ctx *cli.Context, delim string, cb func(string) string) *CLIFlags 
 	// transforming the flag names if a callback is provided
 	for _, flag := range flags {
 		name := flag.Names()[0]
-		if cb != nil {
-			name = cb(name)
+
+		value, err := getFlagValue(ctx, flag)
+		if err != nil {
+			continue
 		}
-		mp[name] = ctx.Value(name)
+
+		var mapName = name
+		if cb != nil {
+			mapName = cb(name)
+		}
+		mp[mapName] = value
 	}
 
 	// unflatten the map if a delimiter is provided
@@ -51,4 +59,34 @@ func (e *CLIFlags) ReadBytes() ([]byte, error) {
 // Read returns the loaded map[string]any.
 func (e *CLIFlags) Read() (map[string]any, error) {
 	return e.mp, nil
+}
+
+func getFlagValue(ctx *cli.Context, flag cli.Flag) (any, error) {
+	name := flag.Names()[0]
+
+	if _, ok := flag.(*cli.StringFlag); ok {
+		return ctx.String(name), nil
+	} else if _, ok := flag.(*cli.StringSliceFlag); ok {
+		return ctx.StringSlice(name), nil
+	} else if _, ok := flag.(*cli.PathFlag); ok {
+		return ctx.Path(name), nil
+	} else if _, ok := flag.(*cli.IntFlag); ok {
+		return ctx.Int(name), nil
+	} else if _, ok := flag.(*cli.IntSliceFlag); ok {
+		return ctx.IntSlice(name), nil
+	} else if _, ok := flag.(*cli.Int64Flag); ok {
+		return ctx.Int64(name), nil
+	} else if _, ok := flag.(*cli.Int64SliceFlag); ok {
+		return ctx.Int64Slice(name), nil
+	} else if _, ok := flag.(*cli.BoolFlag); ok {
+		return ctx.Bool(name), nil
+	} else if _, ok := flag.(*cli.Float64Flag); ok {
+		return ctx.Float64(name), nil
+	} else if _, ok := flag.(*cli.Float64SliceFlag); ok {
+		return ctx.Float64Slice(name), nil
+	} else if f, ok := flag.(*cli.DurationFlag); ok {
+		return f.Value, nil
+	}
+
+	return nil, fmt.Errorf("unsupported flag type %T", flag)
 }

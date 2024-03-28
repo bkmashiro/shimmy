@@ -25,6 +25,6 @@ func GetConfigFromContext[C any](ctx context.Context) (C, error) {
 	return c, errors.New("invalid config in context")
 }
 
-func ContextWithConfig[C any](ctx context.Context, config *C) context.Context {
+func ContextWithConfig[C any](ctx context.Context, config C) context.Context {
 	return context.WithValue(ctx, configKey, config)
 }

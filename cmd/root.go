@@ -31,6 +31,7 @@ functions on arbitrary, serverless platforms.`
 			},
 			&cli.StringFlag{
 				Name:    "log-format",
+				Usage:   "set the log format. Options: production, development.",
 				EnvVars: []string{"LOG_FORMAT"},
 			},
 			// shim flags
@@ -72,13 +73,6 @@ functions on arbitrary, serverless platforms.`
 				Value:    "json",
 				Category: "function",
 				EnvVars:  []string{"FUNCTION_ENCODING"},
-			},
-			&cli.IntFlag{
-				Name:     "min-procs",
-				Usage:    "",
-				Value:    0,
-				Category: "function",
-				EnvVars:  []string{"FUNCTION_MIN_PROCS"},
 			},
 			&cli.IntFlag{
 				Name:     "max-procs",
@@ -167,10 +161,13 @@ func createLogger(ctx *cli.Context) (*zap.Logger, error) {
 	format := getLogFormatFromCLI(ctx)
 
 	var config zap.Config
-	if format == "production" {
+	switch format {
+	case "production":
 		config = zap.NewProductionConfig()
-	} else {
+	case "development":
 		config = zap.NewDevelopmentConfig()
+	default:
+		return nil, fmt.Errorf("invalid log format: %s", format)
 	}
 
 	config.InitialFields = map[string]any{

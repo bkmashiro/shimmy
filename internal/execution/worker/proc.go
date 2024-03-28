@@ -232,6 +232,7 @@ func (p *proc[I, O]) Read(ctx context.Context, timeout time.Duration) (Message[O
 		// Create a context with the specified timeout.
 		timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
+
 		ctx = timeoutCtx
 	}
 

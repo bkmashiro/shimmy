@@ -8,12 +8,12 @@ import (
 
 var (
 	serveCmdDescription = `The serve command starts a http server and waits for events
-	to handle. This allows the shim to be executed on arbitrary
-	platforms, in turn enabling platform-agnostic deployment of
-	language-agnostic evaluation functions.
+to handle. This allows the shim to be executed on arbitrary
+platforms, in turn enabling platform-agnostic deployment of
+language-agnostic evaluation functions.
 	
-	The command will launch the http server and blocks indefin-
-	itely, processing incoming http requests.`
+The command will launch the http server and blocks indefin-
+itely, processing incoming http requests.`
 	serveCmd = &cli.Command{
 		Name:        "serve",
 		Usage:       "Start a http server and listen for events.",
@@ -21,27 +21,24 @@ var (
 		Action:      serveAction,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:     "host",
-				Aliases:  []string{"H"},
-				Usage:    "The host to listen on.",
-				Value:    "localhost",
-				Category: "http",
-				EnvVars:  []string{"HTTP_HOST"},
+				Name:    "host",
+				Aliases: []string{"H"},
+				Usage:   "The host to listen on.",
+				Value:   "localhost",
+				EnvVars: []string{"HTTP_HOST"},
 			},
 			&cli.IntFlag{
-				Name:     "port",
-				Aliases:  []string{"P"},
-				Usage:    "The port to listen on.",
-				Value:    8080,
-				Category: "http",
-				EnvVars:  []string{"HTTP_PORT"},
+				Name:    "port",
+				Aliases: []string{"P"},
+				Usage:   "The port to listen on.",
+				Value:   8080,
+				EnvVars: []string{"HTTP_PORT"},
 			},
 			&cli.BoolFlag{
-				Name:     "h2c",
-				Usage:    "Enable HTTP/2 cleartext upgrade.",
-				Value:    false,
-				Category: "http",
-				EnvVars:  []string{"HTTP_H2C"},
+				Name:    "h2c",
+				Usage:   "Enable HTTP/2 cleartext upgrade.",
+				Value:   false,
+				EnvVars: []string{"HTTP_H2C"},
 			},
 		},
 	}

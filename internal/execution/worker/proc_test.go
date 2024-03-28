@@ -50,7 +50,7 @@ func TestProc_Terminate_SendsTerminationSignal(t *testing.T) {
 	}, zap.NewNop())
 	assert.NoError(t, err)
 
-	p.Terminate(0)
+	p.Terminate(-1)
 
 	select {
 	case <-time.After(1 * time.Second):
@@ -74,7 +74,7 @@ func TestProc_Write_WritesToStdin(t *testing.T) {
 	}, zap.NewNop())
 	assert.NoError(t, err)
 
-	defer p.Terminate(0)
+	defer p.Terminate(-1)
 
 	// write data
 	msgId, err := p.Write(context.Background(), "foo")

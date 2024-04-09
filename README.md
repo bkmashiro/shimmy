@@ -1,0 +1,56 @@
+# Lambda Feedback Evaluation Function Shim
+
+`evaluation-function-shim` is a shim written in Go that interacts with language-agnostic evaluation functions as part of the lambda feedback platform, and exposes them as a RESTful API.
+
+## Overview
+
+The shim listens for incoming HTTP requests / events from feedback clients, validates the incoming data, and forwards it to the underlying evaluation function. The shim is responsible for managing the lifecycle of the evaluation function, and ensures that it is available to process incoming requests. The evaluation function is expected to be a executable application that implements the evaluation runtime interface.
+
+This abstraction allows the evaluation function to be written in any language, and provides a consistent interface for interacting with the lambda feedback platform. Moreover, the shim provides common functionality such as logging, error handling, and request validation, which simplifies the development of evaluation functions and allows developers to focus on the core logic.
+
+### Architecture
+
+The shim is designed to be a lightweight, stateless service that can be deployed alongside a containerized application. The shim listens for incoming HTTP requests on a configurable port, and forwards them to the evaluation function. The evaluation function is expected to be a standalone application that implements the evaluation runtime interface, and is managed by the shim. The following diagram illustrates the architecture of the shim:
+
+![Component Diagram](./docs/img/evaluation-function-shim-component-diagram.svg)
+
+As shown in the diagram, the shim allows the evaluation function to be deployed in three different execution environments, all supported out of the box:
+
+1. **AWS Lambda (managed)**: The evaluation function image is deployed as an AWS Lambda function. The shim implements the AWS Lambda runtime interface, and forwards incoming events to the evaluation function. This allows the evaluation function to be executed in a serverless environment.
+
+2. **AWS Lambda (self-hosted)**: The evaluation function image contains the [AWS Lambda Runtime Interface Emulator](https://github.com/aws/aws-lambda-runtime-interface-emulator). The shim implements the AWS Lambda runtime interface, and forwards incoming events to the evaluation function. This allows the evaluation function to be executed in a local or self-hosted environment, while maintaining compatibility with the AWS Lambda runtime interface.
+
+3. **Standalone (self-hosted)**: The shim includes a standalone HTTP server that listens for incoming evaluation requests. As with the other environments, the shim forwards incoming requests to the evaluation function. This allows for maximum deployment flexibility, without being restricted to a specific runtime environment.
+
+## Usage
+
+`shimmy --help` displays the available command-line options:
+
+```shell
+NAME:
+   shimmy - A shim for running arbitrary, language-agnostic evaluation
+            functions on arbitrary, serverless platforms.
+
+USAGE:
+   shimmy [global options] command [command options] [arguments...]
+
+COMMANDS:
+   handle  Start the AWS Lambda handler
+   serve   Start a http server and listen for events.
+
+GLOBAL OPTIONS:
+   --help, -h          show help
+   --log-format value  set the log format. Options: production, development. [$LOG_FORMAT]
+   --log-level value   set the log level. Options: debug, info, warn, error, panic, fatal. [$LOG_LEVEL]
+   --version           print the version
+
+   function
+
+   --arg value, -a value          additional arguments to pass to the worker process. [$FUNCTION_ARGS]
+   --command value, -c value      the command to invoke in order to start the worker process. [$FUNCTION_COMMAND]
+   --cwd value, -d value          the working directory to use when invoking the worker process. [$FUNCTION_WORKING_DIR]
+   --env value, -e value          additional environment variables to pass to the worker process. [$FUNCTION_ENV]
+   --interface value, -i value    the interface to use for communication with the worker process. Options: stdio, file. (default: "stdio") [$FUNCTION_INTERFACE]
+   --max-workers value, -n value  (default: 1) [$FUNCTION_MAX_PROCS]
+   --persistent, -p               the worker process is capable of handling more than one event. (default: false) [$FUNCTION_DISPOSABLE]
+```

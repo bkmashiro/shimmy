@@ -10,7 +10,7 @@ This abstraction allows the evaluation function to be written in any language, a
 
 ### Architecture
 
-The shim is designed to be a lightweight, stateless service that can be deployed alongside a containerized application. The shim listens for incoming HTTP requests on a configurable port, and forwards them to the evaluation function. The evaluation function is expected to be a standalone application that implements the evaluation runtime interface, and is managed by the shim. The following diagram illustrates the architecture of the shim:
+The shim is designed to be a lightweight, stateless, OS- and architecture-agnostic binary that is intended to be run alongside other, containerized applications. The shim handles incoming evaluation requests, and forwards them to the evaluation function. The evaluation function is expected to be a standalone application that implements the evaluation runtime interface, and is managed by the shim. The following diagram illustrates the architecture of the shim:
 
 ![Component Diagram](./docs/img/evaluation-function-shim-component-diagram.svg)
 

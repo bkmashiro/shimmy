@@ -54,3 +54,27 @@ GLOBAL OPTIONS:
    --max-workers value, -n value  (default: 1) [$FUNCTION_MAX_PROCS]
    --persistent, -p               the worker process is capable of handling more than one event. (default: false) [$FUNCTION_DISPOSABLE]
 ```
+
+## Evaluation Function Interface
+
+The evaluation function is expected to be a standalone application or script that implements the evaluation runtime interface. The evaluation runtime interface is a simple, language-agnostic protocol that defines how the shim communicates with the evaluation function.
+
+The evaluation function is responsible for parsing the input JSON object, performing the evaluation, and responding with the output JSON object. The evaluation function should exit with a status code of `0` if the evaluation was successful, and a non-zero status code if an error occurred.
+
+### Messages
+
+The interface consists of input and output messages, which are exchanged between the shim and the evaluation function. Both The input and output to the evaluation function are expected to be any unstructured JSON object, without any restrictions on schema, format or content.
+
+### Communication Channels
+
+The shim is capable of communicating with the evaluation function using two different channels:
+
+1. **Standard I/O (stdio)**: The shim communicates with the evaluation function using standard input and output. The evaluation function reads the input JSON object from standard input, and writes the output JSON object to standard output.
+
+2. **File System (file)**: The shim communicates with the evaluation function using the file system. The evaluation function reads the input JSON object from a file, and writes the output JSON object to a file. The file paths are always the last two command-line arguments passed to the evaluation function.
+
+   For example, a wolframscript evaluation function in `evaluation.wl`, that reads the input JSON object from a file named `input.json` and writes the output JSON object to a file named `output.json` would be invoked as follows:
+
+   ```shell
+   wolframscript -file evaluation.wl input.json output.json
+   ```

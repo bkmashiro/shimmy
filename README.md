@@ -71,7 +71,9 @@ The shim is capable of communicating with the evaluation function using two diff
 
 1. **Standard I/O (stdio)**: The shim communicates with the evaluation function using standard input and output. The evaluation function reads the input JSON object from standard input, and writes the output JSON object to standard output.
 
-2. **File System (file)**: The shim communicates with the evaluation function using the file system. The evaluation function reads the input JSON object from a file, and writes the output JSON object to a file. The file paths are always the last two command-line arguments passed to the evaluation function.
+2. **File System (file)**: The shim communicates with the evaluation function using the file system. The evaluation function is expected to read the input JSON object from a file, and write the output JSON object to a file.
+
+   The file paths are always the last two command-line arguments passed to the evaluation function.
 
    For example, a wolframscript evaluation function in `evaluation.wl`, that reads the input JSON object from a file named `input.json` and writes the output JSON object to a file named `output.json` would be invoked as follows:
 

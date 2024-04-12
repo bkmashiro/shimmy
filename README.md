@@ -55,7 +55,7 @@ GLOBAL OPTIONS:
    --persistent, -p               the worker process is capable of handling more than one event. (default: false) [$FUNCTION_DISPOSABLE]
 ```
 
-## Evaluation Function Interface
+## Evaluation Runtime Interface
 
 The evaluation function is expected to be a standalone application or script that implements the evaluation runtime interface. The evaluation runtime interface is a simple, language-agnostic protocol that defines how the shim communicates with the evaluation function.
 
@@ -63,7 +63,7 @@ The evaluation function is responsible for parsing the input JSON object, perfor
 
 ### Messages
 
-The interface consists of input and output messages, which are exchanged between the shim and the evaluation function. Both The input and output to the evaluation function are expected to be any unstructured JSON object, without any restrictions on schema, format or content.
+The interface consists of input and output messages, which are exchanged between the shim and the evaluation function. Both the input and output to the evaluation function are expected to be any unstructured JSON object, without any restrictions on schema, format or content.
 
 ### Communication Channels
 

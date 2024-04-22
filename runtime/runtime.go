@@ -20,6 +20,8 @@ type Config = execution.Config[Message, Message]
 
 type EvaluationRuntime struct {
 	manager Manager
+
+	log *zap.Logger
 }
 
 var _ Runtime = (*EvaluationRuntime)(nil)
@@ -49,6 +51,7 @@ func New(params RuntimeParams) (Runtime, error) {
 
 	return &EvaluationRuntime{
 		manager: manager,
+		log:     params.Log,
 	}, nil
 }
 

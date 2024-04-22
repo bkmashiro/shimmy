@@ -1,47 +1,20 @@
 package runtime
 
-import "strings"
-
-type Command int
-
-const (
-	PreviewCommand Command = iota
-	EvaluateCommand
+import (
+	"github.com/lambda-feedback/shimmy/models"
 )
 
-func ParseCommand(path string) (Command, bool) {
-	switch strings.ToLower(path) {
-	case "evaluate":
-		return EvaluateCommand, true
-	case "preview":
-		return PreviewCommand, true
-	}
-
-	return 0, false
-}
-
 type Message struct {
-	Command Command        `json:"command,omitempty"`
-	Data    any            `json:"data"`
-	Params  map[string]any `json:"params"`
+	Command models.Command `json:"command,omitempty"`
+	Data    []byte         `json:"data"`
 }
 
 func NewMessage(
-	command Command,
-	content any,
-	meta map[string]any,
+	command models.Command,
+	content []byte,
 ) Message {
 	return Message{
 		Command: command,
 		Data:    content,
-		Params:  meta,
 	}
-}
-
-func NewPreviewMessage(data string, meta map[string]any) Message {
-	return NewMessage(PreviewCommand, data, nil)
-}
-
-func NewEvaluateMessage(data string, meta map[string]any) Message {
-	return NewMessage(EvaluateCommand, data, nil)
 }

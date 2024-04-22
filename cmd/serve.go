@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"github.com/lambda-feedback/shimmy/app"
-	"github.com/lambda-feedback/shimmy/standalone"
+	"github.com/lambda-feedback/shimmy/handler/standalone"
 	"github.com/urfave/cli/v2"
 )
 

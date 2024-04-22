@@ -32,3 +32,6 @@ serve:
 
 generate-mocks:
 	mockery
+
+update-schema:
+	scripts/update-schema.sh

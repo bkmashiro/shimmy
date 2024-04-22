@@ -1,0 +1,64 @@
+{
+  "title": "JSON schema for the response from a grading function.",
+  "description": "This schema is used to check whether a response from a grading function fits the basic structure.",
+  "properties": {
+    "command": {
+      "const": "eval"
+    },
+    "result": {
+      "type": "object",
+      "properties": {
+        "is_correct": {
+          "type": "boolean"
+        },
+        "feedback": {
+          "type": [
+            "object",
+            "array",
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": true,
+      "required": ["is_correct"]
+    },
+    "error": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "error_thrown": {
+          "type": [
+            "object",
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": true,
+      "required": [
+        "message"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "result"
+        ]
+      },
+      "then": {
+        "required": [
+          "command"
+        ]
+      },
+      "else": {
+        "required": [
+          "error"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+	"title": "JSON schema for a grading request.",
+	"description": "This schema is used to check whether a request to a grading function fits the basic structure.",
+	"properties": {
+		"response": {
+			"not": {
+				"type": "null"
+			}
+		},
+		"answer": {
+			"not": {
+				"type": "null"
+			}
+		},
+		"params": {"type": "object"}
+	},
+	"additionalProperties": false,
+	"required": ["response", "answer"]
+}

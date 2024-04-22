@@ -1,0 +1,59 @@
+{
+  "title": "JSON schema for the response from a preview function.",
+  "description": "This schema is used to check whether a response from a preview function fits the basic structure.",
+  "properties": {
+    "command": {
+      "const": "preview"
+    },
+    "result": {
+      "type": "object",
+      "properties": {
+        "preview": {
+          "not": {
+            "type": "null"
+          }
+        }
+      },
+      "additionalProperties": true,
+      "required": ["preview"]
+    },
+    "error": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "error_thrown": {
+          "type": [
+            "object",
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": true,
+      "required": [
+        "message"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "result"
+        ]
+      },
+      "then": {
+        "required": [
+          "command"
+        ]
+      },
+      "else": {
+        "required": [
+          "error"
+        ]
+      }
+    }
+  ]
+}

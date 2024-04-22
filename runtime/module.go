@@ -2,6 +2,7 @@ package runtime
 
 import "go.uber.org/fx"
 
+// Module provides a runtime module.
 func Module(config Config) fx.Option {
 	return fx.Module(
 		"runtime",
@@ -10,7 +11,7 @@ func Module(config Config) fx.Option {
 		fx.Supply(config),
 
 		// provide runtime
-		fx.Provide(New),
+		fx.Provide(NewRuntime),
 
 		// provide runtime handler
 		fx.Provide(NewRuntimeHandler),

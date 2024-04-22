@@ -13,19 +13,19 @@ import (
 )
 
 var (
-	ErrInvalidMethod    = errors.New("invalid method")
-	ErrSchemaNotFound   = errors.New("schema not found")
-	ErrCommandNotFound  = errors.New("command not found")
-	ErrInvalidCommand   = errors.New("invalid command")
-	ErrValidationFailed = errors.New("validation failed")
+	errInvalidMethod    = errors.New("invalid method")
+	errSchemaNotFound   = errors.New("schema not found")
+	errCommandNotFound  = errors.New("command not found")
+	errInvalidCommand   = errors.New("invalid command")
+	errValidationFailed = errors.New("validation failed")
 )
 
 var wellKnownErrors = map[error]int{
-	ErrInvalidMethod:    http.StatusMethodNotAllowed,
-	ErrSchemaNotFound:   http.StatusInternalServerError,
-	ErrCommandNotFound:  http.StatusNotFound,
-	ErrInvalidCommand:   http.StatusBadRequest,
-	ErrValidationFailed: http.StatusBadRequest,
+	errInvalidMethod:    http.StatusMethodNotAllowed,
+	errSchemaNotFound:   http.StatusInternalServerError,
+	errCommandNotFound:  http.StatusNotFound,
+	errInvalidCommand:   http.StatusBadRequest,
+	errValidationFailed: http.StatusBadRequest,
 }
 
 // HandlerParams defines the dependencies for the runtime handler.
@@ -35,27 +35,6 @@ type HandlerParams struct {
 	Runtime Runtime
 
 	Log *zap.Logger
-}
-
-// Request represents an incoming request.
-type Request struct {
-	Path   string
-	Method string
-	Body   []byte
-	Header http.Header
-}
-
-// Response represents an outgoing response.
-type Response struct {
-	StatusCode int
-	Body       []byte
-	Header     http.Header
-}
-
-// ErrorResponse represents error response data.
-type ErrorResponse struct {
-	Message string `json:"message"`
-	Error   string `json:"error,omitempty"`
 }
 
 // Handler is the interface for handling runtime requests.
@@ -105,13 +84,13 @@ func (h *RuntimeHandler) Handle(ctx context.Context, req Request) Response {
 
 	if req.Method != http.MethodPost {
 		log.Debug("invalid method")
-		return newErrorResponse(ErrInvalidMethod)
+		return newErrorResponse(errInvalidMethod)
 	}
 
 	commandStr, ok := h.getCommand(req)
 	if !ok {
 		log.Debug("missing command")
-		return newErrorResponse(ErrCommandNotFound)
+		return newErrorResponse(errCommandNotFound)
 	}
 
 	log = log.With(zap.String("command", commandStr))
@@ -120,7 +99,7 @@ func (h *RuntimeHandler) Handle(ctx context.Context, req Request) Response {
 	command, ok := models.ParseCommand(commandStr)
 	if !ok {
 		log.Debug("invalid command")
-		return newErrorResponse(ErrInvalidCommand)
+		return newErrorResponse(errInvalidCommand)
 	}
 
 	// Validate the request data against the request schema
@@ -149,6 +128,7 @@ func (h *RuntimeHandler) Handle(ctx context.Context, req Request) Response {
 	return newResponse(http.StatusOK, responseMsg.Data)
 }
 
+// getCommand tries to extract the command from the request.
 func (s *RuntimeHandler) getCommand(req Request) (string, bool) {
 	if commandStr := req.Header.Get("command"); commandStr != "" {
 		return commandStr, true

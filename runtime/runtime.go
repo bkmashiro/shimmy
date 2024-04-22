@@ -8,16 +8,21 @@ import (
 	"go.uber.org/zap"
 )
 
+// Runtime is the interface for a runtime.
 type Runtime interface {
 	Handle(context.Context, Message) (Message, error)
 }
 
+// ManagerParams is the runtime-specific params type for the manager.
 type ManagerParams = execution.Params[Message, Message]
 
+// Manager is the runtime-specific type for the manager.
 type Manager = execution.Manager[Message, Message]
 
+// Config is the runtime-specific type for the config.
 type Config = execution.Config[Message, Message]
 
+// EvaluationRuntime is a runtime that uses the execution manager.
 type EvaluationRuntime struct {
 	manager Manager
 
@@ -26,6 +31,7 @@ type EvaluationRuntime struct {
 
 var _ Runtime = (*EvaluationRuntime)(nil)
 
+// RuntimeParams defines the dependencies for the runtime.
 type RuntimeParams struct {
 	fx.In
 
@@ -39,7 +45,8 @@ type RuntimeParams struct {
 	Log *zap.Logger
 }
 
-func New(params RuntimeParams) (Runtime, error) {
+// NewRuntime creates a new runtime.
+func NewRuntime(params RuntimeParams) (Runtime, error) {
 	manager, err := execution.NewManager(ManagerParams{
 		Context: params.Context,
 		Config:  params.Config,

@@ -8,12 +8,12 @@ type Command string
 
 const (
 	CommandPreview  Command = "preview"
-	CommandEvaluate Command = "evaluate"
+	CommandEvaluate Command = "eval"
 )
 
 func ParseCommand(path string) (Command, bool) {
 	switch strings.ToLower(path) {
-	case "evaluate":
+	case "eval":
 		return CommandEvaluate, true
 	case "preview":
 		return CommandPreview, true

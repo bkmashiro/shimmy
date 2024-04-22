@@ -7,9 +7,7 @@ GOLDFLAGS += -X main.Buildtime=$(BUILDTIME)
 GOLDFLAGS += -X main.Commit=$(COMMIT)
 GOFLAGS = -ldflags "$(GOLDFLAGS)"
 
-PROTO_SRC_DIR = "./proto"
-
-.PHONY: all build clean test test-unit test-race test-msan staticcheck vet
+.PHONY: all build test test-unit lcov install generate-mocks update-schema
 
 all: build
 
@@ -26,9 +24,6 @@ lcov:
 
 install:
 	go install
-
-serve:
-	go run main.go serve
 
 generate-mocks:
 	mockery

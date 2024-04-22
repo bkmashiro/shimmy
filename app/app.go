@@ -21,15 +21,15 @@ func New(ctx *cli.Context) (*shell.Shell, error) {
 		return nil, err
 	}
 
-	sharedModule := fx.Module(
-		"shared",
+	appModule := fx.Module(
+		"app",
+
 		// provide global config
 		fx.Supply(config),
-		// provide runtime config
-		fx.Supply(config.Runtime),
-		// provide runtime
-		fx.Provide(runtime.New),
+
+		// provide runtime module
+		runtime.Module(config.Runtime),
 	)
 
-	return shell.New(log, sharedModule), nil
+	return shell.New(log, appModule), nil
 }

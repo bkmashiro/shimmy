@@ -28,6 +28,7 @@ var wellKnownErrors = map[error]int{
 	ErrValidationFailed: http.StatusBadRequest,
 }
 
+// HandlerParams defines the dependencies for the runtime handler.
 type HandlerParams struct {
 	fx.In
 
@@ -36,6 +37,7 @@ type HandlerParams struct {
 	Log *zap.Logger
 }
 
+// Request represents an incoming request.
 type Request struct {
 	Path   string
 	Method string
@@ -43,21 +45,25 @@ type Request struct {
 	Header http.Header
 }
 
+// Response represents an outgoing response.
 type Response struct {
 	StatusCode int
 	Body       []byte
 	Header     http.Header
 }
 
+// ErrorResponse represents error response data.
 type ErrorResponse struct {
 	Message string `json:"message"`
 	Error   string `json:"error,omitempty"`
 }
 
+// Handler is the interface for handling runtime requests.
 type Handler interface {
 	Handle(ctx context.Context, request Request) Response
 }
 
+// RuntimeHandler is a runtime handler that uses a runtime to handle requests.
 type RuntimeHandler struct {
 	runtime Runtime
 
@@ -66,6 +72,7 @@ type RuntimeHandler struct {
 	log *zap.Logger
 }
 
+// NewRuntimeHandler creates a new runtime handler.
 func NewRuntimeHandler(params HandlerParams) (*RuntimeHandler, error) {
 	requestSchema, err := schema.NewRequestSchema()
 	if err != nil {
@@ -89,6 +96,7 @@ func NewRuntimeHandler(params HandlerParams) (*RuntimeHandler, error) {
 	}, nil
 }
 
+// Handle handles a runtime request.
 func (h *RuntimeHandler) Handle(ctx context.Context, req Request) Response {
 	log := h.log.With(
 		zap.String("path", req.Path),

@@ -14,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ github.ref_name }}
+      COMMIT: ${{ github.sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

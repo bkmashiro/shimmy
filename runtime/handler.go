@@ -73,7 +73,7 @@ type RuntimeHandler struct {
 }
 
 // NewRuntimeHandler creates a new runtime handler.
-func NewRuntimeHandler(params HandlerParams) (*RuntimeHandler, error) {
+func NewRuntimeHandler(params HandlerParams) (Handler, error) {
 	requestSchema, err := schema.NewRequestSchema()
 	if err != nil {
 		return nil, err

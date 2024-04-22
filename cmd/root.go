@@ -134,12 +134,10 @@ functions on arbitrary, serverless platforms.`
 			return nil
 		},
 		After: func(ctx *cli.Context) error {
-			log, err := logging.LoggerFromContext(ctx.Context)
-			if err != nil {
-				return err
+			// flush the logger
+			if log, err := logging.LoggerFromContext(ctx.Context); err == nil {
+				log.Sync()
 			}
-
-			log.Sync()
 
 			return nil
 		},

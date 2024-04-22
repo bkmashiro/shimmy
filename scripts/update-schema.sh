@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# This script fetches the request and response schemas from the
+# lambda-feedback/request-response-schemas repository and updates
+# the local schema files in runtime/schema directory.
+
+# Usage: ./scripts/update-schema.sh [REF]
+# REF: The branch, tag or commit to fetch the schema from. Default is master.
+
 REF=${1:-master}
 
 SCHEMA_DIR=runtime/schema

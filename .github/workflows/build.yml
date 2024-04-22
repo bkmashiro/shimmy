@@ -38,9 +38,36 @@ jobs:
           name: shimmy
           path: ./bin/shimmy
 
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ./go.mod
+
+      - name: Install Dependencies
+        run: go mod download
+
+      - name: Run Tests
+        run: go test -json ./... > TestResults.json
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        with:
+          name: Go-results
+          path: TestResults.json
+
   build-docker:
     name: Build Docker Image
     runs-on: ubuntu-latest
+    needs: [build, test]
     concurrency:
       group: ${{ github.ref }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' || github.ref_name != github.event.repository.default_branch }}
@@ -95,29 +122,3 @@ jobs:
           build-args: |
             VERSION=${{ github.ref_name }}
             COMMIT=${{ github.sha }}
-
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: ./go.mod
-
-      - name: Install Dependencies
-        run: go mod download
-
-      - name: Run Tests
-        run: go test -json ./... > TestResults.json
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        with:
-          name: Go-results
-          path: TestResults.json

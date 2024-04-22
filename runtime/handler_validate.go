@@ -1,7 +1,9 @@
 package runtime
 
 import (
-	"github.com/lambda-feedback/shimmy/models"
+	"fmt"
+
+	"github.com/lambda-feedback/shimmy/runtime/schema"
 	"github.com/xeipuuv/gojsonschema"
 	"go.uber.org/zap"
 )
@@ -43,16 +45,12 @@ func newValidationError(t validationType, result *gojsonschema.Result) *validati
 }
 
 func (e *validationError) Error() string {
-	// TODO: error msg
-	return ""
+	// TODO: check if this is the correct format
+	return fmt.Sprintf("%s validation error", e.Type)
 }
 
 // validate validates the data against the schema for the given command.
-func (r *RuntimeHandler) validate(
-	t validationType,
-	command models.Command,
-	data []byte,
-) error {
+func (r *RuntimeHandler) validate(t validationType, command Command, data []byte) error {
 	log := r.log.With(
 		zap.String("command", string(command)),
 		zap.Stringer("type", t),
@@ -64,7 +62,13 @@ func (r *RuntimeHandler) validate(
 		return errSchemaNotFound
 	}
 
-	res, err := schema.Validate(command, data)
+	schemaType, err := getSchemaType(command)
+	if err != nil {
+		log.Debug("could not get schema type", zap.Error(err))
+		return errSchemaNotFound
+	}
+
+	res, err := schema.Validate(schemaType, data)
 	if err != nil {
 		log.Debug("validation failed", zap.Error(err))
 		return errValidationFailed
@@ -77,4 +81,16 @@ func (r *RuntimeHandler) validate(
 	r.log.Debug("invalid data", zap.Any("errors", res.Errors()))
 
 	return newValidationError(t, res)
+}
+
+// getSchemaType returns the schema type for the given command.
+func getSchemaType(command Command) (schema.SchemaType, error) {
+	switch command {
+	case CommandEvaluate:
+		return schema.SchemaTypeEval, nil
+	case CommandPreview:
+		return schema.SchemaTypePreview, nil
+	default:
+		return 0, errInvalidCommand
+	}
 }

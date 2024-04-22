@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/lambda-feedback/shimmy/models"
 	"github.com/lambda-feedback/shimmy/runtime/schema"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
@@ -96,7 +95,7 @@ func (h *RuntimeHandler) Handle(ctx context.Context, req Request) Response {
 	log = log.With(zap.String("command", commandStr))
 
 	// Parse the raw command string into a Command type
-	command, ok := models.ParseCommand(commandStr)
+	command, ok := ParseCommand(commandStr)
 	if !ok {
 		log.Debug("invalid command")
 		return newErrorResponse(errInvalidCommand)

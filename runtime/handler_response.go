@@ -23,15 +23,21 @@ func newErrorResponse(err error) Response {
 	statusCode := getErrorStatusCode(err)
 
 	type responseError struct {
-		Message string `json:"message"`
-		Error   string `json:"error,omitempty"`
+		Message string              `json:"message"`
+		Error   string              `json:"error_thrown,omitempty"`
+		Fields  map[string][]string `json:"fields,omitempty"`
 	}
 
 	responseErr := responseError{
 		Message: err.Error(),
+		Fields:  make(map[string][]string),
 	}
 
-	// TODO: probably attach validation errors here
+	if validationErr, ok := err.(*validationError); ok {
+		for _, err := range validationErr.Result.Errors() {
+			responseErr.Fields[err.Field()] = append(responseErr.Fields[err.Field()], err.Description())
+		}
+	}
 
 	body, err := json.Marshal(struct {
 		Error responseError `json:"error"`

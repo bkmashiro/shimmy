@@ -5,25 +5,31 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/lambda-feedback/shimmy/models"
 	"github.com/xeipuuv/gojsonschema"
 )
 
+type SchemaType int
+
+const (
+	SchemaTypeEval SchemaType = iota
+	SchemaTypePreview
+)
+
 type Schema struct {
-	schemas map[models.Command]*gojsonschema.Schema
+	schemas map[SchemaType]*gojsonschema.Schema
 }
 
 func new(eval *gojsonschema.Schema, preview *gojsonschema.Schema) *Schema {
 	return &Schema{
-		schemas: map[models.Command]*gojsonschema.Schema{
-			models.CommandEvaluate: eval,
-			models.CommandPreview:  preview,
+		schemas: map[SchemaType]*gojsonschema.Schema{
+			SchemaTypeEval:    eval,
+			SchemaTypePreview: preview,
 		},
 	}
 }
 
-func (s *Schema) Get(command models.Command) (*gojsonschema.Schema, error) {
-	schema, ok := s.schemas[command]
+func (s *Schema) Get(schemaType SchemaType) (*gojsonschema.Schema, error) {
+	schema, ok := s.schemas[schemaType]
 	if !ok {
 		return nil, errors.New("schema not found")
 	}
@@ -31,10 +37,10 @@ func (s *Schema) Get(command models.Command) (*gojsonschema.Schema, error) {
 	return schema, nil
 }
 
-func (s *Schema) Validate(command models.Command, data []byte) (*gojsonschema.Result, error) {
+func (s *Schema) Validate(schemaType SchemaType, data []byte) (*gojsonschema.Result, error) {
 	var schema *gojsonschema.Schema
 
-	schema, err := s.Get(command)
+	schema, err := s.Get(schemaType)
 	if err != nil {
 		return nil, err
 	}

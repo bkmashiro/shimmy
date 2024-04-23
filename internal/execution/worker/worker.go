@@ -21,13 +21,13 @@ type ExitEvent struct {
 
 type Message[T any] struct {
 	// ID is the message identifier
-	ID int `json:"id"`
+	ID int `json:"id,omitempty"`
 
 	// Data is the message payload
 	Data T `json:"data"`
 }
 
-type Worker[I any, O any] interface {
+type Worker[I, O any] interface {
 	Start(context.Context, StartConfig) error
 	Terminate() error
 	// Kill(StopParams) error
@@ -38,7 +38,7 @@ type Worker[I any, O any] interface {
 	WaitFor(context.Context, time.Duration) (ExitEvent, error)
 }
 
-type ProcessWorker[I any, O any] struct {
+type ProcessWorker[I, O any] struct {
 	processLock sync.Mutex
 	process     *proc[I, O]
 	exitChan    chan ExitEvent

@@ -42,17 +42,17 @@ func (a *fileAdapter[I, O]) Send(
 	data I,
 	params worker.SendConfig,
 ) (O, error) {
-	var res O
+	var out O
 
 	if a.worker == nil {
-		return res, errors.New("no worker provided")
+		return out, errors.New("no worker provided")
 	}
 
 	// create temp files for request and response data
 	reqFile, err := os.CreateTemp("", "request-data-*")
 	if err != nil {
 		a.log.Error("error creating temp file", zap.Error(err))
-		return res, err
+		return out, err
 	}
 	defer reqFile.Close()
 	defer os.Remove(reqFile.Name())
@@ -60,15 +60,19 @@ func (a *fileAdapter[I, O]) Send(
 	resFile, err := os.CreateTemp("", "response-data-*")
 	if err != nil {
 		a.log.Error("error creating temp req file", zap.Error(err))
-		return res, err
+		return out, err
 	}
 	defer resFile.Close()
 	defer os.Remove(resFile.Name())
 
+	req := worker.Message[I]{
+		Data: data,
+	}
+
 	// write data to request file
-	if err := json.NewEncoder(reqFile).Encode(data); err != nil {
+	if err := json.NewEncoder(reqFile).Encode(req); err != nil {
 		a.log.Error("error writing temp req file", zap.Error(err))
-		return res, err
+		return out, err
 	}
 
 	startParams := a.startParams
@@ -87,7 +91,7 @@ func (a *fileAdapter[I, O]) Send(
 	// start worker with modified args and env
 	if err := a.worker.Start(ctx, startParams); err != nil {
 		a.log.Error("error starting worker", zap.Error(err))
-		return res, err
+		return out, err
 	}
 
 	// wait for worker to terminate (maybe find another way to read res earlier?)
@@ -95,16 +99,18 @@ func (a *fileAdapter[I, O]) Send(
 	_, err = a.worker.WaitFor(ctx, params.Timeout)
 	if err != nil {
 		a.log.Error("error waiting for worker to finish", zap.Error(err))
-		return res, err
+		return out, err
 	}
+
+	var res worker.Message[O]
 
 	// read response data from res file
 	if err := json.NewDecoder(resFile).Decode(&res); err != nil {
 		a.log.Error("error reading temp req file", zap.Error(err))
-		return res, err
+		return out, err
 	}
 
-	return res, nil
+	return res.Data, nil
 }
 
 func (a *fileAdapter[I, O]) Stop(

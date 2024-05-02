@@ -24,7 +24,7 @@ type Message[T any] struct {
 	ID int `json:"id,omitempty"`
 
 	// Data is the message payload
-	Data T `json:"data"`
+	Data T `json:",inline"`
 }
 
 type Worker[I, O any] interface {
@@ -55,6 +55,13 @@ var _ Worker[any, any] = (*ProcessWorker[any, any])(nil)
 
 // Start starts the worker process.
 func (w *ProcessWorker[I, O]) Start(ctx context.Context, config StartConfig) error {
+	w.log.With(
+		zap.String("command", config.Cmd),
+		zap.Strings("args", config.Args),
+		zap.String("cwd", config.Cwd),
+		zap.Any("env", config.Env),
+	).Debug("starting worker process")
+
 	process := w.acquireProcess()
 
 	if process != nil {
@@ -110,10 +117,18 @@ func (w *ProcessWorker[I, O]) WaitFor(
 	ctx context.Context,
 	deadline time.Duration,
 ) (ExitEvent, error) {
-	ctx, cancel := context.WithTimeout(ctx, deadline)
-	defer cancel()
+	var waitCtx context.Context
+	var cancel context.CancelFunc
 
-	return w.Wait(ctx)
+	if deadline <= 0 {
+		waitCtx, cancel = context.WithCancel(ctx)
+		defer cancel()
+	} else {
+		waitCtx, cancel = context.WithTimeout(ctx, deadline)
+		defer cancel()
+	}
+
+	return w.Wait(waitCtx)
 }
 
 // Terminate sends a SIGTERM signal to the worker process to request it to stop.

@@ -50,7 +50,7 @@ func (e *validationError) Error() string {
 }
 
 // validate validates the data against the schema for the given command.
-func (r *RuntimeHandler) validate(t validationType, command Command, data []byte) error {
+func (r *RuntimeHandler) validate(t validationType, command Command, data map[string]any) error {
 	log := r.log.With(
 		zap.String("command", string(command)),
 		zap.Stringer("type", t),

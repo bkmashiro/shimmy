@@ -27,16 +27,10 @@ func ParseCommand(path string) (Command, bool) {
 	return "", false
 }
 
-// Message is a message that can be sent between the runtime and the handler.
-type Message struct {
-	Command Command `json:"command,omitempty"`
-	Data    []byte  `json:"data"`
-}
+type Message map[string]any
 
-// NewMessage creates a new message.
-func NewMessage(command Command, data []byte) Message {
-	return Message{
-		Command: command,
-		Data:    data,
-	}
+// NewRequestMessage creates a new message.
+func NewRequestMessage(command Command, data map[string]any) Message {
+	data["command"] = command
+	return data
 }

@@ -62,6 +62,9 @@ func NewRuntime(params RuntimeParams) (Runtime, error) {
 	}, nil
 }
 
-func (r *EvaluationRuntime) Handle(ctx context.Context, message Message) (Message, error) {
+func (r *EvaluationRuntime) Handle(
+	ctx context.Context,
+	message Message,
+) (Message, error) {
 	return r.manager.Send(ctx, message)
 }

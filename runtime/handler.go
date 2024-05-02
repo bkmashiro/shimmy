@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -101,14 +102,22 @@ func (h *RuntimeHandler) Handle(ctx context.Context, req Request) Response {
 		return newErrorResponse(errInvalidCommand)
 	}
 
+	var reqData map[string]any
+
+	// Parse the request data into a map
+	if err := json.Unmarshal(req.Body, &reqData); err != nil {
+		log.Debug("failed to unmarshal request data", zap.Error(err))
+		return newErrorResponse(err)
+	}
+
 	// Validate the request data against the request schema
-	err := h.validate(validationTypeRequest, command, req.Body)
+	err := h.validate(validationTypeRequest, command, reqData)
 	if err != nil {
 		return newErrorResponse(err)
 	}
 
 	// Create a new message with the parsed command and request data
-	requestMsg := NewMessage(command, req.Body)
+	requestMsg := NewRequestMessage(command, reqData)
 
 	// Let the runtime handle the message
 	responseMsg, err := h.runtime.Handle(ctx, requestMsg)
@@ -118,13 +127,19 @@ func (h *RuntimeHandler) Handle(ctx context.Context, req Request) Response {
 	}
 
 	// Validate the response data against the response schema
-	err = h.validate(validationTypeResponse, command, responseMsg.Data)
+	err = h.validate(validationTypeResponse, command, responseMsg)
 	if err != nil {
 		return newErrorResponse(err)
 	}
 
+	resData, err := json.Marshal(responseMsg)
+	if err != nil {
+		log.Debug("failed to marshal response data", zap.Error(err))
+		return newErrorResponse(err)
+	}
+
 	// Return the response data
-	return newResponse(http.StatusOK, responseMsg.Data)
+	return newResponse(http.StatusOK, resData)
 }
 
 // getCommand tries to extract the command from the request.

@@ -37,7 +37,7 @@ func (s *Schema) Get(schemaType SchemaType) (*gojsonschema.Schema, error) {
 	return schema, nil
 }
 
-func (s *Schema) Validate(schemaType SchemaType, data []byte) (*gojsonschema.Result, error) {
+func (s *Schema) Validate(schemaType SchemaType, data map[string]any) (*gojsonschema.Result, error) {
 	var schema *gojsonschema.Schema
 
 	schema, err := s.Get(schemaType)
@@ -45,7 +45,7 @@ func (s *Schema) Validate(schemaType SchemaType, data []byte) (*gojsonschema.Res
 		return nil, err
 	}
 
-	return schema.Validate(gojsonschema.NewBytesLoader(data))
+	return schema.Validate(gojsonschema.NewGoLoader(data))
 }
 
 //go:embed request-eval.json

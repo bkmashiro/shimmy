@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 
 	"github.com/lambda-feedback/shimmy/internal/execution/worker"
@@ -54,8 +55,7 @@ func (a *fileAdapter[I, O]) Send(
 		a.log.Error("error creating temp file", zap.Error(err))
 		return out, err
 	}
-	defer reqFile.Close()
-	defer os.Remove(reqFile.Name())
+	// defer os.Remove(reqFile.Name())
 
 	resFile, err := os.CreateTemp("", "response-data-*")
 	if err != nil {
@@ -63,15 +63,17 @@ func (a *fileAdapter[I, O]) Send(
 		return out, err
 	}
 	defer resFile.Close()
-	defer os.Remove(resFile.Name())
-
-	req := worker.Message[I]{
-		Data: data,
-	}
+	// defer os.Remove(resFile.Name())
 
 	// write data to request file
-	if err := json.NewEncoder(reqFile).Encode(req); err != nil {
+	if err := json.NewEncoder(reqFile).Encode(data); err != nil {
 		a.log.Error("error writing temp req file", zap.Error(err))
+		return out, err
+	}
+
+	// close & flush request file
+	if err := reqFile.Close(); err != nil {
+		a.log.Error("error closing temp req file", zap.Error(err))
 		return out, err
 	}
 
@@ -88,11 +90,15 @@ func (a *fileAdapter[I, O]) Send(
 	startParams.Env["REQUEST_FILE_NAME"] = reqFile.Name()
 	startParams.Env["RESPONSE_FILE_NAME"] = resFile.Name()
 
+	a.log.Debug("starting worker")
+
 	// start worker with modified args and env
 	if err := a.worker.Start(ctx, startParams); err != nil {
 		a.log.Error("error starting worker", zap.Error(err))
 		return out, err
 	}
+
+	a.log.Debug("waiting for worker to finish", zap.Duration("timeout", params.Timeout))
 
 	// wait for worker to terminate (maybe find another way to read res earlier?)
 	// TODO: investigate use of status returned by `WaitFor`
@@ -102,15 +108,23 @@ func (a *fileAdapter[I, O]) Send(
 		return out, err
 	}
 
-	var res worker.Message[O]
-
-	// read response data from res file
-	if err := json.NewDecoder(resFile).Decode(&res); err != nil {
-		a.log.Error("error reading temp req file", zap.Error(err))
+	resD, err := io.ReadAll(resFile)
+	if err != nil {
+		a.log.Error("error reading response data from temp file", zap.Error(err))
 		return out, err
 	}
 
-	return res.Data, nil
+	a.log.Debug("reading response data from temp file", zap.String("file", resFile.Name()), zap.String("data", string(resD)))
+
+	var res O
+
+	// read and decode response data from res file
+	if err := json.NewDecoder(resFile).Decode(&res); err != nil {
+		a.log.Error("error decoding response data from temp file", zap.Error(err))
+		return out, err
+	}
+
+	return res, nil
 }
 
 func (a *fileAdapter[I, O]) Stop(

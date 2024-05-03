@@ -91,10 +91,11 @@ func TestFileAdapter_Send_ReturnsStartError(t *testing.T) {
 	a, w := createFileAdapter(t)
 
 	ctx := context.Background()
+	data := map[string]any{"foo": "bar"}
 
 	w.EXPECT().Start(ctx, mock.Anything).Return(assert.AnError)
 
-	_, err := a.Send(ctx, "test", worker.SendConfig{})
+	_, err := a.Send(ctx, data, worker.SendConfig{})
 	assert.ErrorIs(t, err, assert.AnError)
 }
 
@@ -102,11 +103,12 @@ func TestFileAdapter_Send_ReturnsWaitForError(t *testing.T) {
 	a, w := createFileAdapter(t)
 
 	ctx := context.Background()
+	data := map[string]any{"foo": "bar"}
 
 	w.EXPECT().Start(ctx, mock.Anything).Return(nil)
 	w.EXPECT().WaitFor(ctx, mock.Anything).Return(worker.ExitEvent{}, assert.AnError)
 
-	_, err := a.Send(ctx, "test", worker.SendConfig{})
+	_, err := a.Send(ctx, data, worker.SendConfig{})
 	assert.ErrorIs(t, err, assert.AnError)
 }
 
@@ -114,11 +116,12 @@ func TestFileAdapter_Send_ReturnsReadError(t *testing.T) {
 	a, w := createFileAdapter(t)
 
 	ctx := context.Background()
+	data := map[string]any{"foo": "bar"}
 
 	w.EXPECT().Start(ctx, mock.Anything).Return(nil)
 	w.EXPECT().WaitFor(ctx, mock.Anything).Return(worker.ExitEvent{}, nil)
 
-	_, err := a.Send(ctx, "test", worker.SendConfig{})
+	_, err := a.Send(ctx, data, worker.SendConfig{})
 	assert.ErrorIs(t, err, io.EOF)
 }
 

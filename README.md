@@ -70,7 +70,7 @@ The interface consists of input and output messages, which are exchanged between
 The input message is a JSON-encoded object that contains the following fields:
 
 - `$id` (int, optional): A unique identifier for the evaluation request.
-- `$command` (string): The command to be executed by the evaluation function.
+- `command` (string): The command to be executed by the evaluation function.
 - `*` (object): The input data for the evaluation function.
 
 > The `$id` field is not used for file-based communication.
@@ -85,7 +85,7 @@ An example input message for the `evaluate` command is shown below:
 ```json
 {
   "$id": 1,
-  "$command": "eval",
+  "command": "eval",
   "response": "...",
   "answer": "...",
   "params": {

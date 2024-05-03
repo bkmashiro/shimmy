@@ -31,6 +31,6 @@ type Message map[string]any
 
 // NewRequestMessage creates a new message.
 func NewRequestMessage(command Command, data map[string]any) Message {
-	data["$command"] = command
+	data["command"] = command
 	return data
 }

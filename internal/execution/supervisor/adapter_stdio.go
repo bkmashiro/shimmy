@@ -52,7 +52,7 @@ func (a *stdioAdapter[I, O]) Send(
 	// send data to worker
 	res, err := a.worker.Send(ctx, data, params)
 	if err != nil {
-		a.log.Error("error sending data to worker", zap.Error(err))
+		a.log.Debug("error sending data to worker", zap.Error(err))
 		return res, err
 	}
 

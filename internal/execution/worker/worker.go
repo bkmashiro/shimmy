@@ -52,7 +52,6 @@ type ProcessWorker[I, O any] struct {
 }
 
 func NewProcessWorker[I, O any](log *zap.Logger) *ProcessWorker[I, O] {
-
 	return &ProcessWorker[I, O]{
 		log: log.Named("worker"),
 	}
@@ -101,6 +100,26 @@ func (w *ProcessWorker[I, O]) Start(ctx context.Context, config StartConfig) err
 		process.Kill(-1)
 	}()
 
+	go func() {
+		// read from stderr and log it
+		// TODO: improve this A LOT!!
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				var buf [4096]byte
+				n, err := process.StderrPipe().Read(buf[:])
+				if n > 0 {
+					w.log.Debug(string(buf[:n]))
+				}
+				if err != nil {
+					return
+				}
+			}
+		}
+	}()
+
 	return nil
 }
 
@@ -147,8 +166,7 @@ func (w *ProcessWorker[I, O]) Terminate() error {
 		return ErrWorkerNotStarted
 	}
 
-	err := process.Terminate(-1)
-	if err != nil {
+	if err := process.Terminate(-1); err != nil {
 		return err
 	}
 

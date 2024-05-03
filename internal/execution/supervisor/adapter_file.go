@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/lambda-feedback/shimmy/internal/execution/worker"
+	"github.com/mitchellh/mapstructure"
 	"go.uber.org/zap"
 )
 
@@ -72,8 +73,16 @@ func (a *fileAdapter[I, O]) Send(
 	defer resFile.Close()
 	// defer os.Remove(resFile.Name())
 
+	var reqMap map[string]any
+
+	// encode input data to map
+	if err := mapstructure.Decode(data, &reqMap); err != nil {
+		a.log.Debug("error decoding input data", zap.Error(err))
+		return out, err
+	}
+
 	// write data to request file
-	if err := json.NewEncoder(reqFile).Encode(data); err != nil {
+	if err := json.NewEncoder(reqFile).Encode(reqMap); err != nil {
 		a.log.Debug("error writing temp req file", zap.Error(err))
 		return out, err
 	}
@@ -115,11 +124,19 @@ func (a *fileAdapter[I, O]) Send(
 
 	a.log.Debug("worker finished", zap.Any("exit", exitEvent))
 
-	var res O
+	var resMap map[string]any
 
 	// read and decode response data from res file
-	if err := json.NewDecoder(resFile).Decode(&res); err != nil {
+	if err := json.NewDecoder(resFile).Decode(&resMap); err != nil {
 		a.log.Debug("error decoding response data from temp file", zap.Error(err))
+		return out, err
+	}
+
+	var res O
+
+	// decode response data to output type
+	if err := mapstructure.Decode(resMap, &res); err != nil {
+		a.log.Debug("error decoding response data", zap.Error(err))
 		return out, err
 	}
 

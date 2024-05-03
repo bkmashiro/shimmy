@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mitchellh/mapstructure"
 	"go.uber.org/zap"
 )
 
@@ -22,10 +23,10 @@ type ExitEvent struct {
 
 type Message[T any] struct {
 	// ID is the message identifier
-	ID int `json:"id,omitempty"`
+	ID int `mapstructure:"id,omitempty"`
 
 	// Data is the message payload
-	Data T `json:",inline"`
+	Data T `mapstructure:",squash"`
 }
 
 type Worker[I, O any] interface {
@@ -51,6 +52,7 @@ type ProcessWorker[I, O any] struct {
 }
 
 func NewProcessWorker[I, O any](log *zap.Logger) *ProcessWorker[I, O] {
+
 	return &ProcessWorker[I, O]{
 		log: log.Named("worker"),
 	}
@@ -182,7 +184,7 @@ func (w *ProcessWorker[I, O]) Read(ctx context.Context, params ReadConfig) (O, e
 		return result, ErrWorkerNotStarted
 	}
 
-	msg, err := w.readStdout(ctx, process, params.Timeout)
+	msg, err := w.readJsonStdout(ctx, process, params.Timeout)
 	if err != nil {
 		return result, err
 	}
@@ -190,7 +192,7 @@ func (w *ProcessWorker[I, O]) Read(ctx context.Context, params ReadConfig) (O, e
 	return msg.Data, nil
 }
 
-func (w *ProcessWorker[I, O]) readStdout(
+func (w *ProcessWorker[I, O]) readJsonStdout(
 	ctx context.Context,
 	process *proc,
 	timeout time.Duration,
@@ -200,12 +202,25 @@ func (w *ProcessWorker[I, O]) readStdout(
 	// Create a channel to signal the completion of reading and decoding.
 	done := make(chan error, 1)
 
-	// Start a goroutine to read from stdout and decode the JSON.
+	// Start a goroutine to read from stdout and decode the JSON. We're using
+	// a goroutine to support timeouts and context cancellation, as the json
+	// decoder doesn't support these.
 	go func() {
-		if err := json.NewDecoder(process.StdoutPipe()).Decode(&result); err != nil {
+		var resMap map[string]any
+
+		// first, decode the json to a generic map
+		if err := json.NewDecoder(process.StdoutPipe()).Decode(&resMap); err != nil {
 			done <- err
 			return
 		}
+
+		// then, decode the map to the Message struct. We're using mapstructure
+		// for decoding as json.Unmarshal doesn't support squashing.
+		if err := mapstructure.Decode(resMap, &result); err != nil {
+			done <- err
+			return
+		}
+
 		done <- nil
 	}()
 
@@ -235,7 +250,7 @@ func (w *ProcessWorker[I, O]) Write(ctx context.Context, data I) error {
 		return ErrWorkerNotStarted
 	}
 
-	_, err := w.writeStdin(ctx, process, data)
+	_, err := w.writeJsonStdin(ctx, process, data)
 	if err != nil {
 		return err
 	}
@@ -243,7 +258,7 @@ func (w *ProcessWorker[I, O]) Write(ctx context.Context, data I) error {
 	return nil
 }
 
-func (w *ProcessWorker[I, O]) writeStdin(
+func (w *ProcessWorker[I, O]) writeJsonStdin(
 	ctx context.Context,
 	process *proc,
 	data I,
@@ -253,6 +268,13 @@ func (w *ProcessWorker[I, O]) writeStdin(
 	req := Message[I]{
 		ID:   reqID,
 		Data: data,
+	}
+
+	var reqMap map[string]any
+
+	// decode message to map
+	if err := mapstructure.Decode(req, &reqMap); err != nil {
+		return 0, err
 	}
 
 	// write encoded message to process stdin
@@ -281,7 +303,7 @@ func (w *ProcessWorker[I, O]) Send(
 		return result, ErrWorkerNotStarted
 	}
 
-	msgId, err := w.writeStdin(ctx, process, data)
+	msgId, err := w.writeJsonStdin(ctx, process, data)
 	if err != nil {
 		return result, err
 	}
@@ -292,7 +314,7 @@ func (w *ProcessWorker[I, O]) Send(
 		}
 	}
 
-	msg, err := w.readStdout(ctx, process, params.Timeout)
+	msg, err := w.readJsonStdout(ctx, process, params.Timeout)
 	if err != nil {
 		return result, err
 	}

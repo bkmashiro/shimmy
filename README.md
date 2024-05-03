@@ -67,32 +67,29 @@ The interface consists of input and output messages, which are exchanged between
 
 #### Input
 
-The input message is a JSON-encoded string that contains the following fields:
+The input message is a JSON-encoded object that contains the following fields:
 
-- `id` (int, optional): A unique identifier for the evaluation request.
-- `data` (object): The input data for the evaluation function.
+- `$id` (int, optional): A unique identifier for the evaluation request.
+- `$command` (string): The command to be executed by the evaluation function.
+- `*` (object): The input data for the evaluation function.
 
-> The `id` field is not used for file-based communication.
+> The `$id` field is not used for file-based communication.
 
-The `data` object should follow one of the following schemas, depending on the command:
+The object should follow one of the following schemas, depending on the command:
 
-- `evaluate`: [Evaluation Schema](./runtime/schema/request-eval.json)
+- `eval`: [Evaluation Schema](./runtime/schema/request-eval.json)
 - `preview`: [Preview Schema](./runtime/schema/request-preview.json)
 
 An example input message for the `evaluate` command is shown below:
 
 ```json
 {
-  "id": 1,
-  "data": {
-    "command": "...",
-    "data": {
-      "response": "...",
-      "answer": "...",
-      "params": {
-        "param1": "..."
-      }
-    }
+  "$id": 1,
+  "$command": "eval",
+  "response": "...",
+  "answer": "...",
+  "params": {
+    "param1": "..."
   }
 }
 ```
@@ -101,25 +98,23 @@ An example input message for the `evaluate` command is shown below:
 
 The output message is expected to be a JSON-encoded string that contains the following fields:
 
-- `id` (int, optional): The unique identifier of the evaluation request.
-- `data` (object): The output data from the evaluation function.
+- `$id` (int, optional): The unique identifier of the evaluation request.
+- `*` (object): The output data from the evaluation function.
 
-> The `id` field is not used for file-based communication.
+> The `$id` field is not used for file-based communication.
 
-The `data` object should follow one of the following schemas, depending on the command:
+The object should follow one of the following schemas, depending on the command:
 
-- `evaluate`: [Evaluation Schema](./runtime/schema/response-eval.json)
+- `eval`: [Evaluation Schema](./runtime/schema/response-eval.json)
 - `preview`: [Preview Schema](./runtime/schema/response-preview.json)
 
 An example output message for the `evaluate` command is shown below:
 
 ```json
 {
-  "id": 1,
-  "data": {
-    "result": {
-      "is_correct": "..."
-    }
+  "$id": 1,
+  "result": {
+    "is_correct": "..."
   }
 }
 ```

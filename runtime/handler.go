@@ -71,7 +71,7 @@ func NewRuntimeHandler(params HandlerParams) (Handler, error) {
 	return &RuntimeHandler{
 		runtime: params.Runtime,
 		schemas: schemas,
-		log:     params.Log,
+		log:     params.Log.Named("runtime_handler"),
 	}, nil
 }
 

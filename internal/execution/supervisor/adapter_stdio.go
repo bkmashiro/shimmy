@@ -19,7 +19,7 @@ func newStdioAdapter[I, O any](log *zap.Logger) *stdioAdapter[I, O] {
 
 	return &stdioAdapter[I, O]{
 		worker: worker,
-		log:    log,
+		log:    log.Named("adapter_stdio"),
 	}
 }
 

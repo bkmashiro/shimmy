@@ -11,7 +11,7 @@ func Module(config Config) fx.Option {
 		fx.Supply(config),
 
 		// provide runtime
-		fx.Provide(NewRuntime),
+		fx.Provide(NewLifecycleRuntime),
 
 		// provide runtime handler
 		fx.Provide(NewRuntimeHandler),

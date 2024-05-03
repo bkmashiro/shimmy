@@ -263,11 +263,12 @@ func TestSupervisor_Send_Fails(t *testing.T) {
 	assert.NoError(t, err)
 
 	a.EXPECT().Start(mock.Anything, mock.Anything).Return(nil)
-	a.EXPECT().Send(mock.Anything, mock.Anything, mock.Anything).Return("result", assert.AnError)
+	a.EXPECT().Send(mock.Anything, mock.Anything, mock.Anything).Return("", assert.AnError)
 
 	res, err := s.Send(context.Background(), "data")
 	assert.ErrorIs(t, err, assert.AnError)
-	assert.Nil(t, res)
+	assert.NotNil(t, res)
+	assert.Empty(t, res.Data)
 }
 
 // MARK: - mocks

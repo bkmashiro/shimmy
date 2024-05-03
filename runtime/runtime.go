@@ -11,6 +11,7 @@ import (
 // Runtime is the interface for a runtime.
 type Runtime interface {
 	Handle(context.Context, Message) (Message, error)
+	Shutdown(context.Context) error
 }
 
 // ManagerParams is the runtime-specific params type for the manager.
@@ -58,8 +59,26 @@ func NewRuntime(params RuntimeParams) (Runtime, error) {
 
 	return &EvaluationRuntime{
 		manager: manager,
-		log:     params.Log,
+		log:     params.Log.Named("runtime"),
 	}, nil
+}
+
+func NewLifecycleRuntime(
+	params RuntimeParams,
+	lc fx.Lifecycle,
+) (Runtime, error) {
+	r, err := NewRuntime(params)
+	if err != nil {
+		return nil, err
+	}
+
+	lc.Append(fx.Hook{
+		OnStop: func(context.Context) error {
+			return r.Shutdown(context.Background())
+		},
+	})
+
+	return r, nil
 }
 
 func (r *EvaluationRuntime) Handle(
@@ -67,4 +86,9 @@ func (r *EvaluationRuntime) Handle(
 	message Message,
 ) (Message, error) {
 	return r.manager.Send(ctx, message)
+}
+
+func (r *EvaluationRuntime) Shutdown(context.Context) error {
+	r.manager.Shutdown()
+	return nil
 }

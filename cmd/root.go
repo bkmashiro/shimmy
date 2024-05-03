@@ -209,7 +209,7 @@ func getLogFormatFromCLI(ctx *cli.Context) string {
 		return format
 	}
 
-	return "production"
+	return "development"
 }
 
 func getLogLevelFromCLI(ctx *cli.Context) zap.AtomicLevel {

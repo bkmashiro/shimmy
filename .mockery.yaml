@@ -20,7 +20,7 @@ packages:
     interfaces:
       Adapter:
       Supervisor:
-  github.com/lambda-feedback/shimmy/internal/execution/manager:
+  github.com/lambda-feedback/shimmy/internal/execution:
     config:
       outpkg: "{{.PackageName}}"
       inpackage: True

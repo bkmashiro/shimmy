@@ -1,7 +1,6 @@
 package worker
 
 import (
-	"context"
 	"os/exec"
 	"strconv"
 	"testing"
@@ -12,7 +11,7 @@ import (
 )
 
 func TestProc_Start_IsAlive(t *testing.T) {
-	p, err := startProc[any, any](StartConfig{
+	p, err := startProc(StartConfig{
 		Cmd:  "sleep",
 		Args: []string{"10"},
 	}, zap.NewNop())
@@ -28,7 +27,7 @@ func TestProc_Start_IsAlive(t *testing.T) {
 }
 
 func TestProc_Terminate_KillsProcess(t *testing.T) {
-	p, err := startProc[any, any](StartConfig{
+	p, err := startProc(StartConfig{
 		Cmd:  "sleep",
 		Args: []string{"10"},
 	}, zap.NewNop())
@@ -44,7 +43,7 @@ func TestProc_Terminate_KillsProcess(t *testing.T) {
 }
 
 func TestProc_Terminate_SendsTerminationSignal(t *testing.T) {
-	p, err := startProc[any, any](StartConfig{
+	p, err := startProc(StartConfig{
 		Cmd:  "sleep",
 		Args: []string{"10"},
 	}, zap.NewNop())
@@ -68,27 +67,28 @@ func TestProc_Terminate_SendsTerminationSignal(t *testing.T) {
 	assert.Equal(t, false, isProcessAlive(p.pid))
 }
 
-func TestProc_Write_WritesToStdin(t *testing.T) {
-	p, err := startProc[string, string](StartConfig{
-		Cmd: "cat",
-	}, zap.NewNop())
-	assert.NoError(t, err)
+// TODO: move this test to worker!
+// func TestProc_Write_WritesToStdin(t *testing.T) {
+// 	p, err := startProc(StartConfig{
+// 		Cmd: "cat",
+// 	}, zap.NewNop())
+// 	assert.NoError(t, err)
 
-	defer p.Terminate(-1)
+// 	defer p.Terminate(-1)
 
-	// write data
-	msgId, err := p.Write(context.Background(), "foo")
-	assert.NoError(t, err)
+// 	// write data
+// 	msgId, err := p.Write(context.Background(), "foo")
+// 	assert.NoError(t, err)
 
-	// close stdin
-	p.Close()
+// 	// close stdin
+// 	p.Close()
 
-	msg, err := p.Read(context.Background(), 0)
-	assert.NoError(t, err)
+// 	msg, err := p.Read(context.Background(), 0)
+// 	assert.NoError(t, err)
 
-	assert.Equal(t, msgId, msg.ID)
-	assert.Equal(t, "foo", msg.Data)
-}
+// 	assert.Equal(t, msgId, msg.ID)
+// 	assert.Equal(t, "foo", msg.Data)
+// }
 
 func isProcessAlive(pid int) bool {
 	cmd := exec.Command("ps", "-p", strconv.Itoa(pid))

@@ -26,6 +26,7 @@ func TestManager_New_FailsInvalidCapacity(t *testing.T) {
 
 func TestManager_New_CreatesNewManager(t *testing.T) {
 	m, _, err := createManager(t)
+
 	assert.NoError(t, err)
 	assert.NotNil(t, m)
 }
@@ -64,12 +65,16 @@ func TestManager_Send_Fails(t *testing.T) {
 	m, sv, _ := createManager(t)
 
 	sv.EXPECT().Start(mock.Anything).Return(nil)
+	sv.EXPECT().Shutdown(mock.Anything).Return(nil, nil)
 	sv.EXPECT().Send(mock.Anything, "data").Return(nil, assert.AnError)
 
 	_, err := m.Send(context.Background(), "data")
 	assert.ErrorIs(t, err, assert.AnError)
 
 	sv.AssertCalled(t, "Start", mock.Anything)
+
+	// wait for the background shutdown goroutines to finish
+	m.Shutdown()
 }
 
 func TestManager_Send_ReleaseSupervisorWait(t *testing.T) {
@@ -83,18 +88,19 @@ func TestManager_Send_ReleaseSupervisorWait(t *testing.T) {
 	}
 
 	result := &supervisor.Result[any]{
-		Data: "data",
-		Wait: wait,
+		Data:    "data",
+		Release: wait,
 	}
 
 	sv.EXPECT().Start(mock.Anything).Return(nil)
+	sv.EXPECT().Shutdown(mock.Anything).Return(nil, nil)
 	sv.EXPECT().Send(mock.Anything, "data").Return(result, nil)
 
 	_, err := m.Send(context.Background(), "data")
 	assert.NoError(t, err)
 
-	// wait for the release to happen in a goroutine
-	<-time.After(1 * time.Millisecond)
+	// wait for the release to happen in the background goroutine
+	m.Shutdown()
 
 	assert.True(t, waited)
 }
@@ -110,19 +116,19 @@ func TestManager_Send_ReleaseSupervisorWaitError(t *testing.T) {
 	}
 
 	result := &supervisor.Result[any]{
-		Data: "data",
-		Wait: wait,
+		Data:    "data",
+		Release: wait,
 	}
 
 	sv.EXPECT().Start(mock.Anything).Return(nil)
-	sv.EXPECT().Send(mock.Anything, "data").Return(result, nil)
 	sv.EXPECT().Shutdown(mock.Anything).Return(nil, nil)
+	sv.EXPECT().Send(mock.Anything, "data").Return(result, nil)
 
 	_, err := m.Send(context.Background(), "data")
 	assert.NoError(t, err)
 
-	// wait for the release to happen in a goroutine
-	<-time.After(1 * time.Millisecond)
+	// wait for the release to happen in the background goroutine
+	m.Shutdown()
 
 	assert.True(t, waited)
 }
@@ -138,13 +144,13 @@ func TestManager_Send_ReleaseSupervisorWaitErrorOnDestroy(t *testing.T) {
 	}
 
 	result := &supervisor.Result[any]{
-		Data: "data",
-		Wait: wait,
+		Data:    "data",
+		Release: wait,
 	}
 
 	sv.EXPECT().Start(mock.Anything).Return(nil)
-	sv.EXPECT().Send(mock.Anything, "data").Return(result, nil)
 	sv.EXPECT().Shutdown(mock.Anything).Return(wait, nil)
+	sv.EXPECT().Send(mock.Anything, "data").Return(result, nil)
 
 	_, err := m.Send(context.Background(), "data")
 	assert.NoError(t, err)
@@ -166,13 +172,13 @@ func TestManager_Send_ReleaseSupervisorWaitErrorShutdown(t *testing.T) {
 	}
 
 	result := &supervisor.Result[any]{
-		Data: "data",
-		Wait: wait,
+		Data:    "data",
+		Release: wait,
 	}
 
 	sv.EXPECT().Start(mock.Anything).Return(nil)
-	sv.EXPECT().Send(mock.Anything, "data").Return(result, nil)
 	sv.EXPECT().Shutdown(mock.Anything).Return(wait, assert.AnError)
+	sv.EXPECT().Send(mock.Anything, "data").Return(result, nil)
 
 	_, err := m.Send(context.Background(), "data")
 	assert.NoError(t, err)
@@ -191,8 +197,8 @@ func TestManager_Shutdown_DestroysSupervisor(t *testing.T) {
 	}
 
 	sv.EXPECT().Start(mock.Anything).Return(nil)
-	sv.EXPECT().Send(mock.Anything, "data").Return(result, nil)
 	sv.EXPECT().Shutdown(mock.Anything).Return(nil, nil)
+	sv.EXPECT().Send(mock.Anything, "data").Return(result, nil)
 
 	_, err := m.Send(context.Background(), "data")
 	assert.NoError(t, err)

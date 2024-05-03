@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"sync"
@@ -40,14 +41,18 @@ type Worker[I, O any] interface {
 
 type ProcessWorker[I, O any] struct {
 	processLock sync.Mutex
-	process     *proc[I, O]
+	process     *proc
 	exitChan    chan ExitEvent
-	log         *zap.Logger
+
+	msgid     int
+	msgidLock sync.Mutex
+
+	log *zap.Logger
 }
 
 func NewProcessWorker[I, O any](log *zap.Logger) *ProcessWorker[I, O] {
 	return &ProcessWorker[I, O]{
-		log: log,
+		log: log.Named("worker"),
 	}
 }
 
@@ -68,7 +73,7 @@ func (w *ProcessWorker[I, O]) Start(ctx context.Context, config StartConfig) err
 		return ErrWorkerAlreadyStarted
 	}
 
-	process, err := startProc[I, O](config, w.log)
+	process, err := startProc(config, w.log)
 	if err != nil {
 		return err
 	}
@@ -177,12 +182,47 @@ func (w *ProcessWorker[I, O]) Read(ctx context.Context, params ReadConfig) (O, e
 		return result, ErrWorkerNotStarted
 	}
 
-	msg, err := process.Read(ctx, params.Timeout)
+	msg, err := w.readStdout(ctx, process, params.Timeout)
 	if err != nil {
 		return result, err
 	}
 
 	return msg.Data, nil
+}
+
+func (w *ProcessWorker[I, O]) readStdout(
+	ctx context.Context,
+	process *proc,
+	timeout time.Duration,
+) (Message[O], error) {
+	var result Message[O]
+
+	// Create a channel to signal the completion of reading and decoding.
+	done := make(chan error, 1)
+
+	// Start a goroutine to read from stdout and decode the JSON.
+	go func() {
+		if err := json.NewDecoder(process.StdoutPipe()).Decode(&result); err != nil {
+			done <- err
+			return
+		}
+		done <- nil
+	}()
+
+	if timeout > 0 {
+		// Create a context with the specified timeout.
+		timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+
+		ctx = timeoutCtx
+	}
+
+	select {
+	case <-ctx.Done(): // Context was cancelled or timed out
+		return result, ctx.Err()
+	case err := <-done: // Finished reading and decoding
+		return result, err
+	}
 }
 
 // Write writes a message to the worker process. The message is
@@ -195,12 +235,32 @@ func (w *ProcessWorker[I, O]) Write(ctx context.Context, data I) error {
 		return ErrWorkerNotStarted
 	}
 
-	_, err := process.Write(ctx, data)
+	_, err := w.writeStdin(ctx, process, data)
 	if err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func (w *ProcessWorker[I, O]) writeStdin(
+	ctx context.Context,
+	process *proc,
+	data I,
+) (int, error) {
+	reqID := w.nextMsgID()
+
+	req := Message[I]{
+		ID:   reqID,
+		Data: data,
+	}
+
+	// write encoded message to process stdin
+	if err := json.NewEncoder(process.StdinPipe()).Encode(req); err != nil {
+		return 0, err
+	}
+
+	return reqID, nil
 }
 
 // Send sends a message to the worker process. The message is
@@ -221,7 +281,7 @@ func (w *ProcessWorker[I, O]) Send(
 		return result, ErrWorkerNotStarted
 	}
 
-	msgId, err := process.Write(ctx, data)
+	msgId, err := w.writeStdin(ctx, process, data)
 	if err != nil {
 		return result, err
 	}
@@ -232,7 +292,7 @@ func (w *ProcessWorker[I, O]) Send(
 		}
 	}
 
-	msg, err := process.Read(ctx, params.Timeout)
+	msg, err := w.readStdout(ctx, process, params.Timeout)
 	if err != nil {
 		return result, err
 	}
@@ -245,7 +305,7 @@ func (w *ProcessWorker[I, O]) Send(
 }
 
 // getProcess returns the worker process. The method is thread-safe.
-func (w *ProcessWorker[I, O]) setProcess(p *proc[I, O]) {
+func (w *ProcessWorker[I, O]) setProcess(p *proc) {
 	w.processLock.Lock()
 	defer w.processLock.Unlock()
 
@@ -253,7 +313,7 @@ func (w *ProcessWorker[I, O]) setProcess(p *proc[I, O]) {
 }
 
 // acquireProcess returns the worker process. The method is thread-safe.
-func (w *ProcessWorker[I, O]) acquireProcess() *proc[I, O] {
+func (w *ProcessWorker[I, O]) acquireProcess() *proc {
 	w.processLock.Lock()
 	defer w.processLock.Unlock()
 
@@ -288,4 +348,14 @@ func getExitEvent(err error) ExitEvent {
 		Code:   exitStatus,
 		Signal: signo,
 	}
+}
+
+func (w *ProcessWorker[I, O]) nextMsgID() int {
+	w.msgidLock.Lock()
+	defer w.msgidLock.Unlock()
+
+	id := w.msgid
+	w.msgid++
+
+	return id
 }

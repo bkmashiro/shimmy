@@ -1,32 +1,26 @@
 package worker
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os/exec"
-	"sync"
 	"syscall"
 	"time"
 
 	"go.uber.org/zap"
 )
 
-type proc[I, O any] struct {
+type proc struct {
 	pid         int
 	termination chan error
 	stdout      io.ReadCloser
 	stderr      io.ReadCloser
 	stdin       io.WriteCloser
 
-	msgid     int
-	msgidLock sync.Mutex
-
 	log *zap.Logger
 }
 
-func startProc[I, O any](config StartConfig, log *zap.Logger) (*proc[I, O], error) {
+func startProc(config StartConfig, log *zap.Logger) (*proc, error) {
 	cmd := exec.Command(config.Cmd, config.Args...)
 
 	if config.Env != nil {
@@ -63,9 +57,9 @@ func startProc[I, O any](config StartConfig, log *zap.Logger) (*proc[I, O], erro
 		return nil, err
 	}
 
-	log = log.Named("worker_proc").With(zap.Int("pid", cmd.Process.Pid))
+	log = log.Named("proc").With(zap.Int("pid", cmd.Process.Pid))
 
-	process := &proc[I, O]{
+	process := &proc{
 		pid:         cmd.Process.Pid,
 		termination: make(chan error),
 		stdout:      stdout,
@@ -88,7 +82,7 @@ func startProc[I, O any](config StartConfig, log *zap.Logger) (*proc[I, O], erro
 	return process, nil
 }
 
-func (p *proc[I, O]) Terminate(timeout time.Duration) error {
+func (p *proc) Terminate(timeout time.Duration) error {
 	// terminate should report success if the process terminated
 	// by the time supervisor receives the request.
 	select {
@@ -104,7 +98,7 @@ func (p *proc[I, O]) Terminate(timeout time.Duration) error {
 	return p.waitForTermination(timeout)
 }
 
-func (p *proc[I, O]) Kill(timeout time.Duration) error {
+func (p *proc) Kill(timeout time.Duration) error {
 	// kill should report success if the process terminated by the time
 	// supervisor receives the request.
 	select {
@@ -121,15 +115,15 @@ func (p *proc[I, O]) Kill(timeout time.Duration) error {
 	return p.waitForTermination(timeout)
 }
 
-func (p *proc[I, O]) Wait() error {
+func (p *proc) Wait() error {
 	return p.waitForTermination(0)
 }
 
-func (p *proc[I, O]) WaitFor(timeout time.Duration) error {
+func (p *proc) WaitFor(timeout time.Duration) error {
 	return p.waitForTermination(timeout)
 }
 
-func (p *proc[I, O]) waitForTermination(timeout time.Duration) error {
+func (p *proc) waitForTermination(timeout time.Duration) error {
 	// if timeout is < 0, don't wait for the process to exit
 	if timeout < 0 {
 		return nil
@@ -153,7 +147,7 @@ func (p *proc[I, O]) waitForTermination(timeout time.Duration) error {
 	}
 }
 
-func (p *proc[I, O]) kill(signal syscall.Signal) {
+func (p *proc) kill(signal syscall.Signal) {
 	log := p.log.With(zap.Stringer("signal", signal))
 
 	// close stdin before killing the process, to
@@ -170,7 +164,7 @@ func (p *proc[I, O]) kill(signal syscall.Signal) {
 	}
 }
 
-func (p *proc[I, O]) sendKillSignal(signal syscall.Signal) error {
+func (p *proc) sendKillSignal(signal syscall.Signal) error {
 	if pgid, err := syscall.Getpgid(p.pid); err == nil {
 		// Negative pid sends signal to all in process group
 		return syscall.Kill(-pgid, signal)
@@ -179,23 +173,8 @@ func (p *proc[I, O]) sendKillSignal(signal syscall.Signal) error {
 	}
 }
 
-func (p *proc[I, O]) Write(ctx context.Context, data I) (int, error) {
-	reqID := p.nextMsgID()
-
-	req := Message[I]{
-		ID:   reqID,
-		Data: data,
-	}
-
-	// write encoded message to process stdin
-	if err := json.NewEncoder(p.stdin).Encode(req); err != nil {
-		return 0, err
-	}
-
-	return reqID, nil
-}
-
-func (p *proc[I, O]) Close() error {
+// Close closes the stdin pipe of the process.
+func (p *proc) Close() error {
 	if err := p.stdin.Close(); err != nil {
 		return err
 	}
@@ -203,43 +182,20 @@ func (p *proc[I, O]) Close() error {
 	return nil
 }
 
-func (p *proc[I, O]) nextMsgID() int {
-	p.msgidLock.Lock()
-	defer p.msgidLock.Unlock()
-
-	id := p.msgid
-	p.msgid++
-
-	return id
+// StdinPipe returns a pipe that will be connected to the
+// command's standard input when the command starts.
+func (p *proc) StdinPipe() io.WriteCloser {
+	return p.stdin
 }
 
-func (p *proc[I, O]) Read(ctx context.Context, timeout time.Duration) (Message[O], error) {
-	var result Message[O]
+// StdoutPipe returns a pipe that will be connected to the
+// command's standard output when the command starts.
+func (p *proc) StdoutPipe() io.ReadCloser {
+	return p.stdout
+}
 
-	// Create a channel to signal the completion of reading and decoding.
-	done := make(chan error, 1)
-
-	// Start a goroutine to read from stdout and decode the JSON.
-	go func() {
-		if err := json.NewDecoder(p.stdout).Decode(&result); err != nil {
-			done <- err
-			return
-		}
-		done <- nil
-	}()
-
-	if timeout > 0 {
-		// Create a context with the specified timeout.
-		timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
-		defer cancel()
-
-		ctx = timeoutCtx
-	}
-
-	select {
-	case <-ctx.Done(): // Context was cancelled or timed out
-		return result, ctx.Err()
-	case err := <-done: // Finished reading and decoding
-		return result, err
-	}
+// StderrPipe returns a pipe that will be connected to the
+// command's standard error when the command starts.
+func (p *proc) StderrPipe() io.ReadCloser {
+	return p.stderr
 }

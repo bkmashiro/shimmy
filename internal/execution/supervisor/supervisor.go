@@ -38,7 +38,7 @@ type WorkerSupervisor[I, O any] struct {
 	sendLock sync.Mutex
 
 	worker        Adapter[I, O]
-	workerFactory AdapterFactoryFn[I, O]
+	workerFactory func(mode IOInterface) (Adapter[I, O], error)
 	workerLock    sync.Mutex
 
 	workerStartParams worker.StartConfig
@@ -97,8 +97,8 @@ type Params[I, O any] struct {
 }
 
 type Result[O any] struct {
-	Data O
-	Wait WaitFunc
+	Data    O
+	Release WaitFunc
 }
 
 func New[I, O any](params Params[I, O]) (Supervisor[I, O], error) {
@@ -113,22 +113,29 @@ func New[I, O any](params Params[I, O]) (Supervisor[I, O], error) {
 		params.WorkerFactory = defaultAdapterFactory
 	}
 
+	workerFactory := func(mode IOInterface) (Adapter[I, O], error) {
+		return params.WorkerFactory(mode, params.Log)
+	}
+
 	return &WorkerSupervisor[I, O]{
 		persistent:        config.Persistent,
 		mode:              config.Interface,
-		workerFactory:     params.WorkerFactory,
+		workerFactory:     workerFactory,
 		workerStartParams: config.WorkerStartParams,
 		workerStopParams:  config.WorkerStopParams,
 		workerSendParams:  config.WorkerSendParams,
-		log:               params.Log,
+		log:               params.Log.Named("supervisor"),
 	}, nil
 }
 
 func (s *WorkerSupervisor[I, O]) Start(ctx context.Context) error {
 	// if the worker is transient, this is a no-op
 	if !s.persistent {
+		s.log.Debug("not starting transient worker")
 		return nil
 	}
+
+	s.log.Debug("starting persistent worker")
 
 	// otherwise, boot the persistent worker
 	_, err := s.acquireWorker(ctx)
@@ -161,19 +168,20 @@ func (s *WorkerSupervisor[I, O]) Send(ctx context.Context, data I) (*Result[O], 
 	// send data to worker
 	resData, err := worker.Send(ctx, data, params)
 	if err != nil {
-		s.log.Error("error sending data to worker", zap.Error(err))
-		return nil, err
+		s.log.Debug("error sending data to worker", zap.Error(err))
 	}
 
-	wait, err := s.releaseWorker(ctx)
-	if err != nil {
-		s.log.Error("error releasing worker", zap.Error(err))
+	release, releaseErr := s.releaseWorker(ctx)
+	if releaseErr != nil {
+		s.log.Error("error releasing worker", zap.Error(releaseErr))
+		// make release() return the release error
+		release = func() error { return releaseErr }
 	}
 
 	return &Result[O]{
-		Data: resData,
-		Wait: wait,
-	}, nil
+		Data:    resData,
+		Release: release,
+	}, err
 }
 
 func (s *WorkerSupervisor[I, O]) Suspend(ctx context.Context) (WaitFunc, error) {
@@ -208,8 +216,11 @@ func (s *WorkerSupervisor[I, O]) releaseWorker(ctx context.Context) (WaitFunc, e
 	// if the worker is persistent, this is a no-op, as we
 	// want to keep the worker alive for future messages
 	if s.persistent {
+		s.log.Debug("persistent worker, not releasing")
 		return noWaitFunc, nil
 	}
+
+	s.log.Debug("releasing transient worker")
 
 	return s.terminateWorker(ctx)
 }
@@ -220,6 +231,7 @@ func (s *WorkerSupervisor[I, O]) terminateWorker(ctx context.Context) (WaitFunc,
 
 	// if there is no worker, we have nothing to release
 	if s.worker == nil {
+		s.log.Debug("no worker to release")
 		return noWaitFunc, nil
 	}
 
@@ -232,13 +244,15 @@ func (s *WorkerSupervisor[I, O]) terminateWorker(ctx context.Context) (WaitFunc,
 }
 
 func (s *WorkerSupervisor[I, O]) bootWorker(ctx context.Context) (Adapter[I, O], error) {
-	worker, err := s.workerFactory(s.mode, s.log)
+	worker, err := s.workerFactory(s.mode)
 	if err != nil {
+		s.log.Debug("error creating worker", zap.Error(err))
 		return nil, err
 	}
 
 	err = worker.Start(ctx, s.workerStartParams)
 	if err != nil {
+		s.log.Debug("error starting worker", zap.Error(err))
 		return nil, err
 	}
 

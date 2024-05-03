@@ -4,27 +4,34 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 
 	"github.com/lambda-feedback/shimmy/internal/execution/worker"
 	"go.uber.org/zap"
 )
 
+// fileAdapter is an adapter that allows supervisors to use files to communicate
+// with their worker. This is useful when the worker process is not able to
+// communicate with the supervisor process via stdio or sockets.
 type fileAdapter[I, O any] struct {
+	// worker is the worker that is managed by the adapter.
 	worker worker.Worker[any, any]
 
+	// startParams is the start configuration that is used to start the worker.
+	// The file adapter does not start the worker during
 	startParams worker.StartConfig
 
 	log *zap.Logger
 }
+
+var _ Adapter[any, any] = (*fileAdapter[any, any])(nil)
 
 func newFileAdapter[I, O any](log *zap.Logger) *fileAdapter[I, O] {
 	worker := worker.NewProcessWorker[any, any](log)
 
 	return &fileAdapter[I, O]{
 		worker: worker,
-		log:    log,
+		log:    log.Named("adapter_file"),
 	}
 }
 
@@ -52,14 +59,14 @@ func (a *fileAdapter[I, O]) Send(
 	// create temp files for request and response data
 	reqFile, err := os.CreateTemp("", "request-data-*")
 	if err != nil {
-		a.log.Error("error creating temp file", zap.Error(err))
+		a.log.Debug("error creating temp file", zap.Error(err))
 		return out, err
 	}
 	// defer os.Remove(reqFile.Name())
 
 	resFile, err := os.CreateTemp("", "response-data-*")
 	if err != nil {
-		a.log.Error("error creating temp req file", zap.Error(err))
+		a.log.Debug("error creating temp req file", zap.Error(err))
 		return out, err
 	}
 	defer resFile.Close()
@@ -67,13 +74,13 @@ func (a *fileAdapter[I, O]) Send(
 
 	// write data to request file
 	if err := json.NewEncoder(reqFile).Encode(data); err != nil {
-		a.log.Error("error writing temp req file", zap.Error(err))
+		a.log.Debug("error writing temp req file", zap.Error(err))
 		return out, err
 	}
 
 	// close & flush request file
 	if err := reqFile.Close(); err != nil {
-		a.log.Error("error closing temp req file", zap.Error(err))
+		a.log.Debug("error closing temp req file", zap.Error(err))
 		return out, err
 	}
 
@@ -94,33 +101,25 @@ func (a *fileAdapter[I, O]) Send(
 
 	// start worker with modified args and env
 	if err := a.worker.Start(ctx, startParams); err != nil {
-		a.log.Error("error starting worker", zap.Error(err))
+		a.log.Debug("error starting worker", zap.Error(err))
 		return out, err
 	}
-
-	a.log.Debug("waiting for worker to finish", zap.Duration("timeout", params.Timeout))
 
 	// wait for worker to terminate (maybe find another way to read res earlier?)
 	// TODO: investigate use of status returned by `WaitFor`
-	_, err = a.worker.WaitFor(ctx, params.Timeout)
+	exitEvent, err := a.worker.WaitFor(ctx, params.Timeout)
 	if err != nil {
-		a.log.Error("error waiting for worker to finish", zap.Error(err))
+		a.log.Debug("error waiting for worker to finish", zap.Error(err))
 		return out, err
 	}
 
-	resD, err := io.ReadAll(resFile)
-	if err != nil {
-		a.log.Error("error reading response data from temp file", zap.Error(err))
-		return out, err
-	}
-
-	a.log.Debug("reading response data from temp file", zap.String("file", resFile.Name()), zap.String("data", string(resD)))
+	a.log.Debug("worker finished", zap.Any("exit", exitEvent))
 
 	var res O
 
 	// read and decode response data from res file
 	if err := json.NewDecoder(resFile).Decode(&res); err != nil {
-		a.log.Error("error decoding response data from temp file", zap.Error(err))
+		a.log.Debug("error decoding response data from temp file", zap.Error(err))
 		return out, err
 	}
 
@@ -134,6 +133,8 @@ func (a *fileAdapter[I, O]) Stop(
 	if a.worker == nil {
 		return nil, errors.New("no worker provided")
 	}
+
+	a.log.Debug("stopping worker", zap.Any("params", params))
 
 	return stopWorker(ctx, a.worker, params)
 }

@@ -77,6 +77,15 @@ func NewRuntimeHandler(params HandlerParams) (Handler, error) {
 
 // Handle handles a runtime request.
 func (h *RuntimeHandler) Handle(ctx context.Context, req Request) Response {
+	data, err := h.handle(ctx, req)
+	if err != nil {
+		return newErrorResponse(err)
+	}
+
+	return newResponse(http.StatusOK, data)
+}
+
+func (h *RuntimeHandler) handle(ctx context.Context, req Request) ([]byte, error) {
 	log := h.log.With(
 		zap.String("path", req.Path),
 		zap.String("method", req.Method),
@@ -84,13 +93,13 @@ func (h *RuntimeHandler) Handle(ctx context.Context, req Request) Response {
 
 	if req.Method != http.MethodPost {
 		log.Debug("invalid method")
-		return newErrorResponse(errInvalidMethod)
+		return nil, errInvalidMethod
 	}
 
 	commandStr, ok := h.getCommand(req)
 	if !ok {
 		log.Debug("missing command")
-		return newErrorResponse(errCommandNotFound)
+		return nil, errCommandNotFound
 	}
 
 	log = log.With(zap.String("command", commandStr))
@@ -99,7 +108,7 @@ func (h *RuntimeHandler) Handle(ctx context.Context, req Request) Response {
 	command, ok := ParseCommand(commandStr)
 	if !ok {
 		log.Debug("invalid command")
-		return newErrorResponse(errInvalidCommand)
+		return nil, errInvalidCommand
 	}
 
 	var reqData map[string]any
@@ -107,13 +116,13 @@ func (h *RuntimeHandler) Handle(ctx context.Context, req Request) Response {
 	// Parse the request data into a map
 	if err := json.Unmarshal(req.Body, &reqData); err != nil {
 		log.Debug("failed to unmarshal request data", zap.Error(err))
-		return newErrorResponse(err)
+		return nil, err
 	}
 
 	// Validate the request data against the request schema
 	err := h.validate(validationTypeRequest, command, reqData)
 	if err != nil {
-		return newErrorResponse(err)
+		return nil, err
 	}
 
 	// Create a new message with the parsed command and request data
@@ -123,23 +132,23 @@ func (h *RuntimeHandler) Handle(ctx context.Context, req Request) Response {
 	responseMsg, err := h.runtime.Handle(ctx, requestMsg)
 	if err != nil {
 		log.Debug("failed to handle message", zap.Error(err))
-		return newErrorResponse(err)
+		return nil, err
 	}
 
 	// Validate the response data against the response schema
 	err = h.validate(validationTypeResponse, command, responseMsg)
 	if err != nil {
-		return newErrorResponse(err)
+		return nil, err
 	}
 
 	resData, err := json.Marshal(responseMsg)
 	if err != nil {
 		log.Debug("failed to marshal response data", zap.Error(err))
-		return newErrorResponse(err)
+		return nil, err
 	}
 
 	// Return the response data
-	return newResponse(http.StatusOK, resData)
+	return resData, nil
 }
 
 // getCommand tries to extract the command from the request.

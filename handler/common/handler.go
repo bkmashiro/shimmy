@@ -3,6 +3,7 @@ package common
 import (
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/lambda-feedback/shimmy/runtime"
 	"go.uber.org/fx"
@@ -44,9 +45,9 @@ func (h *CommandHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	request := runtime.Request{
 		Path:   r.URL.Path,
-		Method: r.Method,
-		Body:   body,
+		Method: strings.ToUpper(r.Method),
 		Header: r.Header,
+		Body:   body,
 	}
 
 	// Handle the request

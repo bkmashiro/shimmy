@@ -22,6 +22,7 @@ functions on arbitrary, serverless platforms.`
 		Usage:           appUsage,
 		HideHelpCommand: true,
 		Args:            true,
+		DefaultCommand:  "run",
 		Flags: []cli.Flag{
 			// general flags
 			&cli.StringFlag{

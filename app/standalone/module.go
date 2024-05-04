@@ -1,7 +1,7 @@
 package standalone
 
 import (
-	"github.com/lambda-feedback/shimmy/handler/common"
+	"github.com/lambda-feedback/shimmy/handler"
 	"github.com/lambda-feedback/shimmy/internal/server"
 	"github.com/lambda-feedback/shimmy/util/logging"
 	"go.uber.org/fx"
@@ -13,7 +13,7 @@ func Module(config server.HttpConfig) fx.Option {
 		// rename logger for module
 		logging.DecorateLogger("serve"),
 		// provide handlers
-		common.Module(),
+		handler.Module(),
 		// provide server
 		server.Module(config),
 	)

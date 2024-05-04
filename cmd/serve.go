@@ -2,8 +2,9 @@ package cmd
 
 import (
 	"github.com/lambda-feedback/shimmy/app"
-	"github.com/lambda-feedback/shimmy/handler/standalone"
+	"github.com/lambda-feedback/shimmy/app/standalone"
 	"github.com/lambda-feedback/shimmy/internal/server"
+	"github.com/lambda-feedback/shimmy/util/logging"
 	"github.com/urfave/cli/v2"
 )
 
@@ -46,6 +47,11 @@ itely, processing incoming http requests.`
 )
 
 func serveAction(ctx *cli.Context) error {
+	log, err := logging.LoggerFromContext(ctx.Context)
+	if err != nil {
+		return err
+	}
+
 	app, err := app.New(ctx)
 	if err != nil {
 		return err
@@ -56,6 +62,8 @@ func serveAction(ctx *cli.Context) error {
 		Port: ctx.Int("port"),
 		H2c:  ctx.Bool("h2c"),
 	}
+
+	log.Info("starting standalone http server")
 
 	return app.Run(ctx.Context, standalone.Module(httpConfig))
 }

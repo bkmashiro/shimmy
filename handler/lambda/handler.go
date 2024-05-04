@@ -88,7 +88,7 @@ func (s *LambdaHandler) Start() {
 	mux.HandleFunc("/", s.handler.ServeHTTP)
 
 	lambda.StartWithOptions(
-		httpadapter.New(http.DefaultServeMux).ProxyWithContext,
+		httpadapter.New(mux).ProxyWithContext,
 		lambda.WithContext(s.ctx),
 	)
 }

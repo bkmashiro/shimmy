@@ -79,7 +79,7 @@ jobs:
   build_docker:
     name: Build Docker Image
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, build]
     concurrency:
       group: ${{ github.ref }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' || github.ref_name != github.event.repository.default_branch }}

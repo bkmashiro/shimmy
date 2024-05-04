@@ -12,7 +12,7 @@ GOFLAGS = -ldflags "$(GOLDFLAGS)"
 all: build
 
 build:
-	go build -o ./bin/shimmy $(GOFLAGS) .
+	go build -o ./bin/shimmy -trimpath -buildvcs=false $(GOFLAGS) .
 
 test: test-unit
 

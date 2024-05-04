@@ -11,11 +11,11 @@ func Module() fx.Option {
 		"lambda",
 		// rename logger for module
 		logging.DecorateLogger("lambda"),
-		// provide command handler
-		fx.Provide(common.NewCommandHandler),
-		// provide handler
+		// provide handlers
+		common.Module(),
+		// provide server
 		fx.Provide(NewLifecycleHandler),
-		// invoke handler
+		// invoke server
 		fx.Invoke(func(*LambdaHandler) {}),
 	)
 }

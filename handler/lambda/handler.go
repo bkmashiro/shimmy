@@ -6,7 +6,7 @@ import (
 
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/awslabs/aws-lambda-go-api-proxy/httpadapter"
-	"github.com/lambda-feedback/shimmy/handler/common"
+	"github.com/lambda-feedback/shimmy/internal/server"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
 )
@@ -15,25 +15,33 @@ type LambdaHandlerParams struct {
 	fx.In
 
 	Context context.Context
-	Handler *common.CommandHandler
-	Logger  *zap.Logger
+
+	Handlers []*server.HttpHandler `group:"handlers"`
+
+	Logger *zap.Logger
 }
 
 type LambdaHandler struct {
-	ctx     context.Context
-	cancel  context.CancelFunc
-	handler *common.CommandHandler
-	log     *zap.Logger
+	ctx    context.Context
+	cancel context.CancelFunc
+	mux    *http.ServeMux
+	log    *zap.Logger
 }
 
 func NewLambdaHandler(params LambdaHandlerParams) *LambdaHandler {
 	ctx, cancel := context.WithCancel(params.Context)
 
+	mux := http.NewServeMux()
+
+	for _, handler := range params.Handlers {
+		mux.Handle(handler.Name, handler.Handler)
+	}
+
 	return &LambdaHandler{
-		ctx:     ctx,
-		cancel:  cancel,
-		handler: params.Handler,
-		log:     params.Logger,
+		ctx:    ctx,
+		cancel: cancel,
+		mux:    mux,
+		log:    params.Logger,
 	}
 }
 
@@ -52,43 +60,9 @@ func NewLifecycleHandler(params LambdaHandlerParams, lc fx.Lifecycle) *LambdaHan
 	return handler
 }
 
-// func (s *LambdaHandler) Handle(
-// 	ctx context.Context,
-// 	evt events.APIGatewayProxyRequest,
-// ) (events.APIGatewayProxyResponse, error) {
-// 	var reqHeader http.Header
-// 	for k, v := range evt.Headers {
-// 		reqHeader.Add(k, v)
-// 	}
-
-// 	request := runtime.Request{
-// 		Path:   evt.Path,
-// 		Method: evt.HTTPMethod,
-// 		Body:   []byte(evt.Body),
-// 		Header: reqHeader,
-// 	}
-
-// 	response := s.handler.Handle(ctx, request)
-
-// 	resHeader := make(map[string]string)
-// 	for k, v := range response.Header {
-// 		resHeader[k] = v[0]
-// 	}
-
-// 	return events.APIGatewayProxyResponse{
-// 		StatusCode: response.StatusCode,
-// 		Body:       string(response.Body),
-// 		Headers:    resHeader,
-// 	}, nil
-// }
-
 func (s *LambdaHandler) Start() {
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("/", s.handler.ServeHTTP)
-
 	lambda.StartWithOptions(
-		httpadapter.New(mux).ProxyWithContext,
+		httpadapter.New(s.mux).ProxyWithContext,
 		lambda.WithContext(s.ctx),
 	)
 }

@@ -3,6 +3,7 @@ package cmd
 import (
 	"github.com/lambda-feedback/shimmy/app"
 	"github.com/lambda-feedback/shimmy/handler/standalone"
+	"github.com/lambda-feedback/shimmy/internal/server"
 	"github.com/urfave/cli/v2"
 )
 
@@ -50,7 +51,7 @@ func serveAction(ctx *cli.Context) error {
 		return err
 	}
 
-	httpConfig := standalone.HttpConfig{
+	httpConfig := server.HttpConfig{
 		Host: ctx.String("host"),
 		Port: ctx.Int("port"),
 		H2c:  ctx.Bool("h2c"),

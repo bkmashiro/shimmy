@@ -1,4 +1,4 @@
-package standalone
+package server
 
 import (
 	"context"
@@ -11,35 +11,6 @@ import (
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 )
-
-type HttpHandler struct {
-	Name    string
-	Handler http.Handler
-}
-
-type HttpHandlerResult struct {
-	fx.Out
-
-	Handler *HttpHandler `group:"handlers"`
-}
-
-func AsHttpHandler(
-	name string,
-	handler http.Handler,
-) HttpHandlerResult {
-	return HttpHandlerResult{
-		Handler: &HttpHandler{
-			Name:    name,
-			Handler: handler,
-		},
-	}
-}
-
-type HttpConfig struct {
-	Host string
-	Port int
-	H2c  bool
-}
 
 type HttpServerParams struct {
 	fx.In
@@ -62,8 +33,6 @@ type HttpServer struct {
 
 func NewHttpServer(params HttpServerParams) *HttpServer {
 	mux := http.NewServeMux()
-
-	mux.HandleFunc("/health", http.HandlerFunc(healthHandler))
 
 	for _, handler := range params.Handlers {
 		mux.Handle(handler.Name, handler.Handler)

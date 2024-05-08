@@ -31,19 +31,12 @@ func Provider(ctx *cli.Context, delim string, cb func(string) string) *CLIFlags 
 		flags[flag.Names()[0]] = flag
 	}
 
-	flagNames := ctx.FlagNames()
-
 	// create a map to store the flag values
 	mp := make(map[string]any)
 
 	// iterate over the flags and store the values in the map,
 	// transforming the flag names if a callback is provided
-	for _, flagName := range flagNames {
-		flag, ok := flags[flagName]
-		if !ok {
-			continue
-		}
-
+	for flagName, flag := range flags {
 		value, err := getFlagValue(ctx, flag)
 		if err != nil {
 			continue

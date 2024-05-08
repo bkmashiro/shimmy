@@ -91,6 +91,7 @@ functions on arbitrary, serverless platforms.`
 			&cli.IntFlag{
 				Name:     "max-workers",
 				Usage:    "",
+				Value:    1,
 				Aliases:  []string{"n"},
 				Category: "function",
 				EnvVars:  []string{"FUNCTION_MAX_PROCS"},
@@ -119,10 +120,9 @@ functions on arbitrary, serverless platforms.`
 
 			// parse config using env
 			cfg, err := conf.Parse[config.Config](conf.ParseOptions{
-				Defaults: config.DefaultConfig,
-				Log:      log,
-				Cli:      ctx,
-				CliMap:   cliMap,
+				Log:    log,
+				Cli:    ctx,
+				CliMap: cliMap,
 			})
 			if err != nil {
 				return err

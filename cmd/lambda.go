@@ -26,6 +26,7 @@ blocks indefinitely, processing incoming AWS Lambda events.`
 			&cli.StringFlag{
 				Name:     "lambda-proxy-source",
 				Usage:    "the source of the AWS Lambda event. Options: API_GW_V1, API_GW_V2, ALB.",
+				Value:    "API_GW_V2",
 				EnvVars:  []string{"LAMBDA_PROXY_SOURCE"},
 				Category: "lambda",
 			},
@@ -45,9 +46,8 @@ func lambdaAction(ctx *cli.Context) error {
 	}
 
 	cfg, err := conf.Parse[lambda.Config](conf.ParseOptions{
-		Log:      log,
-		Cli:      ctx,
-		Defaults: lambda.DefaultConfig,
+		Log: log,
+		Cli: ctx,
 	})
 	if err != nil {
 		return err

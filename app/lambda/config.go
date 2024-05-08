@@ -22,7 +22,3 @@ type Config struct {
 	// ProxySource is the source of the AWS Lambda event.
 	ProxySource ProxySource `conf:"lambda_proxy_source"`
 }
-
-var DefaultConfig = map[string]any{
-	"lambda_proxy_source": ProxySourceApiGatewayV2,
-}

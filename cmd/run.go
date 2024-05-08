@@ -50,7 +50,7 @@ func isAWSLambda() bool {
 
 func init() {
 	runCmd.Flags = append(runCmd.Flags, serveCmd.Flags...)
-	runCmd.Flags = append(runCmd.Flags, runCmd.Flags...)
+	runCmd.Flags = append(runCmd.Flags, lambdaCmd.Flags...)
 
 	rootApp.Commands = append(rootApp.Commands, runCmd)
 }

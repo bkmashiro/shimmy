@@ -3,7 +3,7 @@ package cmd
 import (
 	"github.com/lambda-feedback/shimmy/app"
 	"github.com/lambda-feedback/shimmy/app/standalone"
-	"github.com/lambda-feedback/shimmy/internal/server"
+	"github.com/lambda-feedback/shimmy/util/conf"
 	"github.com/lambda-feedback/shimmy/util/logging"
 	"github.com/urfave/cli/v2"
 )
@@ -23,24 +23,27 @@ itely, processing incoming http requests.`
 		Action:      serveAction,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:    "host",
-				Aliases: []string{"H"},
-				Usage:   "The host to listen on.",
-				Value:   "localhost",
-				EnvVars: []string{"HTTP_HOST"},
+				Name:     "host",
+				Aliases:  []string{"H"},
+				Usage:    "The host to listen on.",
+				Value:    "localhost",
+				EnvVars:  []string{"HTTP_HOST"},
+				Category: "http",
 			},
 			&cli.IntFlag{
-				Name:    "port",
-				Aliases: []string{"P"},
-				Usage:   "The port to listen on.",
-				Value:   8080,
-				EnvVars: []string{"HTTP_PORT"},
+				Name:     "port",
+				Aliases:  []string{"P"},
+				Usage:    "The port to listen on.",
+				Value:    8080,
+				EnvVars:  []string{"HTTP_PORT"},
+				Category: "http",
 			},
 			&cli.BoolFlag{
-				Name:    "h2c",
-				Usage:   "Enable HTTP/2 cleartext upgrade.",
-				Value:   false,
-				EnvVars: []string{"HTTP_H2C"},
+				Name:     "h2c",
+				Usage:    "Enable HTTP/2 cleartext upgrade.",
+				Value:    false,
+				EnvVars:  []string{"HTTP_H2C"},
+				Category: "http",
 			},
 		},
 	}
@@ -57,15 +60,17 @@ func serveAction(ctx *cli.Context) error {
 		return err
 	}
 
-	httpConfig := server.HttpConfig{
-		Host: ctx.String("host"),
-		Port: ctx.Int("port"),
-		H2c:  ctx.Bool("h2c"),
+	cfg, err := conf.Parse[standalone.Config](conf.ParseOptions{
+		Log: log,
+		Cli: ctx,
+	})
+	if err != nil {
+		return err
 	}
 
 	log.Info("starting standalone http server")
 
-	return app.Run(ctx.Context, standalone.Module(httpConfig))
+	return app.Run(ctx.Context, standalone.Module(cfg))
 }
 
 func init() {

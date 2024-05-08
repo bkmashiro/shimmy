@@ -24,7 +24,7 @@ Otherwise, shimmy will start the standalone http server.
 		Usage:       "Detect execution environment and start shim.",
 		Description: runCmdDescription,
 		Action:      runAction,
-		Flags:       serveCmd.Flags,
+		Flags:       []cli.Flag{},
 	}
 )
 
@@ -49,5 +49,8 @@ func isAWSLambda() bool {
 }
 
 func init() {
+	rootApp.Flags = append(rootApp.Flags, serveCmd.Flags...)
+	rootApp.Flags = append(rootApp.Flags, runCmd.Flags...)
+
 	rootApp.Commands = append(rootApp.Commands, runCmd)
 }

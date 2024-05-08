@@ -6,9 +6,11 @@ import (
 	"go.uber.org/fx"
 )
 
-func Module() fx.Option {
+func Module(config Config) fx.Option {
 	return fx.Module(
 		"lambda",
+		// provide lambda config
+		fx.Supply(config),
 		// rename logger for module
 		logging.DecorateLogger("lambda"),
 		// provide handlers

@@ -3,7 +3,6 @@ package handler
 import (
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/lambda-feedback/shimmy/runtime"
 	"go.uber.org/fx"
@@ -35,7 +34,6 @@ func (h *CommandHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		zap.String("method", r.Method),
 	)
 
-	// Read the body
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Debug("failed to read body", zap.Error(err))
@@ -45,7 +43,7 @@ func (h *CommandHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	request := runtime.Request{
 		Path:   r.URL.Path,
-		Method: strings.ToUpper(r.Method),
+		Method: r.Method,
 		Header: r.Header,
 		Body:   body,
 	}

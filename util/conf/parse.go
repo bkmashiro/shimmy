@@ -34,7 +34,9 @@ func Parse[C any](opt ParseOptions) (C, error) {
 
 	k := koanf.New(".")
 
-	k.Load(confmap.Provider(opt.Defaults, "."), nil)
+	if opt.Defaults != nil {
+		k.Load(confmap.Provider(opt.Defaults, "."), nil)
+	}
 
 	if opt.FileName != "" {
 		if err := k.Load(file.Provider(opt.FileName), json.Parser()); err != nil {

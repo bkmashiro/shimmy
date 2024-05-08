@@ -7,7 +7,7 @@ import (
 	"go.uber.org/fx"
 )
 
-func Module(config server.HttpConfig) fx.Option {
+func Module(config Config) fx.Option {
 	return fx.Module(
 		"serve",
 		// rename logger for module
@@ -15,6 +15,6 @@ func Module(config server.HttpConfig) fx.Option {
 		// provide handlers
 		handler.Module(),
 		// provide server
-		server.Module(config),
+		server.Module(config.HttpConfig),
 	)
 }

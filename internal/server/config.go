@@ -1,7 +1,7 @@
 package server
 
 type HttpConfig struct {
-	Host string
-	Port int
-	H2c  bool
+	Host string `conf:"host"`
+	Port int    `conf:"port"`
+	H2c  bool   `conf:"h2c"`
 }

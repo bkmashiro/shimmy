@@ -3,6 +3,7 @@ package cmd
 import (
 	"github.com/lambda-feedback/shimmy/app"
 	"github.com/lambda-feedback/shimmy/app/lambda"
+	"github.com/lambda-feedback/shimmy/util/conf"
 	"github.com/lambda-feedback/shimmy/util/logging"
 	"github.com/urfave/cli/v2"
 )
@@ -21,6 +22,15 @@ blocks indefinitely, processing incoming AWS Lambda events.`
 		Usage:       "Run the AWS Lambda handler",
 		Description: lambdaCmdDescription,
 		Action:      lambdaAction,
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:     "proxy-source",
+				Usage:    "the source of the AWS Lambda event. Options: API_GW_V1, API_GW_V2, ALB.",
+				Value:    "API_GW_V2",
+				EnvVars:  []string{"LAMBDA_PROXY_SOURCE"},
+				Category: "lambda",
+			},
+		},
 	}
 )
 
@@ -35,9 +45,23 @@ func lambdaAction(ctx *cli.Context) error {
 		return err
 	}
 
+	cliMap := map[string]string{
+		"proxy-source": "proxy_source",
+	}
+
+	cfg, err := conf.Parse[lambda.Config](conf.ParseOptions{
+		Log:      log,
+		Cli:      ctx,
+		CliMap:   cliMap,
+		Defaults: lambda.DefaultConfig,
+	})
+	if err != nil {
+		return err
+	}
+
 	log.Info("starting AWS Lambda handler")
 
-	return app.Run(ctx.Context, lambda.Module())
+	return app.Run(ctx.Context, lambda.Module(cfg))
 }
 
 func init() {

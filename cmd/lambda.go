@@ -44,14 +44,9 @@ func lambdaAction(ctx *cli.Context) error {
 		return err
 	}
 
-	cliMap := map[string]string{
-		"proxy-source": "proxy_source",
-	}
-
 	cfg, err := conf.Parse[lambda.Config](conf.ParseOptions{
 		Log:      log,
 		Cli:      ctx,
-		CliMap:   cliMap,
 		Defaults: lambda.DefaultConfig,
 	})
 	if err != nil {

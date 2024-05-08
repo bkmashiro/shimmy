@@ -49,8 +49,8 @@ func isAWSLambda() bool {
 }
 
 func init() {
-	rootApp.Flags = append(rootApp.Flags, serveCmd.Flags...)
-	rootApp.Flags = append(rootApp.Flags, runCmd.Flags...)
+	runCmd.Flags = append(runCmd.Flags, serveCmd.Flags...)
+	runCmd.Flags = append(runCmd.Flags, runCmd.Flags...)
 
 	rootApp.Commands = append(rootApp.Commands, runCmd)
 }

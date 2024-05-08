@@ -20,9 +20,9 @@ func (p ProxySource) String() string {
 
 type Config struct {
 	// ProxySource is the source of the AWS Lambda event.
-	ProxySource ProxySource `conf:"proxy_source"`
+	ProxySource ProxySource `conf:"lambda_proxy_source"`
 }
 
 var DefaultConfig = map[string]any{
-	"proxy_source": ProxySourceApiGatewayV2,
+	"lambda_proxy_source": ProxySourceApiGatewayV2,
 }

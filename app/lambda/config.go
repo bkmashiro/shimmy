@@ -14,6 +14,10 @@ const (
 	ProxySourceAlb ProxySource = "ALB"
 )
 
+func (p ProxySource) String() string {
+	return string(p)
+}
+
 type Config struct {
 	// ProxySource is the source of the AWS Lambda event.
 	ProxySource ProxySource `conf:"proxy_source"`

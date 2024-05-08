@@ -84,6 +84,8 @@ func (s *LambdaHandler) Start() error {
 		return err
 	}
 
+	s.log.Debug("using lambda event proxy", zap.Stringer("proxy_source", s.config.ProxySource))
+
 	go lambda.StartWithOptions(handler, lambda.WithContext(s.ctx))
 
 	return nil

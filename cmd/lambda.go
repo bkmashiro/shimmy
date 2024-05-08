@@ -24,7 +24,7 @@ blocks indefinitely, processing incoming AWS Lambda events.`
 		Action:      lambdaAction,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:     "proxy-source",
+				Name:     "lambda-proxy-source",
 				Usage:    "the source of the AWS Lambda event. Options: API_GW_V1, API_GW_V2, ALB.",
 				EnvVars:  []string{"LAMBDA_PROXY_SOURCE"},
 				Category: "lambda",

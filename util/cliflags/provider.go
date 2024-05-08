@@ -20,24 +20,38 @@ type CLIFlags struct {
 // and the map needs to be unflatted by delim.
 func Provider(ctx *cli.Context, delim string, cb func(string) string) *CLIFlags {
 	// get all visible flags for the root-level app
-	flags := ctx.App.VisibleFlags()
+	appFlags := ctx.App.VisibleFlags()
+	commandFlags := ctx.Command.VisibleFlags()
+
+	flags := map[string]cli.Flag{}
+	for _, flag := range appFlags {
+		flags[flag.Names()[0]] = flag
+	}
+	for _, flag := range commandFlags {
+		flags[flag.Names()[0]] = flag
+	}
+
+	flagNames := ctx.FlagNames()
 
 	// create a map to store the flag values
 	mp := make(map[string]any)
 
 	// iterate over the flags and store the values in the map,
 	// transforming the flag names if a callback is provided
-	for _, flag := range flags {
-		name := flag.Names()[0]
+	for _, flagName := range flagNames {
+		flag, ok := flags[flagName]
+		if !ok {
+			continue
+		}
 
 		value, err := getFlagValue(ctx, flag)
 		if err != nil {
 			continue
 		}
 
-		var mapName = name
+		var mapName = flagName
 		if cb != nil {
-			mapName = cb(name)
+			mapName = cb(flagName)
 		}
 		mp[mapName] = value
 	}
@@ -47,6 +61,8 @@ func Provider(ctx *cli.Context, delim string, cb func(string) string) *CLIFlags 
 	if delim != "" {
 		mp = maps.Unflatten(mp, delim)
 	}
+
+	fmt.Printf("mp: %v\n", mp)
 
 	return &CLIFlags{mp: mp}
 }

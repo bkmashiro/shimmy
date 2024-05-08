@@ -92,7 +92,6 @@ functions on arbitrary, serverless platforms.`
 				Name:     "max-workers",
 				Usage:    "",
 				Aliases:  []string{"n"},
-				Value:    1,
 				Category: "function",
 				EnvVars:  []string{"FUNCTION_MAX_PROCS"},
 			},

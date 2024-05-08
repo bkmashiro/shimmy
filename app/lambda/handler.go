@@ -65,8 +65,7 @@ func NewLifecycleHandler(params LambdaHandlerParams, lc fx.Lifecycle) *LambdaHan
 	handler := NewLambdaHandler(params)
 	lc.Append(fx.Hook{
 		OnStart: func(context.Context) error {
-			go handler.Start()
-			return nil
+			return handler.Start()
 		},
 		OnStop: func(context.Context) error {
 			handler.Shutdown()

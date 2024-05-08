@@ -26,7 +26,7 @@ itely, processing incoming http requests.`
 				Name:     "host",
 				Aliases:  []string{"H"},
 				Usage:    "The host to listen on.",
-				Value:    "localhost",
+				Value:    "0.0.0.0",
 				EnvVars:  []string{"HTTP_HOST"},
 				Category: "http",
 			},

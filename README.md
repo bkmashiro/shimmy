@@ -117,6 +117,7 @@ An example output message for the `evaluate` command is shown below:
 ```json
 {
   "$id": 1,
+  "command": "eval",
   "result": {
     "is_correct": "..."
   }

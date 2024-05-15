@@ -162,5 +162,7 @@ func (s *RuntimeHandler) getCommand(req Request) (string, bool) {
 		return pathElements[0], true
 	}
 
-	return "", false
+	// if no command could be extracted from the request,
+	// fall back to the `eval` command
+	return "eval", true
 }

@@ -13,6 +13,7 @@ import (
 type proc struct {
 	pid         int
 	termination chan error
+	done        chan struct{}
 	stdout      io.ReadCloser
 	stderr      io.ReadCloser
 	stdin       io.WriteCloser
@@ -62,6 +63,7 @@ func startProc(config StartConfig, log *zap.Logger) (*proc, error) {
 	process := &proc{
 		pid:         cmd.Process.Pid,
 		termination: make(chan error),
+		done:        make(chan struct{}),
 		stdout:      stdout,
 		stderr:      stderr,
 		stdin:       stdin,
@@ -77,78 +79,32 @@ func startProc(config StartConfig, log *zap.Logger) (*proc, error) {
 
 		// close the termination channel
 		close(process.termination)
+
+		// close the done channel
+		close(process.done)
 	}()
 
 	return process, nil
 }
 
 func (p *proc) Terminate(timeout time.Duration) error {
-	// terminate should report success if the process terminated
-	// by the time supervisor receives the request.
-	select {
-	case <-p.termination:
-		p.log.Debug("process already terminated")
-		return nil
-	default:
-		// continue
-	}
-
-	p.kill(syscall.SIGTERM)
-
-	return p.waitForTermination(timeout)
+	return p.halt(syscall.SIGTERM, timeout)
 }
 
 func (p *proc) Kill(timeout time.Duration) error {
-	// kill should report success if the process terminated by the time
-	// supervisor receives the request.
+	return p.halt(syscall.SIGKILL, timeout)
+}
+
+func (p *proc) halt(signal syscall.Signal, timeout time.Duration) error {
+	log := p.log.With(zap.Stringer("signal", signal))
+
 	select {
-	case <-p.termination:
-		p.log.Debug("process already terminated")
+	case <-p.done:
+		log.Debug("process already terminated")
 		return nil
 	default:
 		// continue
 	}
-
-	// kill the process
-	p.kill(syscall.SIGKILL)
-
-	return p.waitForTermination(timeout)
-}
-
-func (p *proc) Wait() error {
-	return p.waitForTermination(0)
-}
-
-func (p *proc) WaitFor(timeout time.Duration) error {
-	return p.waitForTermination(timeout)
-}
-
-func (p *proc) waitForTermination(timeout time.Duration) error {
-	// if timeout is < 0, don't wait for the process to exit
-	if timeout < 0 {
-		return nil
-	}
-
-	// if timeout is 0, wait indefinitely
-	if timeout == 0 {
-		<-p.termination
-		return nil
-	}
-
-	// block until either:
-	//  * the main process exits (parent ctx is cancelled)
-	//  * the child process exits (w.termination is closed)
-	//  * the timeout is reached
-	select {
-	case <-p.termination:
-		return nil
-	case <-time.After(timeout):
-		return ErrKillTimeout
-	}
-}
-
-func (p *proc) kill(signal syscall.Signal) {
-	log := p.log.With(zap.Stringer("signal", signal))
 
 	// close stdin before killing the process, to
 	// avoid the process hanging on input
@@ -162,6 +118,41 @@ func (p *proc) kill(signal syscall.Signal) {
 	if err := p.sendKillSignal(signal); err != nil {
 		log.Error("stop failed", zap.Error(err))
 	}
+
+	return p.waitForTermination(timeout)
+}
+
+func (p *proc) waitForTermination(timeout time.Duration) error {
+	// if timeout is < 0, don't wait for the process to exit
+	if timeout < 0 {
+		return nil
+	}
+
+	// if timeout is 0, wait indefinitely
+	if timeout == 0 {
+		<-p.done
+		return nil
+	}
+
+	// block until either the child process exits
+	// (w.done is closed) or the timeout is reached
+	select {
+	case <-p.done:
+		return nil
+	case <-time.After(timeout):
+		return ErrKillTimeout
+	}
+}
+
+// Wait waits for the process to exit. The method blocks until the process exits.
+// The method returns an error if the process exits with a non-zero exit code.
+func (p *proc) Wait() error {
+	return <-p.termination
+}
+
+// Done returns a channel that is closed when the process exits.
+func (p *proc) Done() <-chan struct{} {
+	return p.done
 }
 
 func (p *proc) sendKillSignal(signal syscall.Signal) error {

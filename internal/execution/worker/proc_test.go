@@ -2,18 +2,17 @@ package worker
 
 import (
 	"os/exec"
-	"strconv"
 	"testing"
 	"time"
 
+	"github.com/lambda-feedback/shimmy/util"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 )
 
 func TestProc_Start_IsAlive(t *testing.T) {
 	p, err := startProc(StartConfig{
-		Cmd:  "sleep",
-		Args: []string{"10"},
+		Cmd: "cat",
 	}, zap.NewNop())
 	assert.NoError(t, err)
 
@@ -23,13 +22,12 @@ func TestProc_Start_IsAlive(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// the process should be started
-	assert.Equal(t, true, isProcessAlive(p.pid))
+	assert.Equal(t, true, util.IsProcessAlive(p.pid))
 }
 
 func TestProc_Terminate_KillsProcess(t *testing.T) {
 	p, err := startProc(StartConfig{
-		Cmd:  "sleep",
-		Args: []string{"10"},
+		Cmd: "cat",
 	}, zap.NewNop())
 	assert.NoError(t, err)
 
@@ -39,13 +37,12 @@ func TestProc_Terminate_KillsProcess(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// the process should be killed
-	assert.Equal(t, false, isProcessAlive(p.pid))
+	assert.Equal(t, false, util.IsProcessAlive(p.pid))
 }
 
 func TestProc_Terminate_SendsTerminationSignal(t *testing.T) {
 	p, err := startProc(StartConfig{
-		Cmd:  "sleep",
-		Args: []string{"10"},
+		Cmd: "cat",
 	}, zap.NewNop())
 	assert.NoError(t, err)
 
@@ -64,46 +61,20 @@ func TestProc_Terminate_SendsTerminationSignal(t *testing.T) {
 	}
 
 	// the process should be killed
-	assert.Equal(t, false, isProcessAlive(p.pid))
+	assert.Equal(t, false, util.IsProcessAlive(p.pid))
 }
 
-// TODO: move this test to worker!
-// func TestProc_Write_WritesToStdin(t *testing.T) {
-// 	p, err := startProc(StartConfig{
-// 		Cmd: "cat",
-// 	}, zap.NewNop())
-// 	assert.NoError(t, err)
+func TestProc_ExitsWithFailure_ReturnsError(t *testing.T) {
+	p, err := startProc(StartConfig{
+		Cmd:  "sh",
+		Args: []string{"-c", "exit 1"},
+	}, zap.NewNop())
+	assert.NoError(t, err)
 
-// 	defer p.Terminate(-1)
-
-// 	// write data
-// 	msgId, err := p.Write(context.Background(), "foo")
-// 	assert.NoError(t, err)
-
-// 	// close stdin
-// 	p.Close()
-
-// 	msg, err := p.Read(context.Background(), 0)
-// 	assert.NoError(t, err)
-
-// 	assert.Equal(t, msgId, msg.ID)
-// 	assert.Equal(t, "foo", msg.Data)
-// }
-
-func isProcessAlive(pid int) bool {
-	cmd := exec.Command("ps", "-p", strconv.Itoa(pid))
-
-	err := cmd.Run()
-	if err, ok := err.(*exec.ExitError); ok {
-		// if the process is found ps returns with exit status 0,
-		// otherwise it returns with another exit status
-		return err.ProcessState.ExitCode() == 0
+	select {
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout")
+	case err := <-p.termination:
+		assert.NotNil(t, err)
 	}
-	if err != nil {
-		// if an error occured, return false
-		return false
-	}
-
-	// ps returned a zero exit status, so the process was found
-	return true
 }

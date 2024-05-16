@@ -11,21 +11,22 @@ import (
 // Runtime is the interface for a runtime.
 type Runtime interface {
 	Handle(context.Context, Message) (Message, error)
+	Start(context.Context) error
 	Shutdown(context.Context) error
 }
 
-// ManagerParams is the runtime-specific params type for the manager.
-type ManagerParams = execution.Params[Message, Message]
+// Params is the runtime-specific params type.
+type Params = execution.Params[Message, Message]
 
-// Manager is the runtime-specific type for the manager.
-type Manager = execution.Manager[Message, Message]
+// Dispatcher is the runtime-specific dispatcher type.
+type Dispatcher = execution.Dispatcher[Message, Message]
 
 // Config is the runtime-specific type for the config.
 type Config = execution.Config[Message, Message]
 
 // EvaluationRuntime is a runtime that uses the execution manager.
 type EvaluationRuntime struct {
-	manager Manager
+	dispatcher Dispatcher
 
 	log *zap.Logger
 }
@@ -48,7 +49,7 @@ type RuntimeParams struct {
 
 // NewRuntime creates a new runtime.
 func NewRuntime(params RuntimeParams) (Runtime, error) {
-	manager, err := execution.NewManager(ManagerParams{
+	dispatcher, err := execution.NewDispatcher(Params{
 		Context: params.Context,
 		Config:  params.Config,
 		Log:     params.Log,
@@ -58,15 +59,12 @@ func NewRuntime(params RuntimeParams) (Runtime, error) {
 	}
 
 	return &EvaluationRuntime{
-		manager: manager,
-		log:     params.Log.Named("runtime"),
+		dispatcher: dispatcher,
+		log:        params.Log.Named("runtime"),
 	}, nil
 }
 
-func NewLifecycleRuntime(
-	params RuntimeParams,
-	lc fx.Lifecycle,
-) (Runtime, error) {
+func NewLifecycleRuntime(params RuntimeParams, lc fx.Lifecycle) (Runtime, error) {
 	r, err := NewRuntime(params)
 	if err != nil {
 		return nil, err
@@ -81,14 +79,14 @@ func NewLifecycleRuntime(
 	return r, nil
 }
 
-func (r *EvaluationRuntime) Handle(
-	ctx context.Context,
-	message Message,
-) (Message, error) {
-	return r.manager.Send(ctx, message)
+func (r *EvaluationRuntime) Start(ctx context.Context) error {
+	return r.dispatcher.Start(ctx)
 }
 
-func (r *EvaluationRuntime) Shutdown(context.Context) error {
-	r.manager.Shutdown()
-	return nil
+func (r *EvaluationRuntime) Handle(ctx context.Context, message Message) (Message, error) {
+	return r.dispatcher.Send(ctx, message)
+}
+
+func (r *EvaluationRuntime) Shutdown(ctx context.Context) error {
+	return r.dispatcher.Shutdown(ctx)
 }

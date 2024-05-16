@@ -1,4 +1,4 @@
-package execution
+package dispatcher
 
 import (
 	"context"
@@ -9,24 +9,14 @@ import (
 	"go.uber.org/zap"
 )
 
-type Manager[I, O any] interface {
-	// Send sends data to a supervisor and returns the result
-	Send(ctx context.Context, data I) (O, error)
-
-	// Shutdown stops the manager and waits for all workers to finish.
-	Shutdown()
-}
-
-type WorkerManager[I, O any] struct {
+type PooledDispatcher[I, O any] struct {
 	pool *puddle.Pool[supervisor.Supervisor[I, O]]
 	log  *zap.Logger
 }
 
-var _ Manager[any, any] = (*WorkerManager[any, any])(nil)
+var _ Dispatcher[any, any] = (*PooledDispatcher[any, any])(nil)
 
-type SupervisorFactory[I, O any] func(supervisor.Params[I, O]) (supervisor.Supervisor[I, O], error)
-
-type Config[I, O any] struct {
+type PooledDispatcherConfig[I, O any] struct {
 	// MaxWorkers is the maximum number of concurrent workers
 	MaxWorkers int `conf:"max_workers"`
 
@@ -34,22 +24,22 @@ type Config[I, O any] struct {
 	Supervisor supervisor.Config[I, O] `conf:"supervisor,squash"`
 }
 
-type Params[I, O any] struct {
-	// Context is the context to use for the manager
+type PooledDispatcherParams[I, O any] struct {
+	// Context is the context to use for the dispatcher
 	Context context.Context
 
-	// Config is the config for the manager and the underlying supervisors
-	Config Config[I, O]
+	// Config is the config for the dispatcher and the underlying supervisors
+	Config PooledDispatcherConfig[I, O]
 
 	// SupervisorFactory is the factory function to create a new supervisor
 	SupervisorFactory SupervisorFactory[I, O]
 
-	// Log is the logger to use for the manager
+	// Log is the logger to use for the dispatcher
 	Log *zap.Logger
 }
 
-func NewManager[I, O any](params Params[I, O]) (*WorkerManager[I, O], error) {
-	log := params.Log.Named("manager")
+func NewPooledDispatcher[I, O any](params PooledDispatcherParams[I, O]) (Dispatcher[I, O], error) {
+	log := params.Log.Named("dispatcher")
 
 	if params.SupervisorFactory == nil {
 		params.SupervisorFactory = defaultSupervisorFactory
@@ -60,13 +50,18 @@ func NewManager[I, O any](params Params[I, O]) (*WorkerManager[I, O], error) {
 		return nil, err
 	}
 
-	return &WorkerManager[I, O]{
+	return &PooledDispatcher[I, O]{
 		pool: pool,
 		log:  log,
 	}, nil
 }
 
-func (m *WorkerManager[I, O]) Send(ctx context.Context, data I) (O, error) {
+func (m *PooledDispatcher[I, O]) Start(context.Context) error {
+	// starting the pool is a no-op
+	return nil
+}
+
+func (m *PooledDispatcher[I, O]) Send(ctx context.Context, data I) (O, error) {
 
 	m.log.Debug("sending message, acquiring supervisor from pool")
 
@@ -91,7 +86,7 @@ func (m *WorkerManager[I, O]) Send(ctx context.Context, data I) (O, error) {
 	return res, nil
 }
 
-func (m *WorkerManager[I, O]) sendToSupervisor(
+func (m *PooledDispatcher[I, O]) sendToSupervisor(
 	ctx context.Context,
 	data I,
 	resource *puddle.Resource[supervisor.Supervisor[I, O]],
@@ -156,16 +151,17 @@ func (m *WorkerManager[I, O]) sendToSupervisor(
 	return res.Data, nil
 }
 
-// Shutdown stops the manager and waits for all workers to finish.
-func (m *WorkerManager[I, O]) Shutdown() {
-	m.log.Debug("shutting down manager")
+// Shutdown stops the dispatcher and waits for all workers to finish.
+func (m *PooledDispatcher[I, O]) Shutdown(context.Context) error {
+	m.log.Debug("shutting down dispatcher")
 	m.pool.Close()
+	return nil
 }
 
 // MARK: - Pool
 
-func createPool[I, O any](params Params[I, O]) (*puddle.Pool[supervisor.Supervisor[I, O]], error) {
-	log := params.Log.Named("manager_pool")
+func createPool[I, O any](params PooledDispatcherParams[I, O]) (*puddle.Pool[supervisor.Supervisor[I, O]], error) {
+	log := params.Log.Named("dispatcher_pool")
 
 	constructor := func(ctx context.Context) (supervisor.Supervisor[I, O], error) {
 		sv, err := params.SupervisorFactory(supervisor.Params[I, O]{
@@ -213,8 +209,4 @@ func createPool[I, O any](params Params[I, O]) (*puddle.Pool[supervisor.Supervis
 		Destructor:  destructor,
 		MaxSize:     int32(params.Config.MaxWorkers),
 	})
-}
-
-func defaultSupervisorFactory[I, O any](params supervisor.Params[I, O]) (supervisor.Supervisor[I, O], error) {
-	return supervisor.New(params)
 }

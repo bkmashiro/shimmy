@@ -20,11 +20,11 @@ packages:
     interfaces:
       Adapter:
       Supervisor:
-  github.com/lambda-feedback/shimmy/internal/execution:
+  github.com/lambda-feedback/shimmy/internal/execution/dispatcher:
     config:
       outpkg: "{{.PackageName}}"
       inpackage: True
       dir: "{{.InterfaceDir}}"
     interfaces:
-      Manager:
+      Dispatcher:
 # testonly: True

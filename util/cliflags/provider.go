@@ -55,8 +55,6 @@ func Provider(ctx *cli.Context, delim string, cb func(string) string) *CLIFlags 
 		mp = maps.Unflatten(mp, delim)
 	}
 
-	fmt.Printf("mp: %v\n", mp)
-
 	return &CLIFlags{mp: mp}
 }
 

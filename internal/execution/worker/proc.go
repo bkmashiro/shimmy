@@ -3,6 +3,7 @@ package worker
 import (
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"syscall"
 	"time"
@@ -24,13 +25,13 @@ type proc struct {
 func startProc(config StartConfig, log *zap.Logger) (*proc, error) {
 	cmd := exec.Command(config.Cmd, config.Args...)
 
+	env := os.Environ()
 	if config.Env != nil {
-		env := make([]string, 0, len(config.Env))
 		for k, v := range config.Env {
 			env = append(env, fmt.Sprintf("%s=%s", k, v))
 		}
-		cmd.Env = env
 	}
+	cmd.Env = env
 
 	if config.Cwd != "" {
 		cmd.Dir = config.Cwd

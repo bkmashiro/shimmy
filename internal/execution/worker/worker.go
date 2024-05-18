@@ -108,8 +108,14 @@ func (w *ProcessWorker[I, O]) Start(ctx context.Context, config StartConfig) err
 		// wait for stderr to be read
 		w.stderrWg.Wait()
 
+		// get the exit event
+		evt := getExitEvent(err, w.stderr.String())
+
+		// log the exit event
+		w.log.Debug("process exited", zap.Any("evt", evt))
+
 		// send the exit event to the channel
-		w.exitChan <- getExitEvent(err, w.stderr.String())
+		w.exitChan <- evt
 
 		// close the exit channel
 		close(w.exitChan)

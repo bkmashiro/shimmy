@@ -54,7 +54,6 @@ func startProc(config StartConfig, log *zap.Logger) (*proc, error) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	log.With(
-		zap.String("cmd", config.Cmd),
 		zap.Strings("args", cmd.Args),
 		zap.String("cwd", cmd.Dir),
 		zap.Strings("env", cmd.Environ()),
@@ -80,6 +79,8 @@ func startProc(config StartConfig, log *zap.Logger) (*proc, error) {
 	go func() {
 		// block until the process exits
 		err := cmd.Wait()
+
+		log.Debug("process exited", zap.Error(err))
 
 		// report the exit error to the caller
 		process.termination <- err

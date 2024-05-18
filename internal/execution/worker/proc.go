@@ -22,6 +22,8 @@ type proc struct {
 }
 
 func startProc(config StartConfig, log *zap.Logger) (*proc, error) {
+	log = log.Named("proc")
+
 	cmd := exec.Command(config.Cmd, config.Args...)
 
 	env := os.Environ()
@@ -51,12 +53,19 @@ func startProc(config StartConfig, log *zap.Logger) (*proc, error) {
 
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
+	log.With(
+		zap.String("cmd", config.Cmd),
+		zap.Strings("args", cmd.Args),
+		zap.String("cwd", cmd.Dir),
+		zap.Strings("env", cmd.Environ()),
+	).Debug("starting process")
+
 	err = cmd.Start()
 	if err != nil {
 		return nil, err
 	}
 
-	log = log.Named("proc").With(zap.Int("pid", cmd.Process.Pid))
+	log = log.With(zap.Int("pid", cmd.Process.Pid))
 
 	process := &proc{
 		pid:         cmd.Process.Pid,

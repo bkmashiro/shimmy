@@ -119,7 +119,7 @@ func (p *proc) halt(signal syscall.Signal, timeout time.Duration) error {
 		log.Error("close stdin failed", zap.Error(err))
 	}
 
-	log.Info("sending signal")
+	log.Debug("sending signal")
 
 	// best effort, ignore errors
 	if err := p.sendKillSignal(signal); err != nil {

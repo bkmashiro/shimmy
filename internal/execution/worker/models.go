@@ -25,7 +25,7 @@ type StartConfig struct {
 
 	// Env is a map of environment variables
 	// to set when running the command
-	Env map[string]string `conf:"env"`
+	Env []string `conf:"env"`
 }
 
 type StopConfig struct {

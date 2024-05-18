@@ -76,8 +76,8 @@ func TestFileAdapter_Send(t *testing.T) {
 	// for the adapter to succeed, the worker process must write to
 	// the response file before exiting. we mock this behaviour here.
 	w.EXPECT().Start(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, sp worker.StartConfig) error {
-		data, _ := os.ReadFile(sp.Env["REQUEST_FILE_NAME"])
-		_ = os.WriteFile(sp.Env["RESPONSE_FILE_NAME"], data, os.ModeAppend)
+		data, _ := os.ReadFile(sp.Args[len(sp.Args)-2])
+		_ = os.WriteFile(sp.Args[len(sp.Args)-1], data, os.ModeAppend)
 		return nil
 	})
 	w.EXPECT().WaitFor(mock.Anything, params.Timeout).Return(worker.ExitEvent{}, nil)

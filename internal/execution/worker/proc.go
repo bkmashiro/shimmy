@@ -1,7 +1,6 @@
 package worker
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -27,9 +26,7 @@ func startProc(config StartConfig, log *zap.Logger) (*proc, error) {
 
 	env := os.Environ()
 	if config.Env != nil {
-		for k, v := range config.Env {
-			env = append(env, fmt.Sprintf("%s=%s", k, v))
-		}
+		env = append(env, config.Env...)
 	}
 	cmd.Env = env
 

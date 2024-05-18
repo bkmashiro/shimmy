@@ -89,13 +89,16 @@ func (a *fileAdapter[I, O]) Send(
 	// append req and res file names to worker arguments
 	startParams.Args = append(startParams.Args, reqFile.Name(), resFile.Name())
 
+	// ensure env is not nil
 	if startParams.Env == nil {
-		startParams.Env = make(map[string]string)
+		startParams.Env = make([]string, 0, 2)
 	}
 
 	// append req and res file names to worker env
-	startParams.Env["REQUEST_FILE_NAME"] = reqFile.Name()
-	startParams.Env["RESPONSE_FILE_NAME"] = resFile.Name()
+	startParams.Env = append(startParams.Env,
+		"REQUEST_FILE_NAME="+reqFile.Name(),
+		"RESPONSE_FILE_NAME="+resFile.Name(),
+	)
 
 	a.log.Debug("starting worker")
 

@@ -1,22 +1,20 @@
 package worker
 
 import (
+	"errors"
 	"io"
 	"os"
 	"os/exec"
 	"syscall"
-	"time"
 
 	"go.uber.org/zap"
 )
 
 type proc struct {
-	pid         int
-	termination chan error
-	done        chan struct{}
-	stdout      io.ReadCloser
-	stderr      io.ReadCloser
-	stdin       io.WriteCloser
+	cmd    *exec.Cmd
+	stdout io.ReadCloser
+	stderr io.ReadCloser
+	stdin  io.WriteCloser
 
 	log *zap.Logger
 }
@@ -67,108 +65,61 @@ func startProc(config StartConfig, log *zap.Logger) (*proc, error) {
 	log = log.With(zap.Int("pid", cmd.Process.Pid))
 
 	process := &proc{
-		pid:         cmd.Process.Pid,
-		termination: make(chan error),
-		done:        make(chan struct{}),
-		stdout:      stdout,
-		stderr:      stderr,
-		stdin:       stdin,
-		log:         log,
+		cmd:    cmd,
+		stdout: stdout,
+		stderr: stderr,
+		stdin:  stdin,
+		log:    log,
 	}
-
-	go func() {
-		// block until the process exits
-		err := cmd.Wait()
-
-		log.Debug("process exited", zap.Error(err))
-
-		// report the exit error to the caller
-		process.termination <- err
-
-		// close the termination channel
-		close(process.termination)
-
-		// close the done channel
-		close(process.done)
-	}()
 
 	return process, nil
 }
 
-func (p *proc) Terminate(timeout time.Duration) error {
-	return p.halt(syscall.SIGTERM, timeout)
+func (p *proc) Terminate() error {
+	return p.halt(syscall.SIGTERM)
 }
 
-func (p *proc) Kill(timeout time.Duration) error {
-	return p.halt(syscall.SIGKILL, timeout)
+func (p *proc) Kill() error {
+	return p.halt(syscall.SIGKILL)
 }
 
-func (p *proc) halt(signal syscall.Signal, timeout time.Duration) error {
-	log := p.log.With(zap.Stringer("signal", signal))
-
-	select {
-	case <-p.done:
-		log.Debug("process already terminated")
-		return nil
-	default:
-		// continue
+func (p *proc) halt(signal syscall.Signal) error {
+	if p.cmd == nil || p.cmd.Process == nil {
+		return errors.New("process is not running")
 	}
+
+	log := p.log.With(zap.Stringer("signal", signal))
 
 	// close stdin before killing the process, to
 	// avoid the process hanging on input
 	if err := p.stdin.Close(); err != nil {
-		log.Error("close stdin failed", zap.Error(err))
+		log.Warn("close stdin failed", zap.Error(err))
 	}
-
-	log.Debug("sending signal")
 
 	// best effort, ignore errors
 	if err := p.sendKillSignal(signal); err != nil {
-		log.Error("stop failed", zap.Error(err))
+		log.Warn("sending signal failed", zap.Error(err))
 	}
 
-	return p.waitForTermination(timeout)
-}
-
-func (p *proc) waitForTermination(timeout time.Duration) error {
-	// if timeout is < 0, don't wait for the process to exit
-	if timeout < 0 {
-		return nil
-	}
-
-	// if timeout is 0, wait indefinitely
-	if timeout == 0 {
-		<-p.done
-		return nil
-	}
-
-	// block until either the child process exits
-	// (w.done is closed) or the timeout is reached
-	select {
-	case <-p.done:
-		return nil
-	case <-time.After(timeout):
-		return ErrKillTimeout
-	}
+	return nil
 }
 
 // Wait waits for the process to exit. The method blocks until the process exits.
 // The method returns an error if the process exits with a non-zero exit code.
 func (p *proc) Wait() error {
-	return <-p.termination
-}
+	if p.cmd == nil {
+		return errors.New("process is not running")
+	}
 
-// Done returns a channel that is closed when the process exits.
-func (p *proc) Done() <-chan struct{} {
-	return p.done
+	return p.cmd.Wait()
 }
 
 func (p *proc) sendKillSignal(signal syscall.Signal) error {
-	if pgid, err := syscall.Getpgid(p.pid); err == nil {
+	if pgid, err := syscall.Getpgid(p.cmd.Process.Pid); err == nil {
 		// Negative pid sends signal to all in process group
 		return syscall.Kill(-pgid, signal)
 	} else {
-		return syscall.Kill(p.pid, signal)
+		return syscall.Kill(p.cmd.Process.Pid, signal)
 	}
 }
 
@@ -179,6 +130,15 @@ func (p *proc) Close() error {
 	}
 
 	return nil
+}
+
+// Pid returns the process ID of the running process.
+func (p *proc) Pid() int {
+	if p.cmd == nil || p.cmd.Process == nil {
+		return 0
+	}
+
+	return p.cmd.Process.Pid
 }
 
 // StdinPipe returns a pipe that will be connected to the

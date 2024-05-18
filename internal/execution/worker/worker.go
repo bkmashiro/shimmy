@@ -47,7 +47,10 @@ type Worker[I, O any] interface {
 type ProcessWorker[I, O any] struct {
 	processLock sync.Mutex
 	process     *proc
-	exitChan    chan ExitEvent
+
+	wg   sync.WaitGroup
+	done chan struct{}
+	exit chan ExitEvent
 
 	stderr   bytes.Buffer
 	stderrWg sync.WaitGroup
@@ -60,8 +63,9 @@ type ProcessWorker[I, O any] struct {
 
 func NewProcessWorker[I, O any](log *zap.Logger) *ProcessWorker[I, O] {
 	return &ProcessWorker[I, O]{
-		exitChan: make(chan ExitEvent, 1),
-		log:      log.Named("worker"),
+		done: make(chan struct{}),
+		exit: make(chan ExitEvent),
+		log:  log.Named("worker"),
 	}
 }
 
@@ -99,14 +103,20 @@ func (w *ProcessWorker[I, O]) Start(ctx context.Context, config StartConfig) err
 	// set the process
 	w.process = process
 
+	// increment the wait group
+	w.wg.Add(1)
+
 	// wait for the process to terminate,
 	// and send the exit event to the channel
 	go func() {
-		// block until the process exits
-		err := process.Wait()
+		// first, wait for `Wait` to be called
+		w.wg.Wait()
 
 		// wait for stderr to be read
 		w.stderrWg.Wait()
+
+		// block until the process exits
+		err := process.Wait()
 
 		// get the exit event
 		evt := getExitEvent(err, w.stderr.String())
@@ -119,21 +129,25 @@ func (w *ProcessWorker[I, O]) Start(ctx context.Context, config StartConfig) err
 		).Debug("process exited")
 
 		// send the exit event to the channel
-		w.exitChan <- evt
+		w.exit <- evt
 
 		// close the exit channel
-		close(w.exitChan)
+		close(w.exit)
+
+		// close the done channel
+		close(w.done)
 	}()
 
 	// wait for the context to be cancelled,
 	// and terminate the process.
 	go func() {
 		select {
-		case <-process.Done():
+		case <-w.done:
 			// the process has terminated, do nothing
 		case <-ctx.Done():
 			// kill the process without further ado
-			process.Kill(-1)
+			w.log.Debug("context cancelled, killing process")
+			process.Kill()
 		}
 	}()
 
@@ -145,7 +159,7 @@ func (w *ProcessWorker[I, O]) Start(ctx context.Context, config StartConfig) err
 		// read from stderr and save it for later use
 		_, err := io.Copy(&w.stderr, process.StderrPipe())
 		if err != nil && err != io.EOF {
-			w.log.Error("failed to read from stderr", zap.Error(err))
+			w.log.Warn("failed to read from stderr", zap.Error(err))
 		}
 	}()
 
@@ -156,10 +170,13 @@ func (w *ProcessWorker[I, O]) Start(ctx context.Context, config StartConfig) err
 // exits. The method returns an ExitEvent object that contains the exit status of
 // the process. If the process is already terminated, the method returns immediately.
 func (w *ProcessWorker[I, O]) Wait(ctx context.Context) (ExitEvent, error) {
+	// decrement the wait group to wait for the process to exit
+	w.wg.Done()
+
 	select {
 	case <-ctx.Done():
 		return ExitEvent{}, ctx.Err()
-	case exitEvent := <-w.exitChan:
+	case exitEvent := <-w.exit:
 		return exitEvent, nil
 	}
 }
@@ -189,7 +206,7 @@ func (w *ProcessWorker[I, O]) WaitFor(
 // The method returns immediately, without waiting for the process to stop.
 func (w *ProcessWorker[I, O]) Kill() error {
 	if process := w.acquireProcess(); process != nil {
-		return process.Kill(-1)
+		return process.Kill()
 	}
 
 	return ErrWorkerNotStarted
@@ -199,7 +216,7 @@ func (w *ProcessWorker[I, O]) Kill() error {
 // The method returns immediately, without waiting for the process to stop.
 func (w *ProcessWorker[I, O]) Terminate() error {
 	if process := w.acquireProcess(); process != nil {
-		return process.Terminate(-1)
+		return process.Terminate()
 	}
 
 	return ErrWorkerNotStarted
@@ -281,7 +298,7 @@ func (w *ProcessWorker[I, O]) Write(ctx context.Context, data I) error {
 }
 
 func (w *ProcessWorker[I, O]) writeJsonStdin(
-	ctx context.Context,
+	_ context.Context,
 	process *proc,
 	data I,
 ) (int, error) {
@@ -323,12 +340,6 @@ func (w *ProcessWorker[I, O]) Send(
 		return result, err
 	}
 
-	if params.CloseAfterSend {
-		if err := process.Close(); err != nil {
-			return result, err
-		}
-	}
-
 	msg, err := w.readJsonStdout(ctx, process, params.Timeout)
 	if err != nil {
 		return result, err
@@ -338,12 +349,19 @@ func (w *ProcessWorker[I, O]) Send(
 		return result, fmt.Errorf("unexpected message id: expected %d, got %d", msgId, msg.ID)
 	}
 
+	// TODO: refactor
+	if params.CloseAfterSend {
+		if err := process.Close(); err != nil {
+			return result, err
+		}
+	}
+
 	return msg.Data, nil
 }
 
 func (w *ProcessWorker[I, O]) Pid() int {
 	if process := w.acquireProcess(); process != nil {
-		return process.pid
+		return process.Pid()
 	}
 
 	return 0

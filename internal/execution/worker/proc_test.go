@@ -3,7 +3,6 @@ package worker
 import (
 	"os/exec"
 	"testing"
-	"time"
 
 	"github.com/lambda-feedback/shimmy/util"
 	"github.com/stretchr/testify/assert"
@@ -11,57 +10,45 @@ import (
 )
 
 func TestProc_Start_IsAlive(t *testing.T) {
-	p, err := startProc(StartConfig{
-		Cmd: "cat",
-	}, zap.NewNop())
+	p, err := startProc(StartConfig{Cmd: "cat"}, zap.NewNop())
 	assert.NoError(t, err)
 
-	defer p.Terminate(1 * time.Second)
-
-	// give the process some time to start
-	time.Sleep(10 * time.Millisecond)
+	defer p.Terminate()
 
 	// the process should be started
-	assert.Equal(t, true, util.IsProcessAlive(p.pid))
+	assert.Equal(t, true, util.IsProcessAlive(p.Pid()))
 }
 
-func TestProc_Terminate_KillsProcess(t *testing.T) {
-	p, err := startProc(StartConfig{
-		Cmd: "cat",
-	}, zap.NewNop())
+func TestProc_Wait_WaitsForProcessToExit(t *testing.T) {
+	p, err := startProc(StartConfig{Cmd: "echo"}, zap.NewNop())
 	assert.NoError(t, err)
 
-	p.Terminate(1 * time.Second)
+	err = p.Wait()
+	assert.NoError(t, err)
 
-	// give the process some time to terminate
-	time.Sleep(10 * time.Millisecond)
-
-	// the process should be killed
-	assert.Equal(t, false, util.IsProcessAlive(p.pid))
+	// the process should be started
+	assert.Equal(t, false, util.IsProcessAlive(p.Pid()))
 }
 
 func TestProc_Terminate_SendsTerminationSignal(t *testing.T) {
-	p, err := startProc(StartConfig{
-		Cmd: "cat",
-	}, zap.NewNop())
+	p, err := startProc(StartConfig{Cmd: "cat"}, zap.NewNop())
 	assert.NoError(t, err)
 
-	p.Terminate(-1)
+	err = p.Terminate()
+	assert.NoError(t, err)
 
-	select {
-	case <-time.After(1 * time.Second):
-		t.Fatal("timeout")
-	case err := <-p.termination:
-		if err, ok := err.(*exec.ExitError); ok {
-			// -1 means the process was killed by a signal
-			assert.Equal(t, -1, err.ExitCode())
-		} else {
-			t.Fatal("unexpected error")
-		}
+	err = p.Wait()
+	assert.Error(t, err)
+
+	if err, ok := err.(*exec.ExitError); ok {
+		// -1 means the process was killed by a signal
+		assert.Equal(t, -1, err.ExitCode())
+	} else {
+		t.Fatal("unexpected error")
 	}
 
 	// the process should be killed
-	assert.Equal(t, false, util.IsProcessAlive(p.pid))
+	assert.Equal(t, false, util.IsProcessAlive(p.Pid()))
 }
 
 func TestProc_ExitsWithFailure_ReturnsError(t *testing.T) {
@@ -71,10 +58,12 @@ func TestProc_ExitsWithFailure_ReturnsError(t *testing.T) {
 	}, zap.NewNop())
 	assert.NoError(t, err)
 
-	select {
-	case <-time.After(1 * time.Second):
-		t.Fatal("timeout")
-	case err := <-p.termination:
-		assert.NotNil(t, err)
+	err = p.Wait()
+	assert.Error(t, err)
+
+	if err, ok := err.(*exec.ExitError); ok {
+		assert.Equal(t, 1, err.ExitCode())
+	} else {
+		t.Fatal("unexpected error")
 	}
 }

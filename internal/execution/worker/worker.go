@@ -115,8 +115,17 @@ func (w *ProcessWorker[I, O]) Start(ctx context.Context, config StartConfig) err
 		// wait for stderr to be read
 		w.stderrWg.Wait()
 
+		// capture and output remaining stdout
+		// TODO: remove, only for debugging
+		var buf bytes.Buffer
+		_, err := io.Copy(&buf, process.StdoutPipe())
+		if err != nil && err != io.EOF {
+			w.log.Warn("failed to read from stderr", zap.Error(err))
+		}
+		w.log.Debug("stdout", zap.String("data", buf.String()))
+
 		// block until the process exits
-		err := process.Wait()
+		err = process.Wait()
 
 		// get the exit event
 		evt := getExitEvent(err, w.stderr.String())

@@ -23,6 +23,9 @@ type proc struct {
 func startProc(ctx context.Context, config StartConfig, log *zap.Logger) (*proc, error) {
 	log = log.Named("proc")
 
+	// start process w/ context, so the process is SIGKILL'd when
+	// the context is cancelled. This ensures we don't have zombie
+	// processes when normal termination fails.
 	cmd := exec.CommandContext(ctx, config.Cmd, config.Args...)
 
 	env := os.Environ()
@@ -34,6 +37,10 @@ func startProc(ctx context.Context, config StartConfig, log *zap.Logger) (*proc,
 	if config.Cwd != "" {
 		cmd.Dir = config.Cwd
 	}
+
+	// TODO: we open all pipes here. make sure to read from all of them,
+	// as we could run into deadlocks otherwise, if the system's stdout
+	// or stderr buffers run full.
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

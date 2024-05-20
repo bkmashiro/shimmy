@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -48,9 +49,7 @@ type ProcessWorker[I, O any] struct {
 	processLock sync.Mutex
 	process     *proc
 
-	wait     chan struct{}
-	waitOnce sync.Once
-
+	wait chan struct{}
 	done chan struct{}
 	exit chan ExitEvent
 
@@ -165,11 +164,17 @@ func (w *ProcessWorker[I, O]) Start(ctx context.Context, config StartConfig) err
 // Wait waits for the worker process to exit. The method blocks until the process
 // exits. The method returns an ExitEvent object that contains the exit status of
 // the process. If the process is already terminated, the method returns immediately.
+//
+// Any of `Wait` or `WaitFor` are intended to be called only once. Subsequent calls
+// will return an error.
 func (w *ProcessWorker[I, O]) Wait(ctx context.Context) (ExitEvent, error) {
 	// close the wait channel to signal that `Wait` has been called
-	w.waitOnce.Do(func() {
+	select {
+	case <-w.wait:
+		return ExitEvent{}, errors.New("wait has already been called")
+	default:
 		close(w.wait)
-	})
+	}
 
 	select {
 	case <-ctx.Done():
@@ -182,6 +187,9 @@ func (w *ProcessWorker[I, O]) Wait(ctx context.Context) (ExitEvent, error) {
 // WaitFor waits for the worker process to exit. It blocks until the process exits
 // or the timeout is reached. The method returns an ExitEvent that contains the exit
 // status. If the process is already terminated, the method returns immediately.
+//
+// Any of `Wait` or `WaitFor` are intended to be called only once. Subsequent calls
+// will return an error.
 func (w *ProcessWorker[I, O]) WaitFor(
 	ctx context.Context,
 	deadline time.Duration,

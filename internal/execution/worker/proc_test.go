@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"os/exec"
 	"testing"
 
@@ -10,7 +11,7 @@ import (
 )
 
 func TestProc_Start_IsAlive(t *testing.T) {
-	p, err := startProc(StartConfig{Cmd: "cat"}, zap.NewNop())
+	p, err := startProc(context.Background(), StartConfig{Cmd: "cat"}, zap.NewNop())
 	assert.NoError(t, err)
 
 	defer p.Terminate()
@@ -20,7 +21,7 @@ func TestProc_Start_IsAlive(t *testing.T) {
 }
 
 func TestProc_Wait_WaitsForProcessToExit(t *testing.T) {
-	p, err := startProc(StartConfig{Cmd: "echo"}, zap.NewNop())
+	p, err := startProc(context.Background(), StartConfig{Cmd: "echo"}, zap.NewNop())
 	assert.NoError(t, err)
 
 	err = p.Wait()
@@ -31,7 +32,7 @@ func TestProc_Wait_WaitsForProcessToExit(t *testing.T) {
 }
 
 func TestProc_Terminate_SendsTerminationSignal(t *testing.T) {
-	p, err := startProc(StartConfig{Cmd: "cat"}, zap.NewNop())
+	p, err := startProc(context.Background(), StartConfig{Cmd: "cat"}, zap.NewNop())
 	assert.NoError(t, err)
 
 	err = p.Terminate()
@@ -52,7 +53,7 @@ func TestProc_Terminate_SendsTerminationSignal(t *testing.T) {
 }
 
 func TestProc_ExitsWithFailure_ReturnsError(t *testing.T) {
-	p, err := startProc(StartConfig{
+	p, err := startProc(context.Background(), StartConfig{
 		Cmd:  "sh",
 		Args: []string{"-c", "exit 1"},
 	}, zap.NewNop())

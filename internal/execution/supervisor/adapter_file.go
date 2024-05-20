@@ -133,11 +133,9 @@ func (a *fileAdapter[I, O]) Stop(
 	ctx context.Context,
 	params worker.StopConfig,
 ) (WaitFunc, error) {
-	if a.worker == nil {
-		return nil, errors.New("no worker provided")
-	}
+	// for fileio, we already stopped the worker, as we do need to wait
+	// for the process to finish in order to read the response data.
+	// therefore, we don't need to do anything here.
 
-	a.log.Debug("stopping worker", zap.Any("params", params))
-
-	return stopWorker(ctx, a.worker, params)
+	return noopWaitFunc, nil
 }

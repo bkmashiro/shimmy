@@ -48,7 +48,9 @@ type ProcessWorker[I, O any] struct {
 	processLock sync.Mutex
 	process     *proc
 
-	wg   sync.WaitGroup
+	wait     chan struct{}
+	waitOnce sync.Once
+
 	done chan struct{}
 	exit chan ExitEvent
 
@@ -63,6 +65,7 @@ type ProcessWorker[I, O any] struct {
 
 func NewProcessWorker[I, O any](log *zap.Logger) *ProcessWorker[I, O] {
 	return &ProcessWorker[I, O]{
+		wait: make(chan struct{}),
 		done: make(chan struct{}),
 		exit: make(chan ExitEvent),
 		log:  log.Named("worker"),
@@ -95,7 +98,7 @@ func (w *ProcessWorker[I, O]) Start(ctx context.Context, config StartConfig) err
 	}
 
 	// start the process
-	process, err := startProc(config, w.log)
+	process, err := startProc(ctx, config, w.log)
 	if err != nil {
 		return fmt.Errorf("failed to start process: %w", err)
 	}
@@ -103,14 +106,11 @@ func (w *ProcessWorker[I, O]) Start(ctx context.Context, config StartConfig) err
 	// set the process
 	w.process = process
 
-	// increment the wait group
-	w.wg.Add(1)
-
 	// wait for the process to terminate,
 	// and send the exit event to the channel
 	go func() {
 		// first, wait for `Wait` to be called
-		w.wg.Wait()
+		<-w.wait
 
 		// wait for stderr to be read
 		w.stderrWg.Wait()
@@ -120,7 +120,7 @@ func (w *ProcessWorker[I, O]) Start(ctx context.Context, config StartConfig) err
 		var buf bytes.Buffer
 		_, err := io.Copy(&buf, process.StdoutPipe())
 		if err != nil && err != io.EOF {
-			w.log.Warn("failed to read from stderr", zap.Error(err))
+			w.log.Warn("failed to read from stdout", zap.Error(err))
 		}
 		w.log.Debug("stdout", zap.String("data", buf.String()))
 
@@ -147,19 +147,6 @@ func (w *ProcessWorker[I, O]) Start(ctx context.Context, config StartConfig) err
 		close(w.done)
 	}()
 
-	// wait for the context to be cancelled,
-	// and terminate the process.
-	go func() {
-		select {
-		case <-w.done:
-			// the process has terminated, do nothing
-		case <-ctx.Done():
-			// kill the process without further ado
-			w.log.Debug("context cancelled, killing process")
-			process.Kill()
-		}
-	}()
-
 	// read from stderr in a separate goroutine
 	w.stderrWg.Add(1)
 	go func() {
@@ -179,8 +166,10 @@ func (w *ProcessWorker[I, O]) Start(ctx context.Context, config StartConfig) err
 // exits. The method returns an ExitEvent object that contains the exit status of
 // the process. If the process is already terminated, the method returns immediately.
 func (w *ProcessWorker[I, O]) Wait(ctx context.Context) (ExitEvent, error) {
-	// decrement the wait group to wait for the process to exit
-	w.wg.Done()
+	// close the wait channel to signal that `Wait` has been called
+	w.waitOnce.Do(func() {
+		close(w.wait)
+	})
 
 	select {
 	case <-ctx.Done():

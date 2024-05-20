@@ -217,7 +217,7 @@ func (s *WorkerSupervisor[I, O]) releaseWorker(ctx context.Context) (WaitFunc, e
 	// want to keep the worker alive for future messages
 	if s.persistent {
 		s.log.Debug("persistent worker, not releasing")
-		return noWaitFunc, nil
+		return noopWaitFunc, nil
 	}
 
 	s.log.Debug("releasing transient worker")
@@ -232,7 +232,7 @@ func (s *WorkerSupervisor[I, O]) terminateWorker(ctx context.Context) (WaitFunc,
 	// if there is no worker, we have nothing to release
 	if s.worker == nil {
 		s.log.Debug("no worker to release")
-		return noWaitFunc, nil
+		return noopWaitFunc, nil
 	}
 
 	// ensure we set the worker to nil
@@ -259,4 +259,4 @@ func (s *WorkerSupervisor[I, O]) bootWorker(ctx context.Context) (Adapter[I, O],
 	return worker, nil
 }
 
-var noWaitFunc = func() error { return nil }
+var noopWaitFunc = func() error { return nil }

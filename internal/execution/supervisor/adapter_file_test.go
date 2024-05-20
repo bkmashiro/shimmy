@@ -23,7 +23,7 @@ func createFileAdapter(t *testing.T) (*fileAdapter[any, any], *worker.MockWorker
 	return adapter, worker
 }
 
-func TestFileAdapter_Start(t *testing.T) {
+func TestFileAdapter_Start_DoesNotStartWorker(t *testing.T) {
 	a, w := createFileAdapter(t)
 
 	err := a.Start(context.Background(), worker.StartConfig{})
@@ -32,38 +32,13 @@ func TestFileAdapter_Start(t *testing.T) {
 	w.AssertNotCalled(t, "Start")
 }
 
-func TestFileAdapter_Stop(t *testing.T) {
+func TestFileAdapter_Stop_DoesNotStopWorker(t *testing.T) {
 	a, w := createFileAdapter(t)
-
-	w.EXPECT().Terminate().Return(nil)
 
 	_, err := a.Stop(context.Background(), worker.StopConfig{})
 	assert.NoError(t, err)
-}
 
-func TestFileAdapter_Stop_PassesError(t *testing.T) {
-	a, w := createFileAdapter(t)
-
-	w.EXPECT().Terminate().Return(assert.AnError)
-
-	_, err := a.Stop(context.Background(), worker.StopConfig{})
-	assert.ErrorIs(t, err, assert.AnError)
-}
-
-func TestFileAdapter_Stop_WaitFor(t *testing.T) {
-	a, w := createFileAdapter(t)
-
-	ctx := context.Background()
-	params := worker.StopConfig{Timeout: 10}
-
-	w.EXPECT().Terminate().Return(nil)
-	w.EXPECT().WaitFor(mock.Anything, params.Timeout).Return(worker.ExitEvent{}, nil)
-
-	wait, err := a.Stop(ctx, params)
-	assert.NoError(t, err)
-
-	err = wait()
-	assert.NoError(t, err)
+	w.AssertNotCalled(t, "Terminate")
 }
 
 func TestFileAdapter_Send(t *testing.T) {

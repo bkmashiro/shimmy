@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -19,10 +20,10 @@ type proc struct {
 	log *zap.Logger
 }
 
-func startProc(config StartConfig, log *zap.Logger) (*proc, error) {
+func startProc(ctx context.Context, config StartConfig, log *zap.Logger) (*proc, error) {
 	log = log.Named("proc")
 
-	cmd := exec.Command(config.Cmd, config.Args...)
+	cmd := exec.CommandContext(ctx, config.Cmd, config.Args...)
 
 	env := os.Environ()
 	if config.Env != nil {
@@ -57,19 +58,16 @@ func startProc(config StartConfig, log *zap.Logger) (*proc, error) {
 		zap.Strings("env", cmd.Environ()),
 	).Debug("starting process")
 
-	err = cmd.Start()
-	if err != nil {
+	if err = cmd.Start(); err != nil {
 		return nil, err
 	}
-
-	log = log.With(zap.Int("pid", cmd.Process.Pid))
 
 	process := &proc{
 		cmd:    cmd,
 		stdout: stdout,
 		stderr: stderr,
 		stdin:  stdin,
-		log:    log,
+		log:    log.With(zap.Int("pid", cmd.Process.Pid)),
 	}
 
 	return process, nil

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"time"
 
 	"github.com/lambda-feedback/shimmy/internal/execution/worker"
 	"go.uber.org/zap"
@@ -15,7 +16,7 @@ import (
 // communicate with the supervisor process via stdio or sockets.
 type fileAdapter[I, O any] struct {
 	// worker is the worker that is managed by the adapter.
-	worker worker.Worker[any, any]
+	worker worker.Worker
 
 	// startParams is the start configuration that is used to start the worker.
 	// The file adapter does not start the worker during
@@ -26,9 +27,7 @@ type fileAdapter[I, O any] struct {
 
 var _ Adapter[any, any] = (*fileAdapter[any, any])(nil)
 
-func newFileAdapter[I, O any](log *zap.Logger) *fileAdapter[I, O] {
-	worker := worker.NewProcessWorker[any, any](log)
-
+func newFileAdapter[I, O any](worker worker.Worker, log *zap.Logger) *fileAdapter[I, O] {
 	return &fileAdapter[I, O]{
 		worker: worker,
 		log:    log.Named("adapter_file"),
@@ -48,7 +47,7 @@ func (a *fileAdapter[I, O]) Start(ctx context.Context, params worker.StartConfig
 func (a *fileAdapter[I, O]) Send(
 	ctx context.Context,
 	data I,
-	params worker.SendConfig,
+	timeout time.Duration,
 ) (O, error) {
 	var out O
 
@@ -108,9 +107,24 @@ func (a *fileAdapter[I, O]) Send(
 		return out, err
 	}
 
+	// var stdoutWg sync.WaitGroup
+
+	// stdoutWg.Add(1)
+	// go func() {
+	// 	defer stdoutWg.Done()
+
+	// 	// capture stdout
+	// 	var buf bytes.Buffer
+	// 	_, err := io.Copy(&buf, )
+	// 	if err != nil && err != io.EOF {
+	// 		w.log.Warn("failed to read from stdout", zap.Error(err))
+	// 	}
+	// 	w.log.Debug("stdout", zap.String("data", buf.String()))
+	// }()
+
 	// wait for worker to terminate (maybe find another way to read res earlier?)
 	// TODO: investigate use of status returned by `WaitFor`
-	exitEvent, err := a.worker.WaitFor(ctx, params.Timeout)
+	exitEvent, err := a.worker.WaitFor(ctx, timeout)
 	if err != nil {
 		a.log.Debug("error waiting for worker to finish", zap.Error(err))
 		return out, err

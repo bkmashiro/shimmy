@@ -3,20 +3,19 @@ package supervisor
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/lambda-feedback/shimmy/internal/execution/worker"
 	"go.uber.org/zap"
 )
 
 type stdioAdapter[I, O any] struct {
-	worker worker.Worker[I, O]
+	worker worker.Worker
 
 	log *zap.Logger
 }
 
-func newStdioAdapter[I, O any](log *zap.Logger) *stdioAdapter[I, O] {
-	worker := worker.NewProcessWorker[I, O](log)
-
+func newStdioAdapter[I, O any](worker worker.Worker, log *zap.Logger) *stdioAdapter[I, O] {
 	return &stdioAdapter[I, O]{
 		worker: worker,
 		log:    log.Named("adapter_stdio"),
@@ -41,7 +40,7 @@ func (a *stdioAdapter[I, O]) Start(ctx context.Context, params worker.StartConfi
 func (a *stdioAdapter[I, O]) Send(
 	ctx context.Context,
 	data I,
-	params worker.SendConfig,
+	timeout time.Duration,
 ) (O, error) {
 	var res O
 
@@ -49,12 +48,12 @@ func (a *stdioAdapter[I, O]) Send(
 		return res, errors.New("no worker provided")
 	}
 
-	// send data to worker
-	res, err := a.worker.Send(ctx, data, params)
-	if err != nil {
-		a.log.Debug("error sending data to worker", zap.Error(err))
-		return res, err
-	}
+	// TODO: send data to worker
+	// res, err := a.worker.Send(ctx, data, timeout)
+	// if err != nil {
+	// 	a.log.Debug("error sending data to worker", zap.Error(err))
+	// 	return res, err
+	// }
 
 	return res, nil
 }

@@ -32,15 +32,3 @@ type StopConfig struct {
 	// Timeout is the duration to wait for the worker to stop
 	Timeout time.Duration `conf:"timeout"`
 }
-
-type SendConfig struct {
-	// Timeout is the duration to wait for the worker to send a message
-	Timeout time.Duration `conf:"timeout"`
-	// CloseAfterSend indicates whether to close the channel after sending
-	CloseAfterSend bool `conf:"close_after_send"`
-}
-
-type ReadConfig struct {
-	// Timeout is the duration to wait for the worker to send a message
-	Timeout time.Duration `conf:"timeout"`
-}

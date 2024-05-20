@@ -2,7 +2,9 @@ package supervisor
 
 import (
 	"context"
+	"fmt"
 	"sync"
+	"time"
 
 	"github.com/lambda-feedback/shimmy/internal/execution/worker"
 	"go.uber.org/zap"
@@ -31,19 +33,27 @@ type Supervisor[I, O any] interface {
 	Shutdown(ctx context.Context) (WaitFunc, error)
 }
 
+type StartConfig = worker.StartConfig
+
+type StopConfig = worker.StopConfig
+
+type SendConfig struct {
+	Timeout time.Duration
+}
+
 type WorkerSupervisor[I, O any] struct {
 	persistent bool
-	mode       IOInterface
 
 	sendLock sync.Mutex
 
-	worker        Adapter[I, O]
-	workerFactory func(mode IOInterface) (Adapter[I, O], error)
-	workerLock    sync.Mutex
+	createWorker func() (Adapter[I, O], error)
 
-	workerStartParams worker.StartConfig
-	workerStopParams  worker.StopConfig
-	workerSendParams  worker.SendConfig
+	worker     Adapter[I, O]
+	workerLock sync.Mutex
+
+	startParams StartConfig
+	stopParams  StopConfig
+	sendParams  SendConfig
 
 	log *zap.Logger
 }
@@ -71,26 +81,32 @@ type Config[I, O any] struct {
 	// Default is "stdio".
 	Interface IOInterface `conf:"interface"`
 
-	// WorkerStartParams are the parameters to pass to the worker when
+	// StartParams are the parameters to pass to the worker when
 	// starting it. This can be used to pass configuration to the worker.
-	WorkerStartParams worker.StartConfig `conf:"start,squash"`
+	StartParams StartConfig `conf:"start,squash"`
 
-	// WorkerStopParams are the parameters to pass to the worker when
+	// StopParams are the parameters to pass to the worker when
 	// terminating it.
-	WorkerStopParams worker.StopConfig `conf:"stop"`
+	StopParams StopConfig `conf:"stop"`
 
-	// WorkerSendParams are the parameters to pass to the worker when
-	// sending a message to it.
-	WorkerSendParams worker.SendConfig `conf:"send"`
+	// SendParams are the parameters to pass to the worker when
+	// sending a message.
+	SendParams SendConfig `conf:"send"`
 }
+
+type WorkerFactoryFn func(*zap.Logger) (worker.Worker, error)
 
 type Params[I, O any] struct {
 	// Config is the config used to set up the supervisor and its workers.
 	Config Config[I, O]
 
-	// WorkerFactory the a factory function to create a new worker.
-	// This is called when the supervisor needs to boot a new worker.
-	WorkerFactory AdapterFactoryFn[I, O]
+	// AdapterFactory is a factory function to create a new adapter. This
+	// is called when the supervisor needs to create a communication adapter.
+	AdapterFactory AdapterFactoryFn[I, O]
+
+	// WorkerFactory is a factory function to create a new worker. This
+	// is called when the supervisor needs to create a new worker.
+	WorkerFactory WorkerFactoryFn
 
 	// Log is the logger to use for the supervisor
 	Log *zap.Logger
@@ -110,21 +126,34 @@ func New[I, O any](params Params[I, O]) (Supervisor[I, O], error) {
 	}
 
 	if params.WorkerFactory == nil {
-		params.WorkerFactory = defaultAdapterFactory
+		params.WorkerFactory = defaultWorkerFactory
 	}
 
-	workerFactory := func(mode IOInterface) (Adapter[I, O], error) {
-		return params.WorkerFactory(mode, params.Log)
+	if params.AdapterFactory == nil {
+		params.AdapterFactory = defaultAdapterFactory
+	}
+
+	createWorker := func() (Adapter[I, O], error) {
+		worker, err := params.WorkerFactory(params.Log)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create worker: %w", err)
+		}
+
+		adapter, err := params.AdapterFactory(worker, config.Interface, params.Log)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create adapter: %w", err)
+		}
+
+		return adapter, nil
 	}
 
 	return &WorkerSupervisor[I, O]{
-		persistent:        config.Persistent,
-		mode:              config.Interface,
-		workerFactory:     workerFactory,
-		workerStartParams: config.WorkerStartParams,
-		workerStopParams:  config.WorkerStopParams,
-		workerSendParams:  config.WorkerSendParams,
-		log:               params.Log.Named("supervisor"),
+		persistent:   config.Persistent,
+		createWorker: createWorker,
+		startParams:  config.StartParams,
+		stopParams:   config.StopParams,
+		sendParams:   config.SendParams,
+		log:          params.Log.Named("supervisor"),
 	}, nil
 }
 
@@ -138,8 +167,8 @@ func (s *WorkerSupervisor[I, O]) Start(ctx context.Context) error {
 	s.log.Debug("starting persistent worker")
 
 	// otherwise, boot the persistent worker
-	_, err := s.acquireWorker(ctx)
-	if err != nil {
+	if _, err := s.acquireWorker(ctx); err != nil {
+		s.log.Error("error booting worker", zap.Error(err))
 		return err
 	}
 
@@ -160,13 +189,8 @@ func (s *WorkerSupervisor[I, O]) Send(ctx context.Context, data I) (*Result[O], 
 		return nil, err
 	}
 
-	params := s.workerSendParams
-	if !s.persistent {
-		params.CloseAfterSend = true
-	}
-
 	// send data to worker
-	resData, err := worker.Send(ctx, data, params)
+	resData, err := worker.Send(ctx, data, s.sendParams.Timeout)
 	if err != nil {
 		s.log.Debug("error sending data to worker", zap.Error(err))
 	}
@@ -204,7 +228,7 @@ func (s *WorkerSupervisor[I, O]) acquireWorker(ctx context.Context) (Adapter[I, 
 	// boot a new worker
 	worker, err := s.bootWorker(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to boot worker: %w", err)
 	}
 
 	s.worker = worker
@@ -240,23 +264,25 @@ func (s *WorkerSupervisor[I, O]) terminateWorker(ctx context.Context) (WaitFunc,
 		s.worker = nil
 	}()
 
-	return s.worker.Stop(ctx, s.workerStopParams)
+	return s.worker.Stop(ctx, s.stopParams)
 }
 
 func (s *WorkerSupervisor[I, O]) bootWorker(ctx context.Context) (Adapter[I, O], error) {
-	worker, err := s.workerFactory(s.mode)
+	worker, err := s.createWorker()
 	if err != nil {
-		s.log.Debug("error creating worker", zap.Error(err))
-		return nil, err
+		return nil, fmt.Errorf("failed to create worker: %w", err)
 	}
 
-	err = worker.Start(ctx, s.workerStartParams)
+	err = worker.Start(ctx, s.startParams)
 	if err != nil {
-		s.log.Debug("error starting worker", zap.Error(err))
-		return nil, err
+		return nil, fmt.Errorf("failed to start worker: %w", err)
 	}
 
 	return worker, nil
 }
 
 var noopWaitFunc = func() error { return nil }
+
+func defaultWorkerFactory(log *zap.Logger) (worker.Worker, error) {
+	return worker.NewProcessWorker(log), nil
+}

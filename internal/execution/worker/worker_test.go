@@ -1,7 +1,10 @@
 package worker_test
 
 import (
+	"bytes"
 	"context"
+	"io"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -13,7 +16,7 @@ import (
 )
 
 func TestWorker_Start_IsAlive(t *testing.T) {
-	w := worker.NewProcessWorker[any, any](zap.NewNop())
+	w := worker.NewProcessWorker(zap.NewNop())
 
 	err := w.Start(context.Background(), worker.StartConfig{Cmd: "cat"})
 	assert.NoError(t, err)
@@ -26,7 +29,7 @@ func TestWorker_Start_IsAlive(t *testing.T) {
 }
 
 func TestWorker_Start_FailsIfStarted(t *testing.T) {
-	w := worker.NewProcessWorker[any, any](zap.NewNop())
+	w := worker.NewProcessWorker(zap.NewNop())
 
 	startConfig := worker.StartConfig{Cmd: "cat"}
 
@@ -40,7 +43,7 @@ func TestWorker_Start_FailsIfStarted(t *testing.T) {
 }
 
 func TestWorker_Start_FailsIfContextCancelled(t *testing.T) {
-	w := worker.NewProcessWorker[any, any](zap.NewNop())
+	w := worker.NewProcessWorker(zap.NewNop())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -50,7 +53,7 @@ func TestWorker_Start_FailsIfContextCancelled(t *testing.T) {
 }
 
 func TestWorker_TerminatesIfContextCancelled(t *testing.T) {
-	w := worker.NewProcessWorker[any, any](zap.NewNop())
+	w := worker.NewProcessWorker(zap.NewNop())
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -69,7 +72,7 @@ func TestWorker_TerminatesIfContextCancelled(t *testing.T) {
 }
 
 func TestWorker_CapturesStderr(t *testing.T) {
-	w := worker.NewProcessWorker[any, any](zap.NewNop())
+	w := worker.NewProcessWorker(zap.NewNop())
 
 	err := w.Start(context.Background(), worker.StartConfig{
 		Cmd:  "sh",
@@ -87,7 +90,7 @@ func TestWorker_CapturesStderr(t *testing.T) {
 }
 
 func TestWorker_Wait_ReturnsExitEvent(t *testing.T) {
-	w := worker.NewProcessWorker[any, any](zap.NewNop())
+	w := worker.NewProcessWorker(zap.NewNop())
 
 	err := w.Start(context.Background(), worker.StartConfig{Cmd: "echo"})
 	assert.NoError(t, err)
@@ -102,7 +105,7 @@ func TestWorker_Wait_ReturnsExitEvent(t *testing.T) {
 }
 
 func TestWorker_Wait_ReturnsErrorIfContextCancelled(t *testing.T) {
-	w := worker.NewProcessWorker[any, any](zap.NewNop())
+	w := worker.NewProcessWorker(zap.NewNop())
 
 	err := w.Start(context.Background(), worker.StartConfig{Cmd: "cat"})
 	assert.NoError(t, err)
@@ -116,7 +119,7 @@ func TestWorker_Wait_ReturnsErrorIfContextCancelled(t *testing.T) {
 	assert.Error(t, err)
 }
 func TestWorker_Wait_ReturnsErrorIfCalledMultiple(t *testing.T) {
-	w := worker.NewProcessWorker[any, any](zap.NewNop())
+	w := worker.NewProcessWorker(zap.NewNop())
 
 	err := w.Start(context.Background(), worker.StartConfig{Cmd: "cat"})
 	assert.NoError(t, err)
@@ -131,7 +134,7 @@ func TestWorker_Wait_ReturnsErrorIfCalledMultiple(t *testing.T) {
 }
 
 func TestWorker_WaitFor_ReturnsExitEvent(t *testing.T) {
-	w := worker.NewProcessWorker[any, any](zap.NewNop())
+	w := worker.NewProcessWorker(zap.NewNop())
 
 	err := w.Start(context.Background(), worker.StartConfig{Cmd: "echo"})
 	assert.NoError(t, err)
@@ -146,7 +149,7 @@ func TestWorker_WaitFor_ReturnsExitEvent(t *testing.T) {
 }
 
 func TestWorker_WaitFor_ReturnsErrorIfTimeout(t *testing.T) {
-	w := worker.NewProcessWorker[any, any](zap.NewNop())
+	w := worker.NewProcessWorker(zap.NewNop())
 
 	err := w.Start(context.Background(), worker.StartConfig{
 		Cmd:  "sleep",
@@ -161,7 +164,7 @@ func TestWorker_WaitFor_ReturnsErrorIfTimeout(t *testing.T) {
 }
 
 func TestWorker_Kill_KillsProcess(t *testing.T) {
-	w := worker.NewProcessWorker[any, any](zap.NewNop())
+	w := worker.NewProcessWorker(zap.NewNop())
 
 	err := w.Start(context.Background(), worker.StartConfig{Cmd: "cat"})
 	assert.NoError(t, err)
@@ -180,7 +183,7 @@ func TestWorker_Kill_KillsProcess(t *testing.T) {
 }
 
 func TestWorker_Terminate_TerminatesProcess(t *testing.T) {
-	w := worker.NewProcessWorker[any, any](zap.NewNop())
+	w := worker.NewProcessWorker(zap.NewNop())
 
 	err := w.Start(context.Background(), worker.StartConfig{Cmd: "cat"})
 	assert.NoError(t, err)
@@ -199,66 +202,41 @@ func TestWorker_Terminate_TerminatesProcess(t *testing.T) {
 }
 
 func TestWorker_Write_WritesToStdin(t *testing.T) {
-	w := worker.NewProcessWorker[string, string](zap.NewNop())
+	w := worker.NewProcessWorker(zap.NewNop())
 
 	err := w.Start(context.Background(), worker.StartConfig{Cmd: "cat"})
 	assert.NoError(t, err)
 
 	defer w.Terminate()
 
-	// write data
-	err = w.Write(context.Background(), "foobar")
+	input := "foobar"
+
+	_, err = io.Copy(w, strings.NewReader(input))
 	assert.NoError(t, err)
 
-	msg, err := w.Read(context.Background(), worker.ReadConfig{})
+	w.Close()
+
+	var outputBuf bytes.Buffer
+	_, err = io.Copy(&outputBuf, w)
 	assert.NoError(t, err)
 
-	assert.Equal(t, "foobar", msg)
+	assert.Equal(t, input, outputBuf.String())
 }
 
 func TestWorker_Read_ReadsFromStdout(t *testing.T) {
-	w := worker.NewProcessWorker[any, string](zap.NewNop())
+	w := worker.NewProcessWorker(zap.NewNop())
 
 	err := w.Start(context.Background(), worker.StartConfig{
 		Cmd:  "echo",
-		Args: []string{"{\"id\":1,\"data\":\"foobar\"}"},
+		Args: []string{"foobar"},
 	})
 	assert.NoError(t, err)
 
 	defer w.Terminate()
 
-	msg, err := w.Read(context.Background(), worker.ReadConfig{})
+	var outputBuf bytes.Buffer
+	_, err = io.Copy(&outputBuf, w)
 	assert.NoError(t, err)
 
-	assert.Equal(t, "foobar", msg)
-}
-
-func TestWorker_Send_SendsMessage(t *testing.T) {
-	w := worker.NewProcessWorker[string, string](zap.NewNop())
-
-	err := w.Start(context.Background(), worker.StartConfig{Cmd: "cat"})
-	assert.NoError(t, err)
-
-	defer w.Terminate()
-
-	msg, err := w.Send(context.Background(), "foobar", worker.SendConfig{})
-	assert.NoError(t, err)
-
-	assert.Equal(t, "foobar", msg)
-}
-
-func TestWorker_Send_FailsOnIdMismatch(t *testing.T) {
-	w := worker.NewProcessWorker[string, string](zap.NewNop())
-
-	err := w.Start(context.Background(), worker.StartConfig{
-		// sed '1s/0/1/; q' will replace 0 with 1 on the first line and quit
-		Cmd:  "sed",
-		Args: []string{"1s/0/1/; q"},
-	})
-	assert.NoError(t, err)
-
-	defer w.Terminate()
-
-	_, err = w.Send(context.Background(), "foobar", worker.SendConfig{})
-	assert.Error(t, err)
+	assert.Equal(t, "foobar\n", outputBuf.String())
 }

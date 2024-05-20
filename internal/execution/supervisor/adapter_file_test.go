@@ -12,8 +12,8 @@ import (
 	"go.uber.org/zap"
 )
 
-func createFileAdapter(t *testing.T) (*fileAdapter[any, any], *worker.MockWorker[any, any]) {
-	worker := worker.NewMockWorker[any, any](t)
+func createFileAdapter(t *testing.T) (*fileAdapter[any, any], *worker.MockWorker) {
+	worker := worker.NewMockWorker(t)
 
 	adapter := &fileAdapter[any, any]{
 		worker: worker,
@@ -46,7 +46,6 @@ func TestFileAdapter_Send(t *testing.T) {
 
 	ctx := context.Background()
 	data := map[string]any{"foo": "bar"}
-	params := worker.SendConfig{Timeout: 10}
 
 	// for the adapter to succeed, the worker process must write to
 	// the response file before exiting. we mock this behaviour here.
@@ -55,9 +54,9 @@ func TestFileAdapter_Send(t *testing.T) {
 		_ = os.WriteFile(sp.Args[len(sp.Args)-1], data, os.ModeAppend)
 		return nil
 	})
-	w.EXPECT().WaitFor(mock.Anything, params.Timeout).Return(worker.ExitEvent{}, nil)
+	w.EXPECT().WaitFor(mock.Anything, mock.Anything).Return(worker.ExitEvent{}, nil)
 
-	res, err := a.Send(ctx, data, params)
+	res, err := a.Send(ctx, data, 10)
 	assert.NoError(t, err)
 	assert.Equal(t, data, res)
 }
@@ -70,7 +69,7 @@ func TestFileAdapter_Send_ReturnsStartError(t *testing.T) {
 
 	w.EXPECT().Start(ctx, mock.Anything).Return(assert.AnError)
 
-	_, err := a.Send(ctx, data, worker.SendConfig{})
+	_, err := a.Send(ctx, data, 0)
 	assert.ErrorIs(t, err, assert.AnError)
 }
 
@@ -83,7 +82,7 @@ func TestFileAdapter_Send_ReturnsWaitForError(t *testing.T) {
 	w.EXPECT().Start(ctx, mock.Anything).Return(nil)
 	w.EXPECT().WaitFor(ctx, mock.Anything).Return(worker.ExitEvent{}, assert.AnError)
 
-	_, err := a.Send(ctx, data, worker.SendConfig{})
+	_, err := a.Send(ctx, data, 0)
 	assert.ErrorIs(t, err, assert.AnError)
 }
 
@@ -96,7 +95,7 @@ func TestFileAdapter_Send_ReturnsReadError(t *testing.T) {
 	w.EXPECT().Start(ctx, mock.Anything).Return(nil)
 	w.EXPECT().WaitFor(ctx, mock.Anything).Return(worker.ExitEvent{}, nil)
 
-	_, err := a.Send(ctx, data, worker.SendConfig{})
+	_, err := a.Send(ctx, data, 0)
 	assert.ErrorIs(t, err, io.EOF)
 }
 
@@ -106,7 +105,7 @@ func TestFileAdapter_Send_ReturnsInvalidDataError(t *testing.T) {
 	ctx := context.Background()
 
 	// write invalid data to request file
-	res, err := a.Send(ctx, make(chan int), worker.SendConfig{})
+	res, err := a.Send(ctx, make(chan int), 0)
 	assert.Error(t, err)
 	assert.Nil(t, res)
 

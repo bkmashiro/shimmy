@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"time"
 
 	"github.com/lambda-feedback/shimmy/internal/execution/worker"
 	"go.uber.org/zap"
@@ -9,7 +10,7 @@ import (
 
 // AdapterFactoryFn is a type alias for a function that creates an adapter
 // based on the given IO mode.
-type AdapterFactoryFn[I, O any] func(IOInterface, *zap.Logger) (Adapter[I, O], error)
+type AdapterFactoryFn[I, O any] func(worker.Worker, IOInterface, *zap.Logger) (Adapter[I, O], error)
 
 // WaitFunc is a function that can be used to wait for a worker to terminate.
 type WaitFunc func() error
@@ -25,7 +26,7 @@ type Adapter[I, O any] interface {
 	Stop(context.Context, worker.StopConfig) (WaitFunc, error)
 
 	// Send sends the given data to the worker and returns the response.
-	Send(context.Context, I, worker.SendConfig) (O, error)
+	Send(context.Context, I, time.Duration) (O, error)
 }
 
 // MARK: - factory
@@ -33,14 +34,15 @@ type Adapter[I, O any] interface {
 // defaultAdapterFactory is the default adapter factory that creates an adapter
 // based on the given IO mode.
 func defaultAdapterFactory[I, O any](
+	worker worker.Worker,
 	mode IOInterface,
 	log *zap.Logger,
 ) (Adapter[I, O], error) {
 	switch mode {
 	case FileIO:
-		return newFileAdapter[I, O](log), nil
+		return newFileAdapter[I, O](worker, log), nil
 	case StdIO:
-		return newStdioAdapter[I, O](log), nil
+		return newStdioAdapter[I, O](worker, log), nil
 	// case SocketIO:
 	// 	return &socketAdapter[I, O]{log: log}, nil
 	default:
@@ -52,9 +54,9 @@ func defaultAdapterFactory[I, O any](
 
 // stopWorker is a helper function to stop a worker and return a wait function
 // that can be used to wait for the worker to terminate.
-func stopWorker[I, O any](
+func stopWorker(
 	ctx context.Context,
-	w worker.Worker[I, O],
+	w worker.Worker,
 	params worker.StopConfig,
 ) (WaitFunc, error) {
 

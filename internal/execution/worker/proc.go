@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"os/exec"
 	"syscall"
 
@@ -31,8 +32,7 @@ func startProc(
 	// processes when normal termination fails.
 	cmd := exec.CommandContext(ctx, config.Cmd, config.Args...)
 
-	// env := os.Environ()
-	env := []string{}
+	env := os.Environ()
 	if config.Env != nil {
 		env = append(env, config.Env...)
 	}

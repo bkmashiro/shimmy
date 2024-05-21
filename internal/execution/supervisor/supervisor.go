@@ -164,15 +164,15 @@ func New[I, O any](params Params[I, O]) (Supervisor[I, O], error) {
 func (s *WorkerSupervisor[I, O]) Start(ctx context.Context) error {
 	// if the worker is transient, this is a no-op
 	if !s.persistent {
-		s.log.Debug("not starting transient worker")
+		s.log.Debug("start: transient, not booting worker")
 		return nil
 	}
 
-	s.log.Debug("starting persistent worker")
+	s.log.Debug("start: persistent, booting worker")
 
 	// otherwise, boot the persistent worker
 	if _, err := s.acquireWorker(ctx); err != nil {
-		return fmt.Errorf("failed to boot worker: %w", err)
+		return fmt.Errorf("failed to start worker: %w", err)
 	}
 
 	return nil

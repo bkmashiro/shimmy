@@ -65,23 +65,17 @@ func (m *PooledDispatcher[I, O]) Start(context.Context) error {
 
 func (m *PooledDispatcher[I, O]) Send(ctx context.Context, data I) (O, error) {
 
-	m.log.Debug("sending message, acquiring supervisor from pool")
-
 	resource, err := m.pool.Acquire(ctx)
 	if err != nil {
 		var zero O
 		return zero, fmt.Errorf("error acquiring supervisor: %w", err)
 	}
 
-	m.log.Debug("supervisor acquired, sending message")
-
 	res, err := m.sendToSupervisor(ctx, data, resource)
 	if err != nil {
 		var zero O
 		return zero, fmt.Errorf("error sending data: %w", err)
 	}
-
-	m.log.Debug("message sent to supervisor")
 
 	return res, nil
 }
@@ -166,20 +160,14 @@ func createPool[I, O any](
 			return nil, err
 		}
 
-		log.Debug("booting supervisor")
-
 		if err = sv.Start(ctx); err != nil {
 			return nil, err
 		}
-
-		log.Debug("done booting supervisor")
 
 		return sv, nil
 	}
 
 	destructor := func(s supervisor.Supervisor[I, O]) {
-		log.Debug("shutting down supervisor")
-
 		wait, err := s.Shutdown(params.Context)
 		if err != nil {
 			log.Error("error shutting down supervisor", zap.Error(err))
@@ -194,8 +182,6 @@ func createPool[I, O any](
 		if err := wait(); err != nil {
 			log.Error("error waiting for supervisor to shut down", zap.Error(err))
 		}
-
-		log.Debug("supervisor shut down")
 	}
 
 	return puddle.NewPool(&puddle.Config[supervisor.Supervisor[I, O]]{

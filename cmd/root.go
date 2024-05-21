@@ -194,9 +194,7 @@ func createLogger(ctx *cli.Context) (*zap.Logger, error) {
 		return nil, fmt.Errorf("invalid log format: %s", format)
 	}
 
-	config.InitialFields = map[string]any{
-		"app": "shimmy",
-	}
+	config.InitialFields = map[string]any{}
 
 	config.Level = level
 

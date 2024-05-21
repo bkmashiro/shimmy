@@ -116,8 +116,6 @@ func (a *fileAdapter[I, O]) Send(
 		"RESPONSE_FILE_NAME="+resFile.Name(),
 	)
 
-	a.log.Debug("starting worker")
-
 	// start worker with modified args and env
 	if err := a.worker.Start(ctx, startParams); err != nil {
 		return out, fmt.Errorf("error starting process: %w", err)

@@ -11,18 +11,20 @@ import (
 )
 
 type stdioAdapter[I, O any] struct {
+	workerFactory AdapterWorkerFactoryFn
+
 	worker worker.Worker
 
 	log *zap.Logger
 }
 
 func newStdioAdapter[I, O any](
-	worker worker.Worker,
+	workerFactory AdapterWorkerFactoryFn,
 	log *zap.Logger,
 ) *stdioAdapter[I, O] {
 	return &stdioAdapter[I, O]{
-		worker: worker,
-		log:    log.Named("adapter_stdio"),
+		workerFactory: workerFactory,
+		log:           log.Named("adapter_stdio"),
 	}
 }
 
@@ -30,13 +32,21 @@ func (a *stdioAdapter[I, O]) Start(
 	ctx context.Context,
 	params worker.StartConfig,
 ) error {
-	if a.worker == nil {
-		return errors.New("no worker provided")
+	if a.workerFactory == nil {
+		return errors.New("no worker factory provided")
 	}
+
+	// create the worker
+	worker, err := a.workerFactory(ctx, params)
+	if err != nil {
+		return fmt.Errorf("error creating worker: %w", err)
+	}
+
+	a.worker = worker
 
 	// for stdio, we can already start the worker, as we do not need to pass
 	// any additional, message-specific data to the worker via arguments
-	if err := a.worker.Start(ctx, params); err != nil {
+	if err := worker.Start(ctx); err != nil {
 		return fmt.Errorf("error starting worker: %w", err)
 	}
 

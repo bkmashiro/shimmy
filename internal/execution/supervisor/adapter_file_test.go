@@ -12,17 +12,6 @@ import (
 	"go.uber.org/zap"
 )
 
-func createFileAdapter(t *testing.T) (*fileAdapter[any, any], *worker.MockWorker) {
-	worker := worker.NewMockWorker(t)
-
-	adapter := &fileAdapter[any, any]{
-		worker: worker,
-		log:    zap.NewNop(),
-	}
-
-	return adapter, worker
-}
-
 func TestFileAdapter_Start_DoesNotStartWorker(t *testing.T) {
 	a, w := createFileAdapter(t)
 
@@ -42,14 +31,26 @@ func TestFileAdapter_Stop_DoesNotStopWorker(t *testing.T) {
 }
 
 func TestFileAdapter_Send(t *testing.T) {
-	a, w := createFileAdapter(t)
+	w := worker.NewMockWorker(t)
+
+	var sp *worker.StartConfig
+
+	workerFactory := func(ctx context.Context, params worker.StartConfig) (worker.Worker, error) {
+		sp = &params
+		return w, nil
+	}
+
+	a := &fileAdapter[any, any]{
+		workerFactory: workerFactory,
+		log:           zap.NewNop(),
+	}
 
 	ctx := context.Background()
 	data := map[string]any{"foo": "bar"}
 
 	// for the adapter to succeed, the worker process must write to
 	// the response file before exiting. we mock this behaviour here.
-	w.EXPECT().Start(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, sp worker.StartConfig) error {
+	w.EXPECT().Start(mock.Anything).RunAndReturn(func(ctx context.Context) error {
 		data, _ := os.ReadFile(sp.Args[len(sp.Args)-2])
 		_ = os.WriteFile(sp.Args[len(sp.Args)-1], data, os.ModeAppend)
 		return nil
@@ -68,7 +69,7 @@ func TestFileAdapter_Send_ReturnsStartError(t *testing.T) {
 	ctx := context.Background()
 	data := map[string]any{"foo": "bar"}
 
-	w.EXPECT().Start(ctx, mock.Anything).Return(assert.AnError)
+	w.EXPECT().Start(ctx).Return(assert.AnError)
 
 	_, err := a.Send(ctx, data, 0)
 	assert.ErrorIs(t, err, assert.AnError)
@@ -80,7 +81,7 @@ func TestFileAdapter_Send_ReturnsWaitForError(t *testing.T) {
 	ctx := context.Background()
 	data := map[string]any{"foo": "bar"}
 
-	w.EXPECT().Start(ctx, mock.Anything).Return(nil)
+	w.EXPECT().Start(ctx).Return(nil)
 	w.EXPECT().WaitFor(ctx, mock.Anything).Return(worker.ExitEvent{}, assert.AnError)
 
 	_, err := a.Send(ctx, data, 0)
@@ -93,7 +94,7 @@ func TestFileAdapter_Send_ReturnsReadError(t *testing.T) {
 	ctx := context.Background()
 	data := map[string]any{"foo": "bar"}
 
-	w.EXPECT().Start(ctx, mock.Anything).Return(nil)
+	w.EXPECT().Start(ctx).Return(nil)
 	var cell int
 	w.EXPECT().WaitFor(ctx, mock.Anything).Return(worker.ExitEvent{Code: &cell}, nil)
 
@@ -112,4 +113,19 @@ func TestFileAdapter_Send_ReturnsInvalidDataError(t *testing.T) {
 	assert.Nil(t, res)
 
 	w.AssertNotCalled(t, "Start")
+}
+
+func createFileAdapter(t *testing.T) (*fileAdapter[any, any], *worker.MockWorker) {
+	w := worker.NewMockWorker(t)
+
+	workerFactory := func(ctx context.Context, params worker.StartConfig) (worker.Worker, error) {
+		return w, nil
+	}
+
+	adapter := &fileAdapter[any, any]{
+		workerFactory: workerFactory,
+		log:           zap.NewNop(),
+	}
+
+	return adapter, w
 }

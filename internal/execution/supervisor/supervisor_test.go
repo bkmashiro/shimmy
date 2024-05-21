@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/lambda-feedback/shimmy/internal/execution/supervisor"
-	"github.com/lambda-feedback/shimmy/internal/execution/worker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
@@ -34,7 +33,7 @@ func TestSupervisor_New_DefaultWorkerFactory(t *testing.T) {
 }
 
 func TestSupervisor_Start_FailsToAcquireWorker(t *testing.T) {
-	mockFactory := func(worker.Worker, supervisor.IOInterface, *zap.Logger) (supervisor.Adapter[any, any], error) {
+	mockFactory := func(supervisor.AdapterWorkerFactoryFn, supervisor.IOInterface, *zap.Logger) (supervisor.Adapter[any, any], error) {
 		return nil, assert.AnError
 	}
 
@@ -48,7 +47,7 @@ func TestSupervisor_Start_FailsToAcquireWorker(t *testing.T) {
 func TestSupervisor_Start_Transient_DoesNotAcquireWorker(t *testing.T) {
 	var called bool
 
-	mockFactory := func(worker.Worker, supervisor.IOInterface, *zap.Logger) (supervisor.Adapter[any, any], error) {
+	mockFactory := func(supervisor.AdapterWorkerFactoryFn, supervisor.IOInterface, *zap.Logger) (supervisor.Adapter[any, any], error) {
 		called = true
 		return nil, nil
 	}
@@ -67,7 +66,7 @@ func TestSupervisor_Start_Persistent_AcquiresWorker(t *testing.T) {
 	a := supervisor.NewMockAdapter[any, any](t)
 	a.EXPECT().Start(mock.Anything, mock.Anything).Return(nil)
 
-	mockFactory := func(worker.Worker, supervisor.IOInterface, *zap.Logger) (supervisor.Adapter[any, any], error) {
+	mockFactory := func(supervisor.AdapterWorkerFactoryFn, supervisor.IOInterface, *zap.Logger) (supervisor.Adapter[any, any], error) {
 		called = true
 		return a, nil
 	}
@@ -230,7 +229,7 @@ func TestSupervisor_Send_SendsData(t *testing.T) {
 }
 
 func TestSupervisor_Send_FailsToAcquireWorker(t *testing.T) {
-	mockFactory := func(worker.Worker, supervisor.IOInterface, *zap.Logger) (supervisor.Adapter[any, any], error) {
+	mockFactory := func(supervisor.AdapterWorkerFactoryFn, supervisor.IOInterface, *zap.Logger) (supervisor.Adapter[any, any], error) {
 		return nil, assert.AnError
 	}
 
@@ -281,7 +280,7 @@ func createSupervisor(t *testing.T, persistent bool, mode supervisor.IOInterface
 ) {
 	adapter := supervisor.NewMockAdapter[any, any](t)
 
-	adapterFactory := func(worker.Worker, supervisor.IOInterface, *zap.Logger) (supervisor.Adapter[any, any], error) {
+	adapterFactory := func(supervisor.AdapterWorkerFactoryFn, supervisor.IOInterface, *zap.Logger) (supervisor.Adapter[any, any], error) {
 		return adapter, nil
 	}
 

@@ -46,7 +46,7 @@ type WorkerSupervisor[I, O any] struct {
 
 	sendLock sync.Mutex
 
-	createWorker func() (Adapter[I, O], error)
+	createAdapter func() (Adapter[I, O], error)
 
 	worker     Adapter[I, O]
 	workerLock sync.Mutex
@@ -94,7 +94,7 @@ type Config[I, O any] struct {
 	SendParams SendConfig `conf:"send"`
 }
 
-type WorkerFactoryFn func(*zap.Logger) (worker.Worker, error)
+type WorkerFactoryFn func(context.Context, worker.StartConfig, *zap.Logger) (worker.Worker, error)
 
 type Params[I, O any] struct {
 	// Config is the config used to set up the supervisor and its workers.
@@ -133,14 +133,16 @@ func New[I, O any](params Params[I, O]) (Supervisor[I, O], error) {
 		params.AdapterFactory = defaultAdapterFactory
 	}
 
-	createWorker := func() (Adapter[I, O], error) {
-		worker, err := params.WorkerFactory(params.Log)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create worker: %w", err)
-		}
+	workerFactory := func(
+		ctx context.Context,
+		config worker.StartConfig,
+	) (worker.Worker, error) {
+		return params.WorkerFactory(ctx, config, params.Log)
+	}
 
+	createAdapter := func() (Adapter[I, O], error) {
 		adapter, err := params.AdapterFactory(
-			worker,
+			workerFactory,
 			config.Interface,
 			params.Log,
 		)
@@ -152,12 +154,12 @@ func New[I, O any](params Params[I, O]) (Supervisor[I, O], error) {
 	}
 
 	return &WorkerSupervisor[I, O]{
-		persistent:   config.Persistent,
-		createWorker: createWorker,
-		startParams:  config.StartParams,
-		stopParams:   config.StopParams,
-		sendParams:   config.SendParams,
-		log:          params.Log.Named("supervisor"),
+		createAdapter: createAdapter,
+		persistent:    config.Persistent,
+		startParams:   config.StartParams,
+		stopParams:    config.StopParams,
+		sendParams:    config.SendParams,
+		log:           params.Log.Named("supervisor"),
 	}, nil
 }
 
@@ -293,7 +295,7 @@ func (s *WorkerSupervisor[I, O]) terminateWorker() (ReleaseFunc, error) {
 func (s *WorkerSupervisor[I, O]) bootWorker(
 	ctx context.Context,
 ) (Adapter[I, O], error) {
-	worker, err := s.createWorker()
+	worker, err := s.createAdapter()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create worker: %w", err)
 	}
@@ -306,6 +308,6 @@ func (s *WorkerSupervisor[I, O]) bootWorker(
 	return worker, nil
 }
 
-func defaultWorkerFactory(log *zap.Logger) (worker.Worker, error) {
-	return worker.NewProcessWorker(log), nil
+func defaultWorkerFactory(ctx context.Context, config worker.StartConfig, log *zap.Logger) (worker.Worker, error) {
+	return worker.NewProcessWorker(ctx, config, log), nil
 }

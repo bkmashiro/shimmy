@@ -8,9 +8,13 @@ import (
 	"go.uber.org/zap"
 )
 
+// AdapterWorkerFactoryFn is a type alias for a function that creates a worker
+// based on the given context and configuration.
+type AdapterWorkerFactoryFn func(context.Context, worker.StartConfig) (worker.Worker, error)
+
 // AdapterFactoryFn is a type alias for a function that creates an adapter
 // based on the given IO mode.
-type AdapterFactoryFn[I, O any] func(worker.Worker, IOInterface, *zap.Logger) (Adapter[I, O], error)
+type AdapterFactoryFn[I, O any] func(AdapterWorkerFactoryFn, IOInterface, *zap.Logger) (Adapter[I, O], error)
 
 // WaitFunc is a function that can be used to wait for a resource to be released.
 type WaitFunc func() error
@@ -40,15 +44,15 @@ type Adapter[I, O any] interface {
 // defaultAdapterFactory is the default adapter factory
 // that creates an adapter based on the given IO mode.
 func defaultAdapterFactory[I, O any](
-	worker worker.Worker,
+	workerFactory AdapterWorkerFactoryFn,
 	mode IOInterface,
 	log *zap.Logger,
 ) (Adapter[I, O], error) {
 	switch mode {
 	case FileIO:
-		return newFileAdapter[I, O](worker, log), nil
+		return newFileAdapter[I, O](workerFactory, log), nil
 	case StdIO:
-		return newStdioAdapter[I, O](worker, log), nil
+		return newStdioAdapter[I, O](workerFactory, log), nil
 	// case SocketIO:
 	// 	return &socketAdapter[I, O]{log: log}, nil
 	default:

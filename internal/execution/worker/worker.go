@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -53,17 +54,16 @@ func (e ExitEvent) String() string {
 }
 
 type Worker interface {
-	io.ReadWriteCloser
-
-	Start(context.Context, StartConfig) error
+	Start(context.Context) error
+	Stream() (io.ReadWriteCloser, error)
 	Terminate() error
 	Wait(context.Context) (ExitEvent, error)
 	WaitFor(context.Context, time.Duration) (ExitEvent, error)
 }
 
 type ProcessWorker struct {
-	processLock sync.Mutex
-	process     *proc
+	mu  sync.Mutex
+	cmd *exec.Cmd
 
 	wait chan struct{}
 	done chan struct{}
@@ -75,8 +75,14 @@ type ProcessWorker struct {
 	log *zap.Logger
 }
 
-func NewProcessWorker(log *zap.Logger) *ProcessWorker {
+func NewProcessWorker(ctx context.Context, config StartConfig, log *zap.Logger) *ProcessWorker {
+	// start process w/ context, so the process is SIGKILL'd when
+	// the context is cancelled. This ensures we don't have zombie
+	// processes when normal termination fails.
+	cmd := createCmd(ctx, config)
+
 	return &ProcessWorker{
+		cmd:  cmd,
 		wait: make(chan struct{}),
 		done: make(chan struct{}),
 		exit: make(chan ExitEvent),
@@ -87,29 +93,32 @@ func NewProcessWorker(log *zap.Logger) *ProcessWorker {
 var _ Worker = (*ProcessWorker)(nil)
 
 // Start starts the worker process.
-func (w *ProcessWorker) Start(ctx context.Context, config StartConfig) error {
+func (w *ProcessWorker) Start(ctx context.Context) error {
 	// synchronize access to the process
-	w.processLock.Lock()
-	defer w.processLock.Unlock()
+	w.mu.Lock()
+	defer w.mu.Unlock()
 
 	// return if the worker is already started
-	if w.process != nil {
+	if w.cmd.Process != nil {
 		return ErrWorkerAlreadyStarted
 	}
 
+	w.log.With(
+		zap.Strings("args", w.cmd.Args),
+		zap.String("cwd", w.cmd.Dir),
+		zap.Strings("env", w.cmd.Environ()),
+	).Debug("starting process")
+
 	// exit early if the context is already cancelled
 	if ctx.Err() != nil {
-		return fmt.Errorf("failed to start process: %w", ctx.Err())
+		return fmt.Errorf("won't start process: %w", ctx.Err())
 	}
 
-	// start the process
-	process, err := startProc(ctx, config, w.log)
+	// create a pipe for stderr
+	stderrPipe, err := w.cmd.StderrPipe()
 	if err != nil {
-		return fmt.Errorf("failed to start process: %w", err)
+		return fmt.Errorf("failed to get stderr pipe: %w", err)
 	}
-
-	// set the process
-	w.process = process
 
 	// wait for the process to terminate,
 	// and send the exit event to the channel
@@ -121,7 +130,7 @@ func (w *ProcessWorker) Start(ctx context.Context, config StartConfig) error {
 		w.stderrWg.Wait()
 
 		// block until the process exits
-		err = process.Wait()
+		err = w.cmd.Wait()
 
 		// get the exit event
 		evt := getExitEvent(err, w.stderr.String())
@@ -151,11 +160,16 @@ func (w *ProcessWorker) Start(ctx context.Context, config StartConfig) error {
 		defer w.stderrWg.Done()
 
 		// read from stderr and save it for later use
-		_, err := io.Copy(&w.stderr, process.StderrPipe())
+		_, err := io.Copy(&w.stderr, stderrPipe)
 		if err != nil && err != io.EOF {
 			w.log.Warn("failed to read from stderr", zap.Error(err))
 		}
 	}()
+
+	// start the process
+	if err := w.cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start process: %w", err)
+	}
 
 	return nil
 }
@@ -207,64 +221,57 @@ func (w *ProcessWorker) WaitFor(
 	return w.Wait(waitCtx)
 }
 
-// Terminate sends a SIGKILL signal to the worker process. The method
-// returns immediately, without waiting for the process to stop.
-func (w *ProcessWorker) Kill() error {
-	if process := w.acquireProcess(); process != nil {
-		return process.Kill()
-	}
-
-	return ErrWorkerNotStarted
-}
-
 // Terminate sends a SIGTERM signal to the worker process. The method
 // returns immediately, without waiting for the process to stop.
 func (w *ProcessWorker) Terminate() error {
-	if process := w.acquireProcess(); process != nil {
-		return process.Terminate()
-	}
-
-	return ErrWorkerNotStarted
+	return w.halt(syscall.SIGTERM)
 }
 
-func (w *ProcessWorker) Read(p []byte) (int, error) {
-	if process := w.acquireProcess(); process != nil {
-		return process.StdoutPipe().Read(p)
-	}
-
-	return 0, ErrWorkerNotStarted
+// Terminate sends a SIGKILL signal to the worker process. The method
+// returns immediately, without waiting for the process to stop.
+func (w *ProcessWorker) Kill() error {
+	return w.halt(syscall.SIGKILL)
 }
 
-func (w *ProcessWorker) Write(p []byte) (int, error) {
-	if process := w.acquireProcess(); process != nil {
-		return process.StdinPipe().Write(p)
+func (w *ProcessWorker) halt(signal syscall.Signal) error {
+	if w.cmd.Process == nil {
+		return errors.New("process is not running")
 	}
 
-	return 0, ErrWorkerNotStarted
+	log := w.log.With(zap.Stringer("signal", signal))
+
+	// close stdin before killing the process, to
+	// avoid the process hanging on input
+	// if err := p.stdin.Close(); err != nil {
+	// 	log.Warn("close stdin failed", zap.Error(err))
+	// }
+
+	// best effort, ignore errors
+	if err := w.sendKillSignal(signal); err != nil {
+		log.Warn("sending signal failed", zap.Error(err))
+	}
+
+	return nil
 }
 
-func (w *ProcessWorker) Close() error {
-	if process := w.acquireProcess(); process != nil {
-		return process.Close()
+func (p *ProcessWorker) sendKillSignal(signal syscall.Signal) error {
+	if pgid, err := syscall.Getpgid(p.cmd.Process.Pid); err == nil {
+		// Negative pid sends signal to all in process group
+		return syscall.Kill(-pgid, signal)
+	} else {
+		return syscall.Kill(p.cmd.Process.Pid, signal)
 	}
-
-	return ErrWorkerNotStarted
 }
 
 func (w *ProcessWorker) Pid() int {
-	if process := w.acquireProcess(); process != nil {
-		return process.Pid()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.cmd == nil || w.cmd.Process == nil {
+		return 0
 	}
 
-	return 0
-}
-
-// acquireProcess returns the worker process. The method is thread-safe.
-func (w *ProcessWorker) acquireProcess() *proc {
-	w.processLock.Lock()
-	defer w.processLock.Unlock()
-
-	return w.process
+	return w.cmd.Process.Pid
 }
 
 // MARK: - Helpers
@@ -304,4 +311,76 @@ func getExitEvent(err error, stderr string) ExitEvent {
 		Signal: signo,
 		Stderr: stderr,
 	}
+}
+
+// Stream returns a `io.ReadWriteCloser` that can be used to
+// read from and write to the process' stdout and stdin.
+//
+// The stream has to be created before the
+func (w *ProcessWorker) Stream() (io.ReadWriteCloser, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.cmd.Process != nil {
+		return nil, ErrWorkerAlreadyStarted
+	}
+
+	stdin, err := w.cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stdin pipe: %w", err)
+	}
+
+	stdout, err := w.cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stdout pipe: %w", err)
+	}
+
+	return &iostream{
+		stdout: stdout,
+		stdin:  stdin,
+	}, nil
+}
+
+type iostream struct {
+	stdout io.ReadCloser
+	stdin  io.WriteCloser
+}
+
+func (s *iostream) Read(p []byte) (int, error) {
+	return s.stdout.Read(p)
+}
+
+func (s *iostream) Write(p []byte) (int, error) {
+	return s.stdin.Write(p)
+}
+
+func (s *iostream) Close() error {
+	// we only close stdin, as stdout is closed by the process
+	// TODO: check if we need to close stdout as well
+	return s.stdin.Close()
+}
+
+func createCmd(ctx context.Context, config StartConfig) *exec.Cmd {
+	// start process w/ context, so the process is SIGKILL'd when
+	// the context is cancelled. This ensures we don't have zombie
+	// processes when normal termination fails.
+	cmd := exec.CommandContext(ctx, config.Cmd, config.Args...)
+
+	env := os.Environ()
+	if config.Env != nil {
+		env = append(env, config.Env...)
+	}
+	cmd.Env = env
+
+	if config.Cwd != "" {
+		cmd.Dir = config.Cwd
+	}
+
+	// TODO: we open all pipes here. make sure to read from all of them,
+	// as we could run into deadlocks otherwise, if the system's stdout
+	// or stderr buffers run full.
+
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	return cmd
 }

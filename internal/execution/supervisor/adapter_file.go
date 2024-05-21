@@ -16,8 +16,8 @@ import (
 // communicate with their worker. This is useful when stdio or sockets
 // can't be used for communication.
 type fileAdapter[I, O any] struct {
-	// worker is the worker that is managed by the adapter.
-	worker worker.Worker
+	// workerFactory is the worker that is managed by the adapter.
+	workerFactory AdapterWorkerFactoryFn
 
 	// startParams is the start configuration that is used to start the worker.
 	// The file adapter does not start the worker during
@@ -29,12 +29,12 @@ type fileAdapter[I, O any] struct {
 var _ Adapter[any, any] = (*fileAdapter[any, any])(nil)
 
 func newFileAdapter[I, O any](
-	worker worker.Worker,
+	workerFactory AdapterWorkerFactoryFn,
 	log *zap.Logger,
 ) *fileAdapter[I, O] {
 	return &fileAdapter[I, O]{
-		worker: worker,
-		log:    log.Named("adapter_file"),
+		workerFactory: workerFactory,
+		log:           log.Named("adapter_file"),
 	}
 }
 
@@ -58,8 +58,8 @@ func (a *fileAdapter[I, O]) Send(
 ) (O, error) {
 	var out O
 
-	if a.worker == nil {
-		return out, errors.New("no worker provided")
+	if a.workerFactory == nil {
+		return out, errors.New("no worker factory provided")
 	}
 
 	// create temp files for request and response data
@@ -116,8 +116,13 @@ func (a *fileAdapter[I, O]) Send(
 		"RESPONSE_FILE_NAME="+resFile.Name(),
 	)
 
-	// start worker with modified args and env
-	if err := a.worker.Start(ctx, startParams); err != nil {
+	// create the worker with modified args and env
+	worker, err := a.workerFactory(ctx, startParams)
+	if err != nil {
+		return out, fmt.Errorf("error creating worker: %w", err)
+	}
+
+	if err := worker.Start(ctx); err != nil {
 		return out, fmt.Errorf("error starting process: %w", err)
 	}
 
@@ -137,7 +142,7 @@ func (a *fileAdapter[I, O]) Send(
 	// }()
 
 	// wait for worker to terminate (find another way to read res earlier?)
-	exitEvent, err := a.worker.WaitFor(ctx, timeout)
+	exitEvent, err := worker.WaitFor(ctx, timeout)
 	if err != nil {
 		return out, fmt.Errorf("error waiting for process: %w", err)
 	}

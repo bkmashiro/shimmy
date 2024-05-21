@@ -21,3 +21,6 @@ lcov.info
 
 # Go workspace file
 go.work
+
+# Local .env files
+*.local

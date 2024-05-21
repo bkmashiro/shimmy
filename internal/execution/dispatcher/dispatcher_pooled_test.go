@@ -80,16 +80,16 @@ func TestPooledDispatcher_Send_Fails(t *testing.T) {
 func TestPooledDispatcher_Send_ReleaseSupervisorWait(t *testing.T) {
 	m, sv, _ := createPooledDispatcher(t)
 
-	var waited bool
+	var released bool
 
-	wait := func() error {
-		waited = true
+	release := func(context.Context) error {
+		released = true
 		return nil
 	}
 
 	result := &supervisor.Result[any]{
 		Data:    "data",
-		Release: wait,
+		Release: release,
 	}
 
 	sv.EXPECT().Start(mock.Anything).Return(nil)
@@ -102,22 +102,22 @@ func TestPooledDispatcher_Send_ReleaseSupervisorWait(t *testing.T) {
 	// wait for the release to happen in the background goroutine
 	m.Shutdown(context.Background())
 
-	assert.True(t, waited)
+	assert.True(t, released)
 }
 
 func TestPooledDispatcher_Send_ReleaseSupervisorWaitError(t *testing.T) {
 	m, sv, _ := createPooledDispatcher(t)
 
-	var waited bool
+	var released bool
 
-	wait := func() error {
-		waited = true
+	release := func(context.Context) error {
+		released = true
 		return assert.AnError
 	}
 
 	result := &supervisor.Result[any]{
 		Data:    "data",
-		Release: wait,
+		Release: release,
 	}
 
 	sv.EXPECT().Start(mock.Anything).Return(nil)
@@ -130,7 +130,7 @@ func TestPooledDispatcher_Send_ReleaseSupervisorWaitError(t *testing.T) {
 	// wait for the release to happen in the background goroutine
 	m.Shutdown(context.Background())
 
-	assert.True(t, waited)
+	assert.True(t, released)
 }
 
 func TestPooledDispatcher_Send_ReleaseSupervisorWaitErrorOnDestroy(t *testing.T) {
@@ -138,14 +138,19 @@ func TestPooledDispatcher_Send_ReleaseSupervisorWaitErrorOnDestroy(t *testing.T)
 
 	var waited int
 
-	wait := func() error {
+	release := func(context.Context) error {
 		waited++
 		return assert.AnError
 	}
 
 	result := &supervisor.Result[any]{
 		Data:    "data",
-		Release: wait,
+		Release: release,
+	}
+
+	wait := func() error {
+		waited++
+		return nil
 	}
 
 	sv.EXPECT().Start(mock.Anything).Return(nil)
@@ -166,14 +171,19 @@ func TestPooledDispatcher_Send_ReleaseSupervisorWaitErrorShutdown(t *testing.T) 
 
 	var waited int
 
-	wait := func() error {
+	release := func(context.Context) error {
 		waited++
 		return assert.AnError
 	}
 
 	result := &supervisor.Result[any]{
 		Data:    "data",
-		Release: wait,
+		Release: release,
+	}
+
+	wait := func() error {
+		waited++
+		return nil
 	}
 
 	sv.EXPECT().Start(mock.Anything).Return(nil)

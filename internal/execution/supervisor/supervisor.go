@@ -114,7 +114,7 @@ type Params[I, O any] struct {
 
 type Result[O any] struct {
 	Data    O
-	Release WaitFunc
+	Release ReleaseFunc
 }
 
 func New[I, O any](params Params[I, O]) (Supervisor[I, O], error) {
@@ -139,7 +139,11 @@ func New[I, O any](params Params[I, O]) (Supervisor[I, O], error) {
 			return nil, fmt.Errorf("failed to create worker: %w", err)
 		}
 
-		adapter, err := params.AdapterFactory(worker, config.Interface, params.Log)
+		adapter, err := params.AdapterFactory(
+			worker,
+			config.Interface,
+			params.Log,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create adapter: %w", err)
 		}
@@ -168,38 +172,37 @@ func (s *WorkerSupervisor[I, O]) Start(ctx context.Context) error {
 
 	// otherwise, boot the persistent worker
 	if _, err := s.acquireWorker(ctx); err != nil {
-		s.log.Error("error booting worker", zap.Error(err))
-		return err
+		return fmt.Errorf("failed to boot worker: %w", err)
 	}
 
 	return nil
 }
 
-func (s *WorkerSupervisor[I, O]) Send(ctx context.Context, data I) (*Result[O], error) {
+func (s *WorkerSupervisor[I, O]) Send(
+	ctx context.Context,
+	data I,
+) (*Result[O], error) {
 	// acquire send lock. should not be necessary as supervisors
 	// are managed by a resource pool, but it does no harm to make
 	// the supervisor thread-safe and serialize access.
 	s.sendLock.Lock()
 	defer s.sendLock.Unlock()
 
-	// acquire worker
 	worker, err := s.acquireWorker(ctx)
 	if err != nil {
-		s.log.Error("error acquiring worker", zap.Error(err))
-		return nil, err
+		return nil, fmt.Errorf("failed to acquire worker: %w", err)
 	}
 
-	// send data to worker
+	// NOTICE: unconventional error handling, as we need to release
+	// the worker before returning the error.
 	resData, err := worker.Send(ctx, data, s.sendParams.Timeout)
-	if err != nil {
-		s.log.Debug("error sending data to worker", zap.Error(err))
-	}
 
-	release, releaseErr := s.releaseWorker(ctx)
+	release, releaseErr := s.releaseWorker()
 	if releaseErr != nil {
-		s.log.Error("error releasing worker", zap.Error(releaseErr))
 		// make release() return the release error
-		release = func() error { return releaseErr }
+		release = func(context.Context) error {
+			return fmt.Errorf("failed to release worker: %w", releaseErr)
+		}
 	}
 
 	return &Result[O]{
@@ -208,20 +211,40 @@ func (s *WorkerSupervisor[I, O]) Send(ctx context.Context, data I) (*Result[O], 
 	}, err
 }
 
-func (s *WorkerSupervisor[I, O]) Suspend(ctx context.Context) (WaitFunc, error) {
-	return s.releaseWorker(ctx)
+func (s *WorkerSupervisor[I, O]) Suspend(
+	ctx context.Context,
+) (WaitFunc, error) {
+	release, err := s.releaseWorker()
+	if err != nil {
+		return nil, err
+	}
+
+	return func() error {
+		return release(ctx)
+	}, nil
 }
 
-func (s *WorkerSupervisor[I, O]) Shutdown(ctx context.Context) (WaitFunc, error) {
-	return s.terminateWorker(ctx)
+func (s *WorkerSupervisor[I, O]) Shutdown(
+	ctx context.Context,
+) (WaitFunc, error) {
+	release, err := s.terminateWorker()
+	if err != nil {
+		return nil, err
+	}
+
+	return func() error {
+		return release(ctx)
+	}, nil
 }
 
-func (s *WorkerSupervisor[I, O]) acquireWorker(ctx context.Context) (Adapter[I, O], error) {
+func (s *WorkerSupervisor[I, O]) acquireWorker(
+	ctx context.Context,
+) (Adapter[I, O], error) {
 	s.workerLock.Lock()
 	defer s.workerLock.Unlock()
 
 	if s.worker != nil {
-		// TODO: what if the worker is already in use, and s.persistent is false?
+		// TODO: what if the worker is in use, and s.persistent is false?
 		return s.worker, nil
 	}
 
@@ -236,27 +259,27 @@ func (s *WorkerSupervisor[I, O]) acquireWorker(ctx context.Context) (Adapter[I, 
 	return worker, nil
 }
 
-func (s *WorkerSupervisor[I, O]) releaseWorker(ctx context.Context) (WaitFunc, error) {
+func (s *WorkerSupervisor[I, O]) releaseWorker() (ReleaseFunc, error) {
 	// if the worker is persistent, this is a no-op, as we
 	// want to keep the worker alive for future messages
 	if s.persistent {
 		s.log.Debug("persistent worker, not releasing")
-		return noopWaitFunc, nil
+		return noopReleaseFunc, nil
 	}
 
 	s.log.Debug("releasing transient worker")
 
-	return s.terminateWorker(ctx)
+	return s.terminateWorker()
 }
 
-func (s *WorkerSupervisor[I, O]) terminateWorker(ctx context.Context) (WaitFunc, error) {
+func (s *WorkerSupervisor[I, O]) terminateWorker() (ReleaseFunc, error) {
 	s.workerLock.Lock()
 	defer s.workerLock.Unlock()
 
 	// if there is no worker, we have nothing to release
 	if s.worker == nil {
 		s.log.Debug("no worker to release")
-		return noopWaitFunc, nil
+		return noopReleaseFunc, nil
 	}
 
 	// ensure we set the worker to nil
@@ -264,10 +287,12 @@ func (s *WorkerSupervisor[I, O]) terminateWorker(ctx context.Context) (WaitFunc,
 		s.worker = nil
 	}()
 
-	return s.worker.Stop(ctx, s.stopParams)
+	return s.worker.Stop(s.stopParams)
 }
 
-func (s *WorkerSupervisor[I, O]) bootWorker(ctx context.Context) (Adapter[I, O], error) {
+func (s *WorkerSupervisor[I, O]) bootWorker(
+	ctx context.Context,
+) (Adapter[I, O], error) {
 	worker, err := s.createWorker()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create worker: %w", err)
@@ -280,8 +305,6 @@ func (s *WorkerSupervisor[I, O]) bootWorker(ctx context.Context) (Adapter[I, O],
 
 	return worker, nil
 }
-
-var noopWaitFunc = func() error { return nil }
 
 func defaultWorkerFactory(log *zap.Logger) (worker.Worker, error) {
 	return worker.NewProcessWorker(log), nil

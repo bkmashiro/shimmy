@@ -49,7 +49,7 @@ func TestStdioAdapter_Stop(t *testing.T) {
 
 	w.EXPECT().Terminate().Return(nil)
 
-	_, err := a.Stop(context.Background(), worker.StopConfig{})
+	_, err := a.Stop(worker.StopConfig{})
 	assert.NoError(t, err)
 }
 
@@ -58,7 +58,7 @@ func TestStdioAdapter_Stop_PassesError(t *testing.T) {
 
 	w.EXPECT().Terminate().Return(assert.AnError)
 
-	_, err := a.Stop(context.Background(), worker.StopConfig{})
+	_, err := a.Stop(worker.StopConfig{})
 	assert.ErrorIs(t, err, assert.AnError)
 }
 
@@ -71,10 +71,10 @@ func TestStdioAdapter_Stop_WaitFor(t *testing.T) {
 	w.EXPECT().Terminate().Return(nil)
 	w.EXPECT().WaitFor(ctx, params.Timeout).Return(worker.ExitEvent{}, nil)
 
-	wait, err := a.Stop(ctx, params)
+	wait, err := a.Stop(params)
 	assert.NoError(t, err)
 
-	err = wait()
+	err = wait(ctx)
 	assert.NoError(t, err)
 }
 
@@ -87,10 +87,10 @@ func TestStdioAdapter_Stop_WaitForError(t *testing.T) {
 	w.EXPECT().Terminate().Return(nil)
 	w.EXPECT().WaitFor(ctx, params.Timeout).Return(worker.ExitEvent{}, assert.AnError)
 
-	wait, err := a.Stop(ctx, params)
+	wait, err := a.Stop(params)
 	assert.NoError(t, err)
 
-	err = wait()
+	err = wait(ctx)
 	assert.ErrorIs(t, err, assert.AnError)
 }
 

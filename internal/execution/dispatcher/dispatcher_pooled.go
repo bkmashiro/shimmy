@@ -10,6 +10,7 @@ import (
 )
 
 type PooledDispatcher[I, O any] struct {
+	ctx  context.Context
 	pool *puddle.Pool[supervisor.Supervisor[I, O]]
 	log  *zap.Logger
 }
@@ -38,9 +39,9 @@ type PooledDispatcherParams[I, O any] struct {
 	Log *zap.Logger
 }
 
-func NewPooledDispatcher[I, O any](params PooledDispatcherParams[I, O]) (Dispatcher[I, O], error) {
-	log := params.Log.Named("dispatcher")
-
+func NewPooledDispatcher[I, O any](
+	params PooledDispatcherParams[I, O],
+) (Dispatcher[I, O], error) {
 	if params.SupervisorFactory == nil {
 		params.SupervisorFactory = defaultSupervisorFactory
 	}
@@ -52,7 +53,8 @@ func NewPooledDispatcher[I, O any](params PooledDispatcherParams[I, O]) (Dispatc
 
 	return &PooledDispatcher[I, O]{
 		pool: pool,
-		log:  log,
+		ctx:  params.Context,
+		log:  params.Log.Named("dispatcher_pooled"),
 	}, nil
 }
 
@@ -67,7 +69,6 @@ func (m *PooledDispatcher[I, O]) Send(ctx context.Context, data I) (O, error) {
 
 	resource, err := m.pool.Acquire(ctx)
 	if err != nil {
-		m.log.Debug("error acquiring supervisor", zap.Error(err))
 		var zero O
 		return zero, fmt.Errorf("error acquiring supervisor: %w", err)
 	}
@@ -76,7 +77,6 @@ func (m *PooledDispatcher[I, O]) Send(ctx context.Context, data I) (O, error) {
 
 	res, err := m.sendToSupervisor(ctx, data, resource)
 	if err != nil {
-		m.log.Debug("error sending data to supervisor", zap.Error(err))
 		var zero O
 		return zero, fmt.Errorf("error sending data: %w", err)
 	}
@@ -94,24 +94,17 @@ func (m *PooledDispatcher[I, O]) sendToSupervisor(
 	var err error
 	var res *supervisor.Result[O]
 
-	dispose := func() {
-		// if there was an error while handling the message,
-		// we need to destroy the supervisor
-		// if err != nil {
-		// 	resource.Destroy()
-		// 	return
-		// }
-
-		destroyOrRelease := func() {
-			if err != nil {
-				m.log.Debug("destroying supervisor: error")
-				resource.Destroy()
-			} else {
-				m.log.Debug("releasing supervisor: suspended")
-				resource.Release()
-			}
+	destroyOrRelease := func() {
+		if err != nil {
+			m.log.Debug("destroying supervisor due to error")
+			resource.Destroy()
+		} else {
+			m.log.Debug("releasing supervisor back to pool")
+			resource.Release()
 		}
+	}
 
+	dispose := func() {
 		// if there is no wait function, we can release the resource
 		if res == nil || res.Release == nil {
 			destroyOrRelease()
@@ -120,8 +113,8 @@ func (m *PooledDispatcher[I, O]) sendToSupervisor(
 
 		// if there is an error destroying the supervisor, we need to
 		// log it and destroy the resource
-		if releaseErr := res.Release(); releaseErr != nil {
-			m.log.Error("destroying supervisor: error waiting", zap.Error(releaseErr))
+		if releaseErr := res.Release(m.ctx); releaseErr != nil {
+			m.log.Error("destroying supervisor due to error waiting", zap.Error(releaseErr))
 			resource.Destroy()
 			return
 		}
@@ -143,7 +136,6 @@ func (m *PooledDispatcher[I, O]) sendToSupervisor(
 
 	res, err = supervisor.Send(ctx, data)
 	if err != nil {
-		m.log.Error("error sending data to supervisor", zap.Error(err))
 		var zero O
 		return zero, err
 	}
@@ -160,7 +152,9 @@ func (m *PooledDispatcher[I, O]) Shutdown(context.Context) error {
 
 // MARK: - Pool
 
-func createPool[I, O any](params PooledDispatcherParams[I, O]) (*puddle.Pool[supervisor.Supervisor[I, O]], error) {
+func createPool[I, O any](
+	params PooledDispatcherParams[I, O],
+) (*puddle.Pool[supervisor.Supervisor[I, O]], error) {
 	log := params.Log.Named("dispatcher_pool")
 
 	constructor := func(ctx context.Context) (supervisor.Supervisor[I, O], error) {

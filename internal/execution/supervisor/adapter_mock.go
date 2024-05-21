@@ -129,29 +129,29 @@ func (_c *MockAdapter_Start_Call[I, O]) RunAndReturn(run func(context.Context, w
 	return _c
 }
 
-// Stop provides a mock function with given fields: _a0, _a1
-func (_m *MockAdapter[I, O]) Stop(_a0 context.Context, _a1 worker.StopConfig) (WaitFunc, error) {
-	ret := _m.Called(_a0, _a1)
+// Stop provides a mock function with given fields: _a0
+func (_m *MockAdapter[I, O]) Stop(_a0 worker.StopConfig) (ReleaseFunc, error) {
+	ret := _m.Called(_a0)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Stop")
 	}
 
-	var r0 WaitFunc
+	var r0 ReleaseFunc
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, worker.StopConfig) (WaitFunc, error)); ok {
-		return rf(_a0, _a1)
+	if rf, ok := ret.Get(0).(func(worker.StopConfig) (ReleaseFunc, error)); ok {
+		return rf(_a0)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, worker.StopConfig) WaitFunc); ok {
-		r0 = rf(_a0, _a1)
+	if rf, ok := ret.Get(0).(func(worker.StopConfig) ReleaseFunc); ok {
+		r0 = rf(_a0)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(WaitFunc)
+			r0 = ret.Get(0).(ReleaseFunc)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, worker.StopConfig) error); ok {
-		r1 = rf(_a0, _a1)
+	if rf, ok := ret.Get(1).(func(worker.StopConfig) error); ok {
+		r1 = rf(_a0)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -165,25 +165,24 @@ type MockAdapter_Stop_Call[I interface{}, O interface{}] struct {
 }
 
 // Stop is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 worker.StopConfig
-func (_e *MockAdapter_Expecter[I, O]) Stop(_a0 interface{}, _a1 interface{}) *MockAdapter_Stop_Call[I, O] {
-	return &MockAdapter_Stop_Call[I, O]{Call: _e.mock.On("Stop", _a0, _a1)}
+//   - _a0 worker.StopConfig
+func (_e *MockAdapter_Expecter[I, O]) Stop(_a0 interface{}) *MockAdapter_Stop_Call[I, O] {
+	return &MockAdapter_Stop_Call[I, O]{Call: _e.mock.On("Stop", _a0)}
 }
 
-func (_c *MockAdapter_Stop_Call[I, O]) Run(run func(_a0 context.Context, _a1 worker.StopConfig)) *MockAdapter_Stop_Call[I, O] {
+func (_c *MockAdapter_Stop_Call[I, O]) Run(run func(_a0 worker.StopConfig)) *MockAdapter_Stop_Call[I, O] {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(worker.StopConfig))
+		run(args[0].(worker.StopConfig))
 	})
 	return _c
 }
 
-func (_c *MockAdapter_Stop_Call[I, O]) Return(_a0 WaitFunc, _a1 error) *MockAdapter_Stop_Call[I, O] {
+func (_c *MockAdapter_Stop_Call[I, O]) Return(_a0 ReleaseFunc, _a1 error) *MockAdapter_Stop_Call[I, O] {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockAdapter_Stop_Call[I, O]) RunAndReturn(run func(context.Context, worker.StopConfig) (WaitFunc, error)) *MockAdapter_Stop_Call[I, O] {
+func (_c *MockAdapter_Stop_Call[I, O]) RunAndReturn(run func(worker.StopConfig) (ReleaseFunc, error)) *MockAdapter_Stop_Call[I, O] {
 	_c.Call.Return(run)
 	return _c
 }

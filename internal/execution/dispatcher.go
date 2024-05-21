@@ -34,20 +34,24 @@ func NewDispatcher[I, O any](
 	params Params[I, O],
 ) (dispatcher.Dispatcher[I, O], error) {
 	if params.Config.Supervisor.Persistent {
-		return dispatcher.NewDedicatedDispatcher[I, O](dispatcher.DedicatedDispatcherParams[I, O]{
-			Config: dispatcher.DedicatedDispatcherConfig[I, O]{
-				Supervisor: params.Config.Supervisor,
+		return dispatcher.NewDedicatedDispatcher(
+			dispatcher.DedicatedDispatcherParams[I, O]{
+				Config: dispatcher.DedicatedDispatcherConfig[I, O]{
+					Supervisor: params.Config.Supervisor,
+				},
+				Log: params.Log,
 			},
-			Log: params.Log,
-		})
+		)
 	} else {
-		return dispatcher.NewPooledDispatcher[I, O](dispatcher.PooledDispatcherParams[I, O]{
-			Config: dispatcher.PooledDispatcherConfig[I, O]{
-				MaxWorkers: params.Config.MaxWorkers,
-				Supervisor: params.Config.Supervisor,
+		return dispatcher.NewPooledDispatcher(
+			dispatcher.PooledDispatcherParams[I, O]{
+				Config: dispatcher.PooledDispatcherConfig[I, O]{
+					Supervisor: params.Config.Supervisor,
+					MaxWorkers: params.Config.MaxWorkers,
+				},
+				Context: params.Context,
+				Log:     params.Log,
 			},
-			Context: params.Context,
-			Log:     params.Log,
-		})
+		)
 	}
 }

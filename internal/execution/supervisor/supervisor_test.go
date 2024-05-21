@@ -117,7 +117,7 @@ func TestSupervisor_Suspend_Transient_StopsWorker(t *testing.T) {
 	assert.NoError(t, err)
 
 	a.EXPECT().Start(mock.Anything, mock.Anything).Return(nil)
-	a.EXPECT().Stop(mock.Anything, mock.Anything).Return(nil, nil)
+	a.EXPECT().Stop(mock.Anything).Return(nil, nil)
 	a.EXPECT().Send(mock.Anything, mock.Anything, mock.Anything).Return("result", nil)
 
 	_, _ = s.Send(context.Background(), nil)
@@ -152,7 +152,7 @@ func TestSupervisor_Shutdown_Transient_StopsWorker(t *testing.T) {
 	assert.NoError(t, err)
 
 	a.EXPECT().Start(mock.Anything, mock.Anything).Return(nil)
-	a.EXPECT().Stop(mock.Anything, mock.Anything).Return(nil, nil)
+	a.EXPECT().Stop(mock.Anything).Return(nil, nil)
 	a.EXPECT().Send(mock.Anything, mock.Anything, mock.Anything).Return("result", nil)
 
 	_, _ = s.Send(context.Background(), nil)
@@ -170,7 +170,7 @@ func TestSupervisor_Shutdown_Persistent_StopsWorker(t *testing.T) {
 	assert.NoError(t, err)
 
 	a.EXPECT().Start(mock.Anything, mock.Anything).Return(nil)
-	a.EXPECT().Stop(mock.Anything, mock.Anything).Return(nil, nil)
+	a.EXPECT().Stop(mock.Anything).Return(nil, nil)
 	a.EXPECT().Send(mock.Anything, mock.Anything, mock.Anything).Return("result", nil)
 
 	_, _ = s.Send(context.Background(), nil)
@@ -202,7 +202,7 @@ func TestSupervisor_Send_Transient_DoesNotReuseWorker(t *testing.T) {
 	assert.NoError(t, err)
 
 	a.EXPECT().Start(mock.Anything, mock.Anything).Return(nil)
-	a.EXPECT().Stop(mock.Anything, mock.Anything).Return(nil, nil)
+	a.EXPECT().Stop(mock.Anything).Return(nil, nil)
 	a.EXPECT().Send(mock.Anything, mock.Anything, mock.Anything).Return("result", nil)
 
 	// boots first, transient worker
@@ -247,7 +247,7 @@ func TestSupervisor_Send_FailsToReleaseWorker(t *testing.T) {
 	assert.NoError(t, err)
 
 	a.EXPECT().Start(mock.Anything, mock.Anything).Return(nil)
-	a.EXPECT().Stop(mock.Anything, mock.Anything).Return(nil, assert.AnError)
+	a.EXPECT().Stop(mock.Anything).Return(nil, assert.AnError)
 	a.EXPECT().Send(mock.Anything, mock.Anything, mock.Anything).Return("result", nil)
 
 	res, err := s.Send(context.Background(), "data")

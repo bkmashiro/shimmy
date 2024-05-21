@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"time"
 
@@ -11,9 +12,9 @@ import (
 	"go.uber.org/zap"
 )
 
-// fileAdapter is an adapter that allows supervisors to use files to communicate
-// with their worker. This is useful when the worker process is not able to
-// communicate with the supervisor process via stdio or sockets.
+// fileAdapter is an adapter that allows supervisors to use files to
+// communicate with their worker. This is useful when stdio or sockets
+// can't be used for communication.
 type fileAdapter[I, O any] struct {
 	// worker is the worker that is managed by the adapter.
 	worker worker.Worker
@@ -27,14 +28,20 @@ type fileAdapter[I, O any] struct {
 
 var _ Adapter[any, any] = (*fileAdapter[any, any])(nil)
 
-func newFileAdapter[I, O any](worker worker.Worker, log *zap.Logger) *fileAdapter[I, O] {
+func newFileAdapter[I, O any](
+	worker worker.Worker,
+	log *zap.Logger,
+) *fileAdapter[I, O] {
 	return &fileAdapter[I, O]{
 		worker: worker,
 		log:    log.Named("adapter_file"),
 	}
 }
 
-func (a *fileAdapter[I, O]) Start(ctx context.Context, params worker.StartConfig) error {
+func (a *fileAdapter[I, O]) Start(
+	ctx context.Context,
+	params worker.StartConfig,
+) error {
 	// for fileio, we can't yet start the worker, as we do need to pass
 	// the file path with the request data to the worker via arguments.
 
@@ -58,29 +65,39 @@ func (a *fileAdapter[I, O]) Send(
 	// create temp files for request and response data
 	reqFile, err := os.CreateTemp("", "request-data-*")
 	if err != nil {
-		a.log.Debug("error creating temp file", zap.Error(err))
-		return out, err
+		return out, fmt.Errorf("error creating temp file: %w", err)
 	}
-	// defer os.Remove(reqFile.Name())
+	defer func() {
+		if err := os.Remove(reqFile.Name()); err != nil {
+			a.log.Error("failed to remove request file", zap.Error(err))
+		}
+	}()
 
 	resFile, err := os.CreateTemp("", "response-data-*")
 	if err != nil {
-		a.log.Debug("error creating temp req file", zap.Error(err))
-		return out, err
+		return out, fmt.Errorf("error creating temp file: %w", err)
 	}
-	defer resFile.Close()
-	// defer os.Remove(resFile.Name())
+
+	defer func() {
+		if err := resFile.Close(); err != nil {
+			a.log.Error("failed to close response file", zap.Error(err))
+		}
+	}()
+
+	defer func() {
+		if err := os.Remove(resFile.Name()); err != nil {
+			a.log.Error("failed to remove response file", zap.Error(err))
+		}
+	}()
 
 	// write data to request file
 	if err := json.NewEncoder(reqFile).Encode(data); err != nil {
-		a.log.Debug("error writing temp req file", zap.Error(err))
-		return out, err
+		return out, fmt.Errorf("error writing request data: %w", err)
 	}
 
 	// close & flush request file
 	if err := reqFile.Close(); err != nil {
-		a.log.Debug("error closing temp req file", zap.Error(err))
-		return out, err
+		return out, fmt.Errorf("error closing request file: %w", err)
 	}
 
 	startParams := a.startParams
@@ -103,8 +120,7 @@ func (a *fileAdapter[I, O]) Send(
 
 	// start worker with modified args and env
 	if err := a.worker.Start(ctx, startParams); err != nil {
-		a.log.Debug("error starting worker", zap.Error(err))
-		return out, err
+		return out, fmt.Errorf("error starting process: %w", err)
 	}
 
 	// var stdoutWg sync.WaitGroup
@@ -122,34 +138,30 @@ func (a *fileAdapter[I, O]) Send(
 	// 	w.log.Debug("stdout", zap.String("data", buf.String()))
 	// }()
 
-	// wait for worker to terminate (maybe find another way to read res earlier?)
-	// TODO: investigate use of status returned by `WaitFor`
+	// wait for worker to terminate (find another way to read res earlier?)
 	exitEvent, err := a.worker.WaitFor(ctx, timeout)
 	if err != nil {
-		a.log.Debug("error waiting for worker to finish", zap.Error(err))
-		return out, err
+		return out, fmt.Errorf("error waiting for process: %w", err)
 	}
 
-	a.log.Debug("worker finished", zap.Any("exit", exitEvent))
-
-	var res O
+	if !exitEvent.Success() {
+		return out, fmt.Errorf("process exited with non-zero code: %s", exitEvent.String())
+	}
 
 	// read and decode response data from res file
-	if err := json.NewDecoder(resFile).Decode(&res); err != nil {
-		a.log.Debug("error decoding response data from temp file", zap.Error(err))
-		return out, err
+	if err := json.NewDecoder(resFile).Decode(&out); err != nil {
+		return out, fmt.Errorf("error decoding response data: %w", err)
 	}
 
-	return res, nil
+	return out, nil
 }
 
 func (a *fileAdapter[I, O]) Stop(
-	ctx context.Context,
-	params worker.StopConfig,
-) (WaitFunc, error) {
+	worker.StopConfig,
+) (ReleaseFunc, error) {
 	// for fileio, we already stopped the worker, as we do need to wait
 	// for the process to finish in order to read the response data.
 	// therefore, we don't need to do anything here.
 
-	return noopWaitFunc, nil
+	return noopReleaseFunc, nil
 }

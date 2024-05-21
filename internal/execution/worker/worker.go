@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -23,6 +24,32 @@ type ExitEvent struct {
 
 	// Stderr is the stderr output of the process
 	Stderr string
+}
+
+// Success returns true if the process exited successfully.
+func (e ExitEvent) Success() bool {
+	return e.Code != nil && *e.Code == 0
+}
+
+// String returns a string representation of the exit event.
+func (e ExitEvent) String() string {
+	var code string
+	if e.Code != nil {
+		code = fmt.Sprintf("%d", *e.Code)
+	} else {
+		code = "(nil)"
+	}
+
+	var signal string
+	if e.Signal != nil {
+		signal = fmt.Sprintf("%d", *e.Signal)
+	} else {
+		signal = "(nil)"
+	}
+
+	stderr := strings.Trim(strings.ReplaceAll(e.Stderr, "\n", " "), " ")
+
+	return fmt.Sprintf("code=%v, signal=%s, stderr=%s", code, signal, stderr)
 }
 
 type Worker interface {
@@ -61,13 +88,6 @@ var _ Worker = (*ProcessWorker)(nil)
 
 // Start starts the worker process.
 func (w *ProcessWorker) Start(ctx context.Context, config StartConfig) error {
-	w.log.With(
-		zap.String("command", config.Cmd),
-		zap.Strings("args", config.Args),
-		zap.String("cwd", config.Cwd),
-		zap.Any("env", config.Env),
-	).Debug("starting worker process")
-
 	// synchronize access to the process
 	w.processLock.Lock()
 	defer w.processLock.Unlock()
@@ -107,11 +127,13 @@ func (w *ProcessWorker) Start(ctx context.Context, config StartConfig) error {
 		evt := getExitEvent(err, w.stderr.String())
 
 		// log the exit event
-		w.log.With(
-			zap.Any("code", evt.Code),
-			zap.Any("signal", evt.Signal),
-			zap.String("stderr", evt.Stderr),
-		).Debug("process exited")
+		if !evt.Success() {
+			w.log.With(
+				zap.Any("code", evt.Code),
+				zap.Any("signal", evt.Signal),
+				zap.String("stderr", evt.Stderr),
+			).Warn("process exited with non-zero code")
+		}
 
 		// send the exit event to the channel
 		w.exit <- evt
@@ -138,12 +160,12 @@ func (w *ProcessWorker) Start(ctx context.Context, config StartConfig) error {
 	return nil
 }
 
-// Wait waits for the worker process to exit. The method blocks until the process
-// exits. The method returns an ExitEvent object that contains the exit status of
-// the process. If the process is already terminated, the method returns immediately.
+// Wait blocks until the process exits. The method returns an ExitEvent
+// object that contains the exit status of the process. If the process
+// is already terminated, the method returns immediately.
 //
-// Any of `Wait` or `WaitFor` are intended to be called only once. Subsequent calls
-// will return an error.
+// Any of `Wait` or `WaitFor` are intended to be called only once.
+// Subsequent calls will return an error.
 func (w *ProcessWorker) Wait(ctx context.Context) (ExitEvent, error) {
 	// close the wait channel to signal that `Wait` has been called
 	select {
@@ -161,12 +183,12 @@ func (w *ProcessWorker) Wait(ctx context.Context) (ExitEvent, error) {
 	}
 }
 
-// WaitFor waits for the worker process to exit. It blocks until the process exits
-// or the timeout is reached. The method returns an ExitEvent that contains the exit
-// status. If the process is already terminated, the method returns immediately.
+// WaitFor blocks until the process exits or the timeout is reached.
+// The method returns an ExitEvent that contains the exit status. If
+// the process is already terminated, the method returns immediately.
 //
-// Any of `Wait` or `WaitFor` are intended to be called only once. Subsequent calls
-// will return an error.
+// Any of `Wait` or `WaitFor` are intended to be called only once.
+// Subsequent calls will return an error.
 func (w *ProcessWorker) WaitFor(
 	ctx context.Context,
 	deadline time.Duration,
@@ -185,8 +207,8 @@ func (w *ProcessWorker) WaitFor(
 	return w.Wait(waitCtx)
 }
 
-// Terminate sends a SIGKILL signal to the worker process to request it to stop.
-// The method returns immediately, without waiting for the process to stop.
+// Terminate sends a SIGKILL signal to the worker process. The method
+// returns immediately, without waiting for the process to stop.
 func (w *ProcessWorker) Kill() error {
 	if process := w.acquireProcess(); process != nil {
 		return process.Kill()
@@ -195,8 +217,8 @@ func (w *ProcessWorker) Kill() error {
 	return ErrWorkerNotStarted
 }
 
-// Terminate sends a SIGTERM signal to the worker process to request it to stop.
-// The method returns immediately, without waiting for the process to stop.
+// Terminate sends a SIGTERM signal to the worker process. The method
+// returns immediately, without waiting for the process to stop.
 func (w *ProcessWorker) Terminate() error {
 	if process := w.acquireProcess(); process != nil {
 		return process.Terminate()

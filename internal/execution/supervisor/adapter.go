@@ -12,8 +12,14 @@ import (
 // based on the given IO mode.
 type AdapterFactoryFn[I, O any] func(worker.Worker, IOInterface, *zap.Logger) (Adapter[I, O], error)
 
-// WaitFunc is a function that can be used to wait for a worker to terminate.
+// WaitFunc is a function that can be used to wait for a resource to be released.
 type WaitFunc func() error
+
+// ReleaseFunc is a function that can be used to release resources.
+type ReleaseFunc func(context.Context) error
+
+// noopReleaseFunc is a no-op release function that always returns nil.
+var noopReleaseFunc = func(context.Context) error { return nil }
 
 type Adapter[I, O any] interface {
 	// Start allows to start the worker with the given configuration.
@@ -22,8 +28,8 @@ type Adapter[I, O any] interface {
 
 	// Stop stops the worker with the given configuration. The worker is
 	// expected to be stopped in a non-blocking manner. The returned
-	// WaitFunc can be used to wait for the worker to terminate.
-	Stop(context.Context, worker.StopConfig) (WaitFunc, error)
+	// ReleaseFunc can be used to wait for the worker to terminate.
+	Stop(worker.StopConfig) (ReleaseFunc, error)
 
 	// Send sends the given data to the worker and returns the response.
 	Send(context.Context, I, time.Duration) (O, error)
@@ -31,8 +37,8 @@ type Adapter[I, O any] interface {
 
 // MARK: - factory
 
-// defaultAdapterFactory is the default adapter factory that creates an adapter
-// based on the given IO mode.
+// defaultAdapterFactory is the default adapter factory
+// that creates an adapter based on the given IO mode.
 func defaultAdapterFactory[I, O any](
 	worker worker.Worker,
 	mode IOInterface,
@@ -52,13 +58,9 @@ func defaultAdapterFactory[I, O any](
 
 // MARK: - helpers
 
-// stopWorker is a helper function to stop a worker and return a wait function
-// that can be used to wait for the worker to terminate.
-func stopWorker(
-	ctx context.Context,
-	w worker.Worker,
-	params worker.StopConfig,
-) (WaitFunc, error) {
+// stopWorker is a helper function to stop a worker and return a wait
+// function that can be used to wait for the worker to terminate.
+func stopWorker(w worker.Worker, params worker.StopConfig) (ReleaseFunc, error) {
 
 	// TODO: what if shutdown fails? we have a zombie worker then...
 
@@ -68,7 +70,7 @@ func stopWorker(
 		return nil, err
 	}
 
-	waitFunc := func() error {
+	releaseFunc := func(ctx context.Context) error {
 		// wait for the worker to terminate
 		_, err := w.WaitFor(ctx, params.Timeout)
 		if err != nil {
@@ -78,5 +80,5 @@ func stopWorker(
 		return nil
 	}
 
-	return waitFunc, nil
+	return releaseFunc, nil
 }

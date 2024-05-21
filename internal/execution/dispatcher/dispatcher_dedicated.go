@@ -31,85 +31,90 @@ type DedicatedDispatcherParams[I, O any] struct {
 	Log *zap.Logger
 }
 
-func NewDedicatedDispatcher[I, O any](params DedicatedDispatcherParams[I, O]) (Dispatcher[I, O], error) {
-	log := params.Log.Named("dispatcher")
-
+func NewDedicatedDispatcher[I, O any](
+	params DedicatedDispatcherParams[I, O],
+) (Dispatcher[I, O], error) {
 	if params.SupervisorFactory == nil {
 		params.SupervisorFactory = defaultSupervisorFactory
 	}
 
-	supervisor, err := createSupervisor[I, O](params)
+	supervisor, err := createSupervisor(params)
 	if err != nil {
 		return nil, err
 	}
 
 	return &DedicatedDispatcher[I, O]{
 		supervisor: supervisor,
-		log:        log.Named("controller"),
+		log:        params.Log.Named("dispatcher_dedicated"),
 	}, nil
 }
 
 func (m *DedicatedDispatcher[I, O]) Start(ctx context.Context) error {
-	m.log.Debug("booting supervisor")
+	m.log.Debug("booting")
 
 	if err := m.supervisor.Start(ctx); err != nil {
-		m.log.Error("error booting supervisor", zap.Error(err))
+		m.log.Error("error booting", zap.Error(err))
 		return err
 	}
 
-	m.log.Debug("done booting supervisor")
+	m.log.Debug("done booting")
 
 	return nil
 }
 
-func (m *DedicatedDispatcher[I, O]) Send(ctx context.Context, data I) (O, error) {
-
+func (m *DedicatedDispatcher[I, O]) Send(
+	ctx context.Context,
+	data I,
+) (O, error) {
 	m.log.Debug("sending message")
 
 	res, err := m.supervisor.Send(ctx, data)
 	if err != nil {
-		m.log.Error("error sending data to supervisor", zap.Error(err))
+		m.log.Error("error sending message", zap.Error(err))
 		var zero O
 		return zero, fmt.Errorf("error sending data: %w", err)
 	}
 
 	// TODO: ignore release error?
-	if err := res.Release(); err != nil {
+	// TODO: move into background goroutine?
+	if err := res.Release(ctx); err != nil {
 		m.log.Error("error releasing worker", zap.Error(err))
 		return res.Data, fmt.Errorf("error releasing worker: %w", err)
 	}
 
-	m.log.Debug("message sent to supervisor")
+	m.log.Debug("message sent")
 
 	return res.Data, nil
 }
 
 // Shutdown stops the dispatcher and waits for all workers to finish.
 func (m *DedicatedDispatcher[I, O]) Shutdown(ctx context.Context) error {
-	m.log.Debug("shutting down supervisor")
+	m.log.Debug("shutting down")
 
 	wait, err := m.supervisor.Shutdown(ctx)
 	if err != nil {
-		m.log.Error("error shutting down supervisor", zap.Error(err))
+		m.log.Error("error shutting down", zap.Error(err))
 		return err
 	}
 
 	if wait == nil {
-		m.log.Warn("supervisor did not return a wait function")
+		m.log.Warn("missing wait function")
 		return nil
 	}
 
 	if err := wait(); err != nil {
-		m.log.Error("error waiting for supervisor to shut down", zap.Error(err))
+		m.log.Error("error waiting for shut down", zap.Error(err))
 		return err
 	}
 
-	m.log.Debug("supervisor shut down")
+	m.log.Debug("shut down")
 
 	return nil
 }
 
-func createSupervisor[I, O any](params DedicatedDispatcherParams[I, O]) (supervisor.Supervisor[I, O], error) {
+func createSupervisor[I, O any](
+	params DedicatedDispatcherParams[I, O],
+) (supervisor.Supervisor[I, O], error) {
 	return params.SupervisorFactory(supervisor.Params[I, O]{
 		Config: params.Config.Supervisor,
 		Log:    params.Log,

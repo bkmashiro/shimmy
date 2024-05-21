@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"os"
 	"os/exec"
 	"syscall"
 
@@ -20,7 +19,11 @@ type proc struct {
 	log *zap.Logger
 }
 
-func startProc(ctx context.Context, config StartConfig, log *zap.Logger) (*proc, error) {
+func startProc(
+	ctx context.Context,
+	config StartConfig,
+	log *zap.Logger,
+) (*proc, error) {
 	log = log.Named("proc")
 
 	// start process w/ context, so the process is SIGKILL'd when
@@ -28,7 +31,8 @@ func startProc(ctx context.Context, config StartConfig, log *zap.Logger) (*proc,
 	// processes when normal termination fails.
 	cmd := exec.CommandContext(ctx, config.Cmd, config.Args...)
 
-	env := os.Environ()
+	// env := os.Environ()
+	env := []string{}
 	if config.Env != nil {
 		env = append(env, config.Env...)
 	}
@@ -109,8 +113,8 @@ func (p *proc) halt(signal syscall.Signal) error {
 	return nil
 }
 
-// Wait waits for the process to exit. The method blocks until the process exits.
-// The method returns an error if the process exits with a non-zero exit code.
+// Wait blocks until the process exits. The method returns
+// an error if the process exits with a non-zero exit code.
 func (p *proc) Wait() error {
 	if p.cmd == nil {
 		return errors.New("process is not running")

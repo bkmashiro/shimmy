@@ -35,7 +35,7 @@ func TestFileAdapter_Start_DoesNotStartWorker(t *testing.T) {
 func TestFileAdapter_Stop_DoesNotStopWorker(t *testing.T) {
 	a, w := createFileAdapter(t)
 
-	_, err := a.Stop(context.Background(), worker.StopConfig{})
+	_, err := a.Stop(worker.StopConfig{})
 	assert.NoError(t, err)
 
 	w.AssertNotCalled(t, "Terminate")
@@ -54,7 +54,8 @@ func TestFileAdapter_Send(t *testing.T) {
 		_ = os.WriteFile(sp.Args[len(sp.Args)-1], data, os.ModeAppend)
 		return nil
 	})
-	w.EXPECT().WaitFor(mock.Anything, mock.Anything).Return(worker.ExitEvent{}, nil)
+	var cell int
+	w.EXPECT().WaitFor(mock.Anything, mock.Anything).Return(worker.ExitEvent{Code: &cell}, nil)
 
 	res, err := a.Send(ctx, data, 10)
 	assert.NoError(t, err)
@@ -93,7 +94,8 @@ func TestFileAdapter_Send_ReturnsReadError(t *testing.T) {
 	data := map[string]any{"foo": "bar"}
 
 	w.EXPECT().Start(ctx, mock.Anything).Return(nil)
-	w.EXPECT().WaitFor(ctx, mock.Anything).Return(worker.ExitEvent{}, nil)
+	var cell int
+	w.EXPECT().WaitFor(ctx, mock.Anything).Return(worker.ExitEvent{Code: &cell}, nil)
 
 	_, err := a.Send(ctx, data, 0)
 	assert.ErrorIs(t, err, io.EOF)

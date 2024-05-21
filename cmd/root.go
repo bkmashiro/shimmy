@@ -120,9 +120,9 @@ functions on arbitrary, serverless platforms.`
 
 			// parse config using env
 			cfg, err := conf.Parse[config.Config](conf.ParseOptions{
-				Log:    log,
 				Cli:    ctx,
 				CliMap: cliMap,
+				Log:    log,
 			})
 			if err != nil {
 				return err
@@ -204,8 +204,7 @@ func createLogger(ctx *cli.Context) (*zap.Logger, error) {
 }
 
 func getLogFormatFromCLI(ctx *cli.Context) string {
-	format := ctx.String("log-format")
-	if format != "" {
+	if format := ctx.String("log-format"); format != "" {
 		return format
 	}
 
@@ -213,9 +212,7 @@ func getLogFormatFromCLI(ctx *cli.Context) string {
 }
 
 func getLogLevelFromCLI(ctx *cli.Context) zap.AtomicLevel {
-	lvl := ctx.String("log-level")
-
-	if atom, err := zap.ParseAtomicLevel(lvl); err == nil {
+	if atom, err := zap.ParseAtomicLevel(ctx.String("log-level")); err == nil {
 		return atom
 	}
 

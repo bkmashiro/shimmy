@@ -3,7 +3,6 @@ package conf
 import (
 	"strings"
 
-	"github.com/knadh/koanf/parsers/dotenv"
 	"github.com/knadh/koanf/parsers/json"
 	"github.com/knadh/koanf/providers/confmap"
 	"github.com/knadh/koanf/providers/env"
@@ -15,12 +14,23 @@ import (
 )
 
 type ParseOptions struct {
-	Cli      *cli.Context
-	CliMap   map[string]string
+	// Cli is the cli.Context from urfave/cli
+	Cli *cli.Context
+
+	// CliMap is a map of cli flag names to config keys
+	CliMap map[string]string
+
+	// Defaults is a map of default values
 	Defaults DefaultConfig
-	Prefix   string
+
+	// EnvPrefix is the prefix for env vars
+	EnvPrefix string
+
+	// FileName is the name of the configuration file to load
 	FileName string
-	Log      *zap.Logger
+
+	// Log is the logger to use
+	Log *zap.Logger
 }
 
 func Parse[C any](opt ParseOptions) (C, error) {
@@ -40,20 +50,20 @@ func Parse[C any](opt ParseOptions) (C, error) {
 
 	if opt.FileName != "" {
 		if err := k.Load(file.Provider(opt.FileName), json.Parser()); err != nil {
-			log.With(zap.Error(err), zap.String("file", opt.FileName)).
-				Error("error parsing file")
+			log.Error("error parsing file",
+				zap.Error(err),
+				zap.String("file", opt.FileName),
+			)
 		}
 	}
 
-	dotenvParser := dotenv.ParserEnv(opt.Prefix, ".", transformEnv)
-
-	if err := k.Load(file.Provider(".env"), dotenvParser); err != nil {
-		log.Debug(".env not found", zap.Error(err))
+	transformPrefixedEnv := func(s string) string {
+		return transformEnv(s, opt.EnvPrefix)
 	}
 
 	var config C
 
-	if err := k.Load(env.Provider(opt.Prefix, ".", transformEnv), nil); err != nil {
+	if err := k.Load(env.Provider(opt.EnvPrefix, ".", transformPrefixedEnv), nil); err != nil {
 		log.Error("error parsing env vars", zap.Error(err))
 		return config, err
 	}
@@ -84,13 +94,15 @@ func Parse[C any](opt ParseOptions) (C, error) {
 	return config, nil
 }
 
-func transformEnv(s string) string {
+func transformEnv(s, prefix string) string {
 	// allow specifying nested env vars w/ __
 	normalized := strings.ReplaceAll(strings.ToLower(s), "__", ".")
 	// split normalized env var by separator
 	parts := strings.Split(normalized, ".")
-	// pop prefix
-	_, parts = parts[0], parts[1:]
+	// pop prefix if it is set
+	if prefix != "" {
+		_, parts = parts[0], parts[1:]
+	}
 	// create final string
 	return strings.Join(parts, ".")
 }

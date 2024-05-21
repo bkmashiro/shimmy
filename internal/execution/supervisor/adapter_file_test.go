@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/lambda-feedback/shimmy/internal/execution/worker"
@@ -55,6 +56,7 @@ func TestFileAdapter_Send(t *testing.T) {
 		_ = os.WriteFile(sp.Args[len(sp.Args)-1], data, os.ModeAppend)
 		return nil
 	})
+	w.EXPECT().ReadPipe().Return(io.NopCloser(strings.NewReader("")), nil)
 	var cell int
 	w.EXPECT().WaitFor(mock.Anything, mock.Anything).Return(worker.ExitEvent{Code: &cell}, nil)
 
@@ -69,6 +71,7 @@ func TestFileAdapter_Send_ReturnsStartError(t *testing.T) {
 	ctx := context.Background()
 	data := map[string]any{"foo": "bar"}
 
+	w.EXPECT().ReadPipe().Return(io.NopCloser(strings.NewReader("")), nil)
 	w.EXPECT().Start(ctx).Return(assert.AnError)
 
 	_, err := a.Send(ctx, data, 0)
@@ -82,6 +85,7 @@ func TestFileAdapter_Send_ReturnsWaitForError(t *testing.T) {
 	data := map[string]any{"foo": "bar"}
 
 	w.EXPECT().Start(ctx).Return(nil)
+	w.EXPECT().ReadPipe().Return(io.NopCloser(strings.NewReader("")), nil)
 	w.EXPECT().WaitFor(ctx, mock.Anything).Return(worker.ExitEvent{}, assert.AnError)
 
 	_, err := a.Send(ctx, data, 0)
@@ -95,6 +99,7 @@ func TestFileAdapter_Send_ReturnsReadError(t *testing.T) {
 	data := map[string]any{"foo": "bar"}
 
 	w.EXPECT().Start(ctx).Return(nil)
+	w.EXPECT().ReadPipe().Return(io.NopCloser(strings.NewReader("")), nil)
 	var cell int
 	w.EXPECT().WaitFor(ctx, mock.Anything).Return(worker.ExitEvent{Code: &cell}, nil)
 

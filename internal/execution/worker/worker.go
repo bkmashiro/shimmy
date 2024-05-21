@@ -54,11 +54,35 @@ func (e ExitEvent) String() string {
 }
 
 type Worker interface {
+	// Start starts the worker. The method returns immediately,
+	// without waiting for the process to start.
 	Start(context.Context) error
-	Stream() (io.ReadWriteCloser, error)
+
+	// Terminate terminates the worker. The method returns
+	// immediately, without waiting for the process to stop.
 	Terminate() error
+
+	// Wait blocks until the process exits. The method
+	// returns an ExitEvent that contains the exit status
+	// of the process. If the process is already terminated,
+	// the method returns immediately.
 	Wait(context.Context) (ExitEvent, error)
+
+	// WaitFor blocks until the process exits or
+	// the timeout is reached.
 	WaitFor(context.Context, time.Duration) (ExitEvent, error)
+
+	// ReadPipe returns a reader that can be used
+	// to read the output of a worker.
+	ReadPipe() (io.ReadCloser, error)
+
+	// WritePipe returns a writer that can be used
+	// to write to the worker.
+	WritePipe() (io.WriteCloser, error)
+
+	// DuplexPipe returns a reader and writer that
+	// can be used to read and write to the worker.
+	DuplexPipe() (io.ReadWriteCloser, error)
 }
 
 type ProcessWorker struct {
@@ -313,11 +337,47 @@ func getExitEvent(err error, stderr string) ExitEvent {
 	}
 }
 
-// Stream returns a `io.ReadWriteCloser` that can be used to
+// MARK: - Pipes
+
+// ReadPipe returns a `io.ReadCloser` that can be used to read
+// the process' stdout.
+func (w *ProcessWorker) ReadPipe() (io.ReadCloser, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.cmd.Process != nil {
+		return nil, ErrWorkerAlreadyStarted
+	}
+
+	stdout, err := w.cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stdout pipe: %w", err)
+	}
+
+	return stdout, nil
+}
+
+// WritePipe returns a `io.WriteCloser` that can be used to write
+// to the process' stdin.
+func (w *ProcessWorker) WritePipe() (io.WriteCloser, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.cmd.Process != nil {
+		return nil, ErrWorkerAlreadyStarted
+	}
+
+	stdin, err := w.cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stdin pipe: %w", err)
+	}
+
+	return stdin, nil
+}
+
+// DuplexPipe returns a `io.ReadWriteCloser` that can be used to
 // read from and write to the process' stdout and stdin.
-//
-// The stream has to be created before the
-func (w *ProcessWorker) Stream() (io.ReadWriteCloser, error) {
+func (w *ProcessWorker) DuplexPipe() (io.ReadWriteCloser, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 

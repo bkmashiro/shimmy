@@ -1,11 +1,14 @@
 package supervisor
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/lambda-feedback/shimmy/internal/execution/worker"
@@ -122,24 +125,34 @@ func (a *fileAdapter[I, O]) Send(
 		return out, fmt.Errorf("error creating worker: %w", err)
 	}
 
+	pipe, err := worker.ReadPipe()
+	if err != nil {
+		return out, fmt.Errorf("error getting read pipe: %w", err)
+	}
+
+	var stdoutWg sync.WaitGroup
+
+	stdoutWg.Add(1)
+	go func() {
+		defer stdoutWg.Done()
+
+		// capture stdout
+		var buf bytes.Buffer
+		_, err := io.Copy(&buf, pipe)
+		if err != nil && err != io.EOF {
+			a.log.Warn("failed to read from stdout",
+				zap.String("data", buf.String()),
+				zap.Error(err),
+			)
+		}
+		a.log.Debug("stdout", zap.String("data", buf.String()))
+	}()
+
 	if err := worker.Start(ctx); err != nil {
 		return out, fmt.Errorf("error starting process: %w", err)
 	}
 
-	// var stdoutWg sync.WaitGroup
-
-	// stdoutWg.Add(1)
-	// go func() {
-	// 	defer stdoutWg.Done()
-
-	// 	// capture stdout
-	// 	var buf bytes.Buffer
-	// 	_, err := io.Copy(&buf, )
-	// 	if err != nil && err != io.EOF {
-	// 		w.log.Warn("failed to read from stdout", zap.Error(err))
-	// 	}
-	// 	w.log.Debug("stdout", zap.String("data", buf.String()))
-	// }()
+	stdoutWg.Wait()
 
 	// wait for worker to terminate (find another way to read res earlier?)
 	exitEvent, err := worker.WaitFor(ctx, timeout)

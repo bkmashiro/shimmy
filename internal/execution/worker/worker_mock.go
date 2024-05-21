@@ -24,6 +24,120 @@ func (_m *MockWorker) EXPECT() *MockWorker_Expecter {
 	return &MockWorker_Expecter{mock: &_m.Mock}
 }
 
+// DuplexPipe provides a mock function with given fields:
+func (_m *MockWorker) DuplexPipe() (io.ReadWriteCloser, error) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for DuplexPipe")
+	}
+
+	var r0 io.ReadWriteCloser
+	var r1 error
+	if rf, ok := ret.Get(0).(func() (io.ReadWriteCloser, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() io.ReadWriteCloser); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(io.ReadWriteCloser)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockWorker_DuplexPipe_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DuplexPipe'
+type MockWorker_DuplexPipe_Call struct {
+	*mock.Call
+}
+
+// DuplexPipe is a helper method to define mock.On call
+func (_e *MockWorker_Expecter) DuplexPipe() *MockWorker_DuplexPipe_Call {
+	return &MockWorker_DuplexPipe_Call{Call: _e.mock.On("DuplexPipe")}
+}
+
+func (_c *MockWorker_DuplexPipe_Call) Run(run func()) *MockWorker_DuplexPipe_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWorker_DuplexPipe_Call) Return(_a0 io.ReadWriteCloser, _a1 error) *MockWorker_DuplexPipe_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockWorker_DuplexPipe_Call) RunAndReturn(run func() (io.ReadWriteCloser, error)) *MockWorker_DuplexPipe_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ReadPipe provides a mock function with given fields:
+func (_m *MockWorker) ReadPipe() (io.ReadCloser, error) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ReadPipe")
+	}
+
+	var r0 io.ReadCloser
+	var r1 error
+	if rf, ok := ret.Get(0).(func() (io.ReadCloser, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() io.ReadCloser); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(io.ReadCloser)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockWorker_ReadPipe_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReadPipe'
+type MockWorker_ReadPipe_Call struct {
+	*mock.Call
+}
+
+// ReadPipe is a helper method to define mock.On call
+func (_e *MockWorker_Expecter) ReadPipe() *MockWorker_ReadPipe_Call {
+	return &MockWorker_ReadPipe_Call{Call: _e.mock.On("ReadPipe")}
+}
+
+func (_c *MockWorker_ReadPipe_Call) Run(run func()) *MockWorker_ReadPipe_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWorker_ReadPipe_Call) Return(_a0 io.ReadCloser, _a1 error) *MockWorker_ReadPipe_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockWorker_ReadPipe_Call) RunAndReturn(run func() (io.ReadCloser, error)) *MockWorker_ReadPipe_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Start provides a mock function with given fields: _a0
 func (_m *MockWorker) Start(_a0 context.Context) error {
 	ret := _m.Called(_a0)
@@ -66,63 +180,6 @@ func (_c *MockWorker_Start_Call) Return(_a0 error) *MockWorker_Start_Call {
 }
 
 func (_c *MockWorker_Start_Call) RunAndReturn(run func(context.Context) error) *MockWorker_Start_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// Stream provides a mock function with given fields:
-func (_m *MockWorker) Stream() (io.ReadWriteCloser, error) {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for Stream")
-	}
-
-	var r0 io.ReadWriteCloser
-	var r1 error
-	if rf, ok := ret.Get(0).(func() (io.ReadWriteCloser, error)); ok {
-		return rf()
-	}
-	if rf, ok := ret.Get(0).(func() io.ReadWriteCloser); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(io.ReadWriteCloser)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func() error); ok {
-		r1 = rf()
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockWorker_Stream_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Stream'
-type MockWorker_Stream_Call struct {
-	*mock.Call
-}
-
-// Stream is a helper method to define mock.On call
-func (_e *MockWorker_Expecter) Stream() *MockWorker_Stream_Call {
-	return &MockWorker_Stream_Call{Call: _e.mock.On("Stream")}
-}
-
-func (_c *MockWorker_Stream_Call) Run(run func()) *MockWorker_Stream_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockWorker_Stream_Call) Return(_a0 io.ReadWriteCloser, _a1 error) *MockWorker_Stream_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockWorker_Stream_Call) RunAndReturn(run func() (io.ReadWriteCloser, error)) *MockWorker_Stream_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -281,6 +338,63 @@ func (_c *MockWorker_WaitFor_Call) Return(_a0 ExitEvent, _a1 error) *MockWorker_
 }
 
 func (_c *MockWorker_WaitFor_Call) RunAndReturn(run func(context.Context, time.Duration) (ExitEvent, error)) *MockWorker_WaitFor_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// WritePipe provides a mock function with given fields:
+func (_m *MockWorker) WritePipe() (io.WriteCloser, error) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for WritePipe")
+	}
+
+	var r0 io.WriteCloser
+	var r1 error
+	if rf, ok := ret.Get(0).(func() (io.WriteCloser, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() io.WriteCloser); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(io.WriteCloser)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockWorker_WritePipe_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WritePipe'
+type MockWorker_WritePipe_Call struct {
+	*mock.Call
+}
+
+// WritePipe is a helper method to define mock.On call
+func (_e *MockWorker_Expecter) WritePipe() *MockWorker_WritePipe_Call {
+	return &MockWorker_WritePipe_Call{Call: _e.mock.On("WritePipe")}
+}
+
+func (_c *MockWorker_WritePipe_Call) Run(run func()) *MockWorker_WritePipe_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWorker_WritePipe_Call) Return(_a0 io.WriteCloser, _a1 error) *MockWorker_WritePipe_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockWorker_WritePipe_Call) RunAndReturn(run func() (io.WriteCloser, error)) *MockWorker_WritePipe_Call {
 	_c.Call.Return(run)
 	return _c
 }

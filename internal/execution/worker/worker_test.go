@@ -204,7 +204,7 @@ func TestWorker_Terminate_TerminatesProcess(t *testing.T) {
 	assert.Equal(t, false, util.IsProcessAlive(w.Pid()))
 }
 
-func TestWorker_Stream_ReturnsErrorIfAlreadyStarted(t *testing.T) {
+func TestWorker_DuplexPipe_ReturnsErrorIfAlreadyStarted(t *testing.T) {
 	w := worker.NewProcessWorker(context.Background(), worker.StartConfig{Cmd: "cat"}, zap.NewNop())
 
 	err := w.Start(context.Background())
@@ -212,22 +212,22 @@ func TestWorker_Stream_ReturnsErrorIfAlreadyStarted(t *testing.T) {
 
 	defer w.Terminate()
 
-	_, err = w.Stream()
+	_, err = w.DuplexPipe()
 	assert.Error(t, err)
 }
 
-func TestWorker_Stream_ReturnsReadWriteStream(t *testing.T) {
+func TestWorker_DuplexPipe_ReturnsReadWriteStream(t *testing.T) {
 	w := worker.NewProcessWorker(context.Background(), worker.StartConfig{Cmd: "cat"}, zap.NewNop())
 
-	stream, err := w.Stream()
+	pipe, err := w.DuplexPipe()
 	assert.NoError(t, err)
-	assert.NotNil(t, stream)
+	assert.NotNil(t, pipe)
 }
 
 func TestWorker_Write_WritesToStdin(t *testing.T) {
 	w := worker.NewProcessWorker(context.Background(), worker.StartConfig{Cmd: "cat"}, zap.NewNop())
 
-	stream, err := w.Stream()
+	pipe, err := w.DuplexPipe()
 	assert.NoError(t, err)
 
 	err = w.Start(context.Background())
@@ -237,13 +237,13 @@ func TestWorker_Write_WritesToStdin(t *testing.T) {
 
 	input := "foobar"
 
-	_, err = io.Copy(stream, strings.NewReader(input))
+	_, err = io.Copy(pipe, strings.NewReader(input))
 	assert.NoError(t, err)
 
-	stream.Close()
+	pipe.Close()
 
 	var outputBuf bytes.Buffer
-	_, err = io.Copy(&outputBuf, stream)
+	_, err = io.Copy(&outputBuf, pipe)
 	assert.NoError(t, err)
 
 	assert.Equal(t, input, outputBuf.String())
@@ -255,10 +255,10 @@ func TestWorker_Read_ReadsFromStdout(t *testing.T) {
 		Args: []string{"foobar"},
 	}, zap.NewNop())
 
-	stream, err := w.Stream()
+	readPipe, err := w.ReadPipe()
 	assert.NoError(t, err)
 
-	defer stream.Close()
+	defer readPipe.Close()
 
 	err = w.Start(context.Background())
 	assert.NoError(t, err)
@@ -266,7 +266,7 @@ func TestWorker_Read_ReadsFromStdout(t *testing.T) {
 	defer w.Terminate()
 
 	var outputBuf bytes.Buffer
-	_, err = io.Copy(&outputBuf, stream)
+	_, err = io.Copy(&outputBuf, readPipe)
 	assert.NoError(t, err)
 
 	assert.Equal(t, "foobar\n", outputBuf.String())

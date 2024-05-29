@@ -248,21 +248,21 @@ func (w *ProcessWorker) WaitFor(
 // Terminate sends a SIGTERM signal to the worker process. The method
 // returns immediately, without waiting for the process to stop.
 func (w *ProcessWorker) Terminate() error {
-	return w.halt(syscall.SIGTERM)
+	return w.halt(false)
 }
 
 // Terminate sends a SIGKILL signal to the worker process. The method
 // returns immediately, without waiting for the process to stop.
 func (w *ProcessWorker) Kill() error {
-	return w.halt(syscall.SIGKILL)
+	return w.halt(true)
 }
 
-func (w *ProcessWorker) halt(signal syscall.Signal) error {
+func (w *ProcessWorker) halt(force bool) error {
 	if w.cmd.Process == nil {
 		return errors.New("process is not running")
 	}
 
-	log := w.log.With(zap.Stringer("signal", signal))
+	log := w.log.With(zap.Bool("force", force))
 
 	// close stdin before killing the process, to
 	// avoid the process hanging on input
@@ -271,20 +271,11 @@ func (w *ProcessWorker) halt(signal syscall.Signal) error {
 	// }
 
 	// best effort, ignore errors
-	if err := w.sendKillSignal(signal); err != nil {
+	if err := w.killProcess(force); err != nil {
 		log.Warn("sending signal failed", zap.Error(err))
 	}
 
 	return nil
-}
-
-func (p *ProcessWorker) sendKillSignal(signal syscall.Signal) error {
-	if pgid, err := syscall.Getpgid(p.cmd.Process.Pid); err == nil {
-		// Negative pid sends signal to all in process group
-		return syscall.Kill(-pgid, signal)
-	} else {
-		return syscall.Kill(p.cmd.Process.Pid, signal)
-	}
 }
 
 func (w *ProcessWorker) Pid() int {
@@ -440,7 +431,7 @@ func createCmd(ctx context.Context, config StartConfig) *exec.Cmd {
 	// as we could run into deadlocks otherwise, if the system's stdout
 	// or stderr buffers run full.
 
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	initCmd(cmd)
 
 	return cmd
 }

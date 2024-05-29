@@ -15,6 +15,7 @@ jobs:
     env:
       VERSION: ${{ github.ref_name }}
       COMMIT: ${{ github.sha }}
+      BINARY_NAME: ${{ matrix.os == 'windows' && 'shimmy.exe' || 'shimmy' }}
     strategy:
       matrix:
         include:
@@ -22,6 +23,7 @@ jobs:
           - { runner: macos-latest, os: darwin, arch: arm64 }
           - { runner: ubuntu-latest, os: linux, arch: amd64, env: CGO_ENABLED=0 }
           - { runner: ubuntu-latest, os: linux, arch: arm64, env: CGO_ENABLED=0 }
+          - { runner: ubuntu-latest, os: windows, arch: amd64, env: CGO_ENABLED=0 }
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -48,8 +50,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: shimmy-${{ matrix.os }}-${{ matrix.arch }}
-          path: ./bin/shimmy
+          path: ./bin/${{ env.BINARY_NAME }}
 
+  # TODO: Test on windows
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -98,7 +101,6 @@ jobs:
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx (QEMU)
-        if: github.ref_name == github.event.repository.default_branch
         uses: docker/setup-buildx-action@v3
 
       - name: Login to Github Packages

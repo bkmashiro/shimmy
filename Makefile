@@ -7,12 +7,14 @@ GOLDFLAGS += -X main.Buildtime=$(BUILDTIME)
 GOLDFLAGS += -X main.Commit=$(COMMIT)
 GOFLAGS = -ldflags "$(GOLDFLAGS)"
 
+BINARY_NAME ?= shimmy
+
 .PHONY: all build test test-unit lcov install generate-mocks update-schema
 
 all: build
 
 build:
-	go build -o ./bin/shimmy -trimpath -buildvcs=false $(GOFLAGS) .
+	go build -o ./bin/$(BINARY_NAME) -trimpath -buildvcs=false $(GOFLAGS) .
 
 test: test-unit
 

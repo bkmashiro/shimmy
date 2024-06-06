@@ -158,7 +158,7 @@ func (s *RuntimeHandler) getCommand(req Request) (string, bool) {
 	}
 
 	pathElements := strings.Split(strings.TrimPrefix(req.Path, "/"), "/")
-	if len(pathElements) == 1 {
+	if len(pathElements) == 1 && pathElements[0] != "" {
 		return pathElements[0], true
 	}
 

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"sync"
 	"time"
 
@@ -65,8 +66,23 @@ func (a *fileAdapter[I, O]) Send(
 		return out, errors.New("no worker factory provided")
 	}
 
+	// temp dir path
+	workingDir := path.Join(os.TempDir(), "shimmy")
+
+	// create temp dir if it doesn't exist
+	err := os.Mkdir(workingDir, 0755)
+	if err != nil && !errors.Is(err, os.ErrExist) {
+		return out, fmt.Errorf("error creating working dir: %w", err)
+	}
+
+	// create temp dir for request and response files
+	tmpPath, err := os.MkdirTemp(workingDir, "*")
+	if err != nil {
+		return out, fmt.Errorf("error creating temp dir: %w", err)
+	}
+
 	// create temp files for request and response data
-	reqFile, err := os.CreateTemp("", "request-data-*")
+	reqFile, err := os.CreateTemp(tmpPath, "request-data-*")
 	if err != nil {
 		return out, fmt.Errorf("error creating temp file: %w", err)
 	}
@@ -76,7 +92,7 @@ func (a *fileAdapter[I, O]) Send(
 		}
 	}()
 
-	resFile, err := os.CreateTemp("", "response-data-*")
+	resFile, err := os.CreateTemp(tmpPath, "response-data-*")
 	if err != nil {
 		return out, fmt.Errorf("error creating temp file: %w", err)
 	}

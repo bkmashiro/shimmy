@@ -83,7 +83,7 @@ func TestWorker_CapturesStderr(t *testing.T) {
 	err := w.Start(context.Background())
 	assert.NoError(t, err)
 
-	defer w.Terminate()
+	defer w.Stop()
 
 	evt, err := w.Wait(context.Background())
 	assert.NoError(t, err)
@@ -98,7 +98,7 @@ func TestWorker_Wait_ReturnsExitEvent(t *testing.T) {
 	err := w.Start(context.Background())
 	assert.NoError(t, err)
 
-	defer w.Terminate()
+	defer w.Stop()
 
 	evt, err := w.Wait(context.Background())
 	assert.NoError(t, err)
@@ -113,7 +113,7 @@ func TestWorker_Wait_ReturnsErrorIfContextCancelled(t *testing.T) {
 	err := w.Start(context.Background())
 	assert.NoError(t, err)
 
-	defer w.Terminate()
+	defer w.Stop()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -127,7 +127,7 @@ func TestWorker_Wait_ReturnsErrorIfCalledMultiple(t *testing.T) {
 	err := w.Start(context.Background())
 	assert.NoError(t, err)
 
-	w.Terminate()
+	w.Stop()
 
 	_, err = w.Wait(context.Background())
 	assert.NoError(t, err)
@@ -142,7 +142,7 @@ func TestWorker_WaitFor_ReturnsExitEvent(t *testing.T) {
 	err := w.Start(context.Background())
 	assert.NoError(t, err)
 
-	defer w.Terminate()
+	defer w.Stop()
 
 	evt, err := w.WaitFor(context.Background(), 0)
 	assert.NoError(t, err)
@@ -160,7 +160,7 @@ func TestWorker_WaitFor_ReturnsErrorIfTimeout(t *testing.T) {
 	err := w.Start(context.Background())
 	assert.NoError(t, err)
 
-	defer w.Terminate()
+	defer w.Stop()
 
 	_, err = w.WaitFor(context.Background(), 100*time.Millisecond)
 	assert.Error(t, err)
@@ -191,7 +191,7 @@ func TestWorker_Terminate_TerminatesProcess(t *testing.T) {
 	err := w.Start(context.Background())
 	assert.NoError(t, err)
 
-	w.Terminate()
+	w.Stop()
 
 	evt, err := w.Wait(context.Background())
 	assert.NoError(t, err)
@@ -210,7 +210,7 @@ func TestWorker_DuplexPipe_ReturnsErrorIfAlreadyStarted(t *testing.T) {
 	err := w.Start(context.Background())
 	assert.NoError(t, err)
 
-	defer w.Terminate()
+	defer w.Stop()
 
 	_, err = w.DuplexPipe()
 	assert.Error(t, err)
@@ -233,7 +233,7 @@ func TestWorker_Write_WritesToStdin(t *testing.T) {
 	err = w.Start(context.Background())
 	assert.NoError(t, err)
 
-	defer w.Terminate()
+	defer w.Stop()
 
 	input := "foobar"
 
@@ -263,7 +263,7 @@ func TestWorker_Read_ReadsFromStdout(t *testing.T) {
 	err = w.Start(context.Background())
 	assert.NoError(t, err)
 
-	defer w.Terminate()
+	defer w.Stop()
 
 	var outputBuf bytes.Buffer
 	_, err = io.Copy(&outputBuf, readPipe)

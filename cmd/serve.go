@@ -61,7 +61,6 @@ func serveAction(ctx *cli.Context) error {
 	}
 
 	cfg, err := conf.Parse[standalone.Config](conf.ParseOptions{
-		Log: log,
 		Cli: ctx,
 	})
 	if err != nil {

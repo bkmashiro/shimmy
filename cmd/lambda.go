@@ -19,7 +19,7 @@ The command will start the AWS runtime interface client and
 blocks indefinitely, processing incoming AWS Lambda events.`
 	lambdaCmd = &cli.Command{
 		Name:        "lambda",
-		Usage:       "Run the AWS Lambda handler",
+		Usage:       "Run the AWS Lambda handler.",
 		Description: lambdaCmdDescription,
 		Action:      lambdaAction,
 		Flags: []cli.Flag{
@@ -46,7 +46,6 @@ func lambdaAction(ctx *cli.Context) error {
 	}
 
 	cfg, err := conf.Parse[lambda.Config](conf.ParseOptions{
-		Log: log,
 		Cli: ctx,
 	})
 	if err != nil {

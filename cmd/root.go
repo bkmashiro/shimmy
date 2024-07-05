@@ -38,15 +38,15 @@ functions on arbitrary, serverless platforms.`
 			// shim flags
 			&cli.StringFlag{
 				Name:     "interface",
-				Usage:    "the interface to use for communication with the worker process. Options: stdio, file.",
+				Usage:    "the interface to use for worker process communication. Options: rpc, file.",
 				Aliases:  []string{"i"},
-				Value:    "stdio",
+				Value:    "rpc",
 				Category: "function",
 				EnvVars:  []string{"FUNCTION_INTERFACE"},
 			},
 			&cli.StringFlag{
 				Name:     "command",
-				Usage:    "the command to invoke in order to start the worker process.",
+				Usage:    "the command to invoke to start the worker process.",
 				Aliases:  []string{"c"},
 				Category: "function",
 				EnvVars:  []string{"FUNCTION_COMMAND"},
@@ -54,47 +54,58 @@ functions on arbitrary, serverless platforms.`
 			},
 			&cli.StringFlag{
 				Name:     "cwd",
-				Usage:    "the working directory to use when invoking the worker process.",
+				Usage:    "the working directory for the worker process.",
 				Aliases:  []string{"d"},
 				Category: "function",
 				EnvVars:  []string{"FUNCTION_WORKING_DIR"},
 			},
 			&cli.StringSliceFlag{
 				Name:     "arg",
-				Usage:    "additional arguments to pass to the worker process.",
+				Usage:    "additional arguments for to the worker process.",
 				Aliases:  []string{"a"},
 				Category: "function",
 				EnvVars:  []string{"FUNCTION_ARGS"},
 			},
 			&cli.StringSliceFlag{
 				Name:     "env",
-				Usage:    "additional environment variables to pass to the worker process.",
+				Usage:    "additional environment variables for the worker process.",
 				Aliases:  []string{"e"},
 				Category: "function",
 				EnvVars:  []string{"FUNCTION_ENV"},
 			},
-			&cli.BoolFlag{
-				Name:     "persistent",
-				Usage:    "the worker process is capable of handling more than one event.",
-				Aliases:  []string{"p"},
-				Category: "function",
-				EnvVars:  []string{"FUNCTION_DISPOSABLE"},
-			},
-			// &cli.StringFlag{
-			// 	Name:     "encoding",
-			// 	Usage:    "the encoding of the event data. Options: json.",
-			// 	Aliases:  []string{"e"},
-			// 	Value:    "json",
-			// 	Category: "function",
-			// 	EnvVars:  []string{"FUNCTION_ENCODING"},
-			// },
 			&cli.IntFlag{
-				Name:     "max-workers",
-				Usage:    "",
-				Value:    1,
-				Aliases:  []string{"n"},
-				Category: "function",
-				EnvVars:  []string{"FUNCTION_MAX_PROCS"},
+				Name:        "max-workers",
+				Usage:       "the maximum number of worker processes to run concurrently.",
+				DefaultText: "number of CPU cores",
+				Value:       0,
+				Aliases:     []string{"n"},
+				Category:    "function",
+				EnvVars:     []string{"FUNCTION_MAX_PROCS"},
+			},
+			&cli.StringFlag{
+				Name:     "rpc-transport",
+				Usage:    "the transport to use for the RPC interface. Options: stdio, ipc, http, ws.",
+				Value:    "stdio",
+				EnvVars:  []string{"FUNCTION_RPC_TRANSPORT"},
+				Category: "rpc",
+			},
+			&cli.StringFlag{
+				Name:     "rpc-transport-ipc-endpoint",
+				Usage:    "the IPC endpoint to use for the IPC transport. Default: /tmp/eval.sock",
+				EnvVars:  []string{"FUNCTION_RPC_TRANSPORT_IPC_ENDPOINT"},
+				Category: "rpc",
+			},
+			&cli.StringFlag{
+				Name:     "rpc-transport-http-url",
+				Usage:    "the url to use for the HTTP transport. Default: http://localhost:7321",
+				EnvVars:  []string{"FUNCTION_RPC_TRANSPORT_HTTP_URL"},
+				Category: "rpc",
+			},
+			&cli.StringFlag{
+				Name:     "rpc-transport-ws-url",
+				Usage:    "the url to use for the WebSocket transport. Default: ws://localhost:7321",
+				EnvVars:  []string{"FUNCTION_RPC_TRANSPORT_WS_URL"},
+				Category: "rpc",
 			},
 		},
 		Before: func(ctx *cli.Context) error {
@@ -107,23 +118,8 @@ functions on arbitrary, serverless platforms.`
 			// inject logger into cli context
 			ctx.Context = logging.ContextWithLogger(ctx.Context, log)
 
-			// map cli flags to config fields
-			cliMap := map[string]string{
-				"max-workers": "runtime.max_workers",
-				"persistent":  "runtime.persistent",
-				"interface":   "runtime.interface",
-				"command":     "runtime.cmd",
-				"cwd":         "runtime.cwd",
-				"arg":         "runtime.arg",
-				"env":         "runtime.env",
-			}
-
-			// parse config using env
-			cfg, err := conf.Parse[config.Config](conf.ParseOptions{
-				Cli:    ctx,
-				CliMap: cliMap,
-				Log:    log,
-			})
+			// create the config
+			cfg, err := parseRootConfig(ctx)
 			if err != nil {
 				return err
 			}
@@ -215,4 +211,32 @@ func getLogLevelFromCLI(ctx *cli.Context) zap.AtomicLevel {
 	}
 
 	return zap.NewAtomicLevelAt(zap.InfoLevel)
+}
+
+func parseRootConfig(ctx *cli.Context) (config.Config, error) {
+
+	// map cli flags to config fields
+	cliMap := map[string]string{
+		"max-workers":                "runtime.max_workers",
+		"command":                    "runtime.cmd",
+		"cwd":                        "runtime.cwd",
+		"arg":                        "runtime.arg",
+		"env":                        "runtime.env",
+		"interface":                  "runtime.io.interface",
+		"rpc-transport":              "runtime.io.rpc.transport",
+		"rpc-transport-ipc-endpoint": "runtime.io.rpc.ipc.endpoint",
+		"rpc-transport-http-url":     "runtime.io.rpc.http.url",
+		"rpc-transport-ws-url":       "runtime.io.rpc.ws.url",
+	}
+
+	// parse config using env
+	cfg, err := conf.Parse[config.Config](conf.ParseOptions{
+		Cli:    ctx,
+		CliMap: cliMap,
+	})
+	if err != nil {
+		return config.Config{}, err
+	}
+
+	return cfg, err
 }

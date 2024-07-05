@@ -184,12 +184,12 @@ func (_c *MockWorker_Start_Call) RunAndReturn(run func(context.Context) error) *
 	return _c
 }
 
-// Terminate provides a mock function with given fields:
-func (_m *MockWorker) Terminate() error {
+// Stop provides a mock function with given fields:
+func (_m *MockWorker) Stop() error {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
-		panic("no return value specified for Terminate")
+		panic("no return value specified for Stop")
 	}
 
 	var r0 error
@@ -202,29 +202,29 @@ func (_m *MockWorker) Terminate() error {
 	return r0
 }
 
-// MockWorker_Terminate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Terminate'
-type MockWorker_Terminate_Call struct {
+// MockWorker_Stop_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Stop'
+type MockWorker_Stop_Call struct {
 	*mock.Call
 }
 
-// Terminate is a helper method to define mock.On call
-func (_e *MockWorker_Expecter) Terminate() *MockWorker_Terminate_Call {
-	return &MockWorker_Terminate_Call{Call: _e.mock.On("Terminate")}
+// Stop is a helper method to define mock.On call
+func (_e *MockWorker_Expecter) Stop() *MockWorker_Stop_Call {
+	return &MockWorker_Stop_Call{Call: _e.mock.On("Stop")}
 }
 
-func (_c *MockWorker_Terminate_Call) Run(run func()) *MockWorker_Terminate_Call {
+func (_c *MockWorker_Stop_Call) Run(run func()) *MockWorker_Stop_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run()
 	})
 	return _c
 }
 
-func (_c *MockWorker_Terminate_Call) Return(_a0 error) *MockWorker_Terminate_Call {
+func (_c *MockWorker_Stop_Call) Return(_a0 error) *MockWorker_Stop_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockWorker_Terminate_Call) RunAndReturn(run func() error) *MockWorker_Terminate_Call {
+func (_c *MockWorker_Stop_Call) RunAndReturn(run func() error) *MockWorker_Stop_Call {
 	_c.Call.Return(run)
 	return _c
 }

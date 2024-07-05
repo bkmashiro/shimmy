@@ -11,7 +11,7 @@ func getErrorStatusCode(err error) int {
 		return status
 	}
 
-	if _, ok := err.(*validationError); ok {
+	if err, ok := err.(*validationError); ok && err.Type == validationTypeRequest {
 		return http.StatusUnprocessableEntity
 	}
 

@@ -16,9 +16,9 @@ func TestDefaultAdapterFactory(t *testing.T) {
 		return w, nil
 	}
 
-	cases := []IOInterface{FileIO, StdIO}
+	cases := []IOConfig{{Interface: FileIO}, {Interface: RpcIO}}
 	for _, mode := range cases {
-		_, err := defaultAdapterFactory[any, any](workerFactory, mode, zap.NewNop())
+		_, err := defaultAdapterFactory(workerFactory, mode, zap.NewNop())
 
 		assert.NoError(t, err)
 	}
@@ -31,7 +31,7 @@ func TestDefaultAdapterFactory_Fails(t *testing.T) {
 		return w, nil
 	}
 
-	_, err := defaultAdapterFactory[any, any](workerFactory, "", zap.NewNop())
+	_, err := defaultAdapterFactory(workerFactory, IOConfig{Interface: ""}, zap.NewNop())
 
-	assert.ErrorIs(t, err, ErrUnsupportedIOMode)
+	assert.ErrorIs(t, err, ErrUnsupportedIOInterface)
 }

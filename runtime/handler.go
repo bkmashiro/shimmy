@@ -120,8 +120,7 @@ func (h *RuntimeHandler) handle(ctx context.Context, req Request) ([]byte, error
 	}
 
 	// Validate the request data against the request schema
-	err := h.validate(validationTypeRequest, command, reqData)
-	if err != nil {
+	if err := h.validate(validationTypeRequest, command, reqData); err != nil {
 		return nil, err
 	}
 
@@ -131,19 +130,19 @@ func (h *RuntimeHandler) handle(ctx context.Context, req Request) ([]byte, error
 	// Let the runtime handle the message
 	responseMsg, err := h.runtime.Handle(ctx, requestMsg)
 	if err != nil {
-		log.Debug("failed to handle message", zap.Error(err))
+		log.Error("failed to handle message", zap.Error(err))
 		return nil, err
 	}
 
 	// Validate the response data against the response schema
-	err = h.validate(validationTypeResponse, command, responseMsg)
-	if err != nil {
+	if err = h.validate(validationTypeResponse, command, responseMsg); err != nil {
+		log.Error("failed to validate response data", zap.Error(err))
 		return nil, err
 	}
 
 	resData, err := json.Marshal(responseMsg)
 	if err != nil {
-		log.Debug("failed to marshal response data", zap.Error(err))
+		log.Error("failed to marshal response data", zap.Error(err))
 		return nil, err
 	}
 

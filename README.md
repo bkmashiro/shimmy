@@ -54,9 +54,8 @@ GLOBAL OPTIONS:
    --command value, -c value                        the command to invoke in order to start the worker process. [$FUNCTION_COMMAND]
    --cwd value, -d value                            the working directory to use when invoking the worker process. [$FUNCTION_WORKING_DIR]
    --env value, -e value [ --env value, -e value ]  additional environment variables to pass to the worker process. [$FUNCTION_ENV]
-   --interface value, -i value                      the interface to use for communication with the worker process. Options: stdio, file. (default: "stdio") [$FUNCTION_INTERFACE]
+   --interface value, -i value                      the interface to use for communication with the worker process. Options: rpc, file. (default: "rpc") [$FUNCTION_INTERFACE]
    --max-workers value, -n value                    (default: 1) [$FUNCTION_MAX_PROCS]
-   --persistent, -p                                 the worker process is capable of handling more than one event. (default: false) [$FUNCTION_DISPOSABLE]
 ```
 
 ## Evaluation Runtime Interface

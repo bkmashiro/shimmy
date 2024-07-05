@@ -58,9 +58,9 @@ type Worker interface {
 	// without waiting for the process to start.
 	Start(context.Context) error
 
-	// Terminate terminates the worker. The method returns
-	// immediately, without waiting for the process to stop.
-	Terminate() error
+	// Stop stops the worker. The method returns immediately,
+	// without waiting for the process to stop.
+	Stop() error
 
 	// Wait blocks until the process exits. The method
 	// returns an ExitEvent that contains the exit status
@@ -99,7 +99,11 @@ type ProcessWorker struct {
 	log *zap.Logger
 }
 
-func NewProcessWorker(ctx context.Context, config StartConfig, log *zap.Logger) *ProcessWorker {
+func NewProcessWorker(
+	ctx context.Context,
+	config StartConfig,
+	log *zap.Logger,
+) *ProcessWorker {
 	// start process w/ context, so the process is SIGKILL'd when
 	// the context is cancelled. This ensures we don't have zombie
 	// processes when normal termination fails.
@@ -130,7 +134,7 @@ func (w *ProcessWorker) Start(ctx context.Context) error {
 	w.log.With(
 		zap.Strings("args", w.cmd.Args),
 		zap.String("cwd", w.cmd.Dir),
-		zap.Strings("env", w.cmd.Environ()),
+		// zap.Strings("env", w.cmd.Environ()),
 	).Debug("starting process")
 
 	// exit early if the context is already cancelled
@@ -245,9 +249,9 @@ func (w *ProcessWorker) WaitFor(
 	return w.Wait(waitCtx)
 }
 
-// Terminate sends a SIGTERM signal to the worker process. The method
+// Stop sends a SIGTERM signal to the worker process. The method
 // returns immediately, without waiting for the process to stop.
-func (w *ProcessWorker) Terminate() error {
+func (w *ProcessWorker) Stop() error {
 	return w.halt(false)
 }
 

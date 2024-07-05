@@ -3,45 +3,46 @@ package dispatcher
 import (
 	"context"
 	"fmt"
+	"runtime"
 
 	"github.com/jackc/puddle/v2"
 	"github.com/lambda-feedback/shimmy/internal/execution/supervisor"
 	"go.uber.org/zap"
 )
 
-type PooledDispatcher[I, O any] struct {
+type PooledDispatcher struct {
 	ctx  context.Context
-	pool *puddle.Pool[supervisor.Supervisor[I, O]]
+	pool *puddle.Pool[supervisor.Supervisor]
 	log  *zap.Logger
 }
 
-var _ Dispatcher[any, any] = (*PooledDispatcher[any, any])(nil)
+var _ Dispatcher = (*PooledDispatcher)(nil)
 
-type PooledDispatcherConfig[I, O any] struct {
+type PooledDispatcherConfig struct {
 	// MaxWorkers is the maximum number of concurrent workers
 	MaxWorkers int `conf:"max_workers"`
 
 	// SupervisorConfig is the configuration to use for the supervisor
-	Supervisor supervisor.Config[I, O] `conf:"supervisor,squash"`
+	Supervisor supervisor.Config `conf:"supervisor,squash"`
 }
 
-type PooledDispatcherParams[I, O any] struct {
+type PooledDispatcherParams struct {
 	// Context is the context to use for the dispatcher
 	Context context.Context
 
 	// Config is the config for the dispatcher and the underlying supervisors
-	Config PooledDispatcherConfig[I, O]
+	Config PooledDispatcherConfig
 
 	// SupervisorFactory is the factory function to create a new supervisor
-	SupervisorFactory SupervisorFactory[I, O]
+	SupervisorFactory SupervisorFactory
 
 	// Log is the logger to use for the dispatcher
 	Log *zap.Logger
 }
 
-func NewPooledDispatcher[I, O any](
-	params PooledDispatcherParams[I, O],
-) (Dispatcher[I, O], error) {
+func NewPooledDispatcher(
+	params PooledDispatcherParams,
+) (Dispatcher, error) {
 	if params.SupervisorFactory == nil {
 		params.SupervisorFactory = defaultSupervisorFactory
 	}
@@ -51,42 +52,45 @@ func NewPooledDispatcher[I, O any](
 		return nil, err
 	}
 
-	return &PooledDispatcher[I, O]{
+	return &PooledDispatcher{
 		pool: pool,
 		ctx:  params.Context,
 		log:  params.Log.Named("dispatcher_pooled"),
 	}, nil
 }
 
-func (m *PooledDispatcher[I, O]) Start(context.Context) error {
+func (m *PooledDispatcher) Start(context.Context) error {
 	// starting the pool is a no-op
 	return nil
 }
 
-func (m *PooledDispatcher[I, O]) Send(ctx context.Context, data I) (O, error) {
+func (m *PooledDispatcher) Send(
+	ctx context.Context,
+	method string,
+	data map[string]any,
+) (map[string]any, error) {
 
 	resource, err := m.pool.Acquire(ctx)
 	if err != nil {
-		var zero O
-		return zero, fmt.Errorf("error acquiring supervisor: %w", err)
+		return nil, fmt.Errorf("error acquiring supervisor: %w", err)
 	}
 
-	res, err := m.sendToSupervisor(ctx, data, resource)
+	result, err := m.sendToSupervisor(ctx, method, data, resource)
 	if err != nil {
-		var zero O
-		return zero, fmt.Errorf("error sending data: %w", err)
+		return nil, fmt.Errorf("error sending data: %w", err)
 	}
 
-	return res, nil
+	return result, nil
 }
 
-func (m *PooledDispatcher[I, O]) sendToSupervisor(
+func (m *PooledDispatcher) sendToSupervisor(
 	ctx context.Context,
-	data I,
-	resource *puddle.Resource[supervisor.Supervisor[I, O]],
-) (O, error) {
+	method string,
+	data map[string]any,
+	resource *puddle.Resource[supervisor.Supervisor],
+) (map[string]any, error) {
 	var err error
-	var res *supervisor.Result[O]
+	var res *supervisor.Result
 
 	destroyOrRelease := func() {
 		if err != nil {
@@ -128,31 +132,30 @@ func (m *PooledDispatcher[I, O]) sendToSupervisor(
 
 	supervisor := resource.Value()
 
-	res, err = supervisor.Send(ctx, data)
+	res, err = supervisor.Send(ctx, method, data)
 	if err != nil {
-		var zero O
-		return zero, err
+		return nil, err
 	}
 
 	return res.Data, nil
 }
 
 // Shutdown stops the dispatcher and waits for all workers to finish.
-func (m *PooledDispatcher[I, O]) Shutdown(context.Context) error {
-	m.log.Debug("shutting down dispatcher")
+func (m *PooledDispatcher) Shutdown(context.Context) error {
+	m.log.Debug("shutting down")
 	m.pool.Close()
 	return nil
 }
 
 // MARK: - Pool
 
-func createPool[I, O any](
-	params PooledDispatcherParams[I, O],
-) (*puddle.Pool[supervisor.Supervisor[I, O]], error) {
+func createPool(
+	params PooledDispatcherParams,
+) (*puddle.Pool[supervisor.Supervisor], error) {
 	log := params.Log.Named("dispatcher_pool")
 
-	constructor := func(ctx context.Context) (supervisor.Supervisor[I, O], error) {
-		sv, err := params.SupervisorFactory(supervisor.Params[I, O]{
+	constructor := func(ctx context.Context) (supervisor.Supervisor, error) {
+		sv, err := params.SupervisorFactory(supervisor.Params{
 			Config: params.Config.Supervisor,
 			Log:    params.Log,
 		})
@@ -167,7 +170,7 @@ func createPool[I, O any](
 		return sv, nil
 	}
 
-	destructor := func(s supervisor.Supervisor[I, O]) {
+	destructor := func(s supervisor.Supervisor) {
 		wait, err := s.Shutdown(params.Context)
 		if err != nil {
 			log.Error("error shutting down supervisor", zap.Error(err))
@@ -184,9 +187,16 @@ func createPool[I, O any](
 		}
 	}
 
-	return puddle.NewPool(&puddle.Config[supervisor.Supervisor[I, O]]{
+	// if the max workers is less than or equal to 0,
+	// default to the number of logical CPUs
+	maxWorkers := params.Config.MaxWorkers
+	if maxWorkers <= 0 {
+		maxWorkers = runtime.NumCPU()
+	}
+
+	return puddle.NewPool(&puddle.Config[supervisor.Supervisor]{
 		Constructor: constructor,
 		Destructor:  destructor,
-		MaxSize:     int32(params.Config.MaxWorkers),
+		MaxSize:     int32(maxWorkers),
 	})
 }

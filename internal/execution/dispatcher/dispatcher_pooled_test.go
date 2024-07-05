@@ -12,16 +12,16 @@ import (
 	"go.uber.org/zap"
 )
 
-func TestPooledDispatcher_New_FailsInvalidCapacity(t *testing.T) {
-	m, err := dispatcher.NewPooledDispatcher(dispatcher.PooledDispatcherParams[any, any]{
-		Config: dispatcher.PooledDispatcherConfig[any, any]{
+func TestPooledDispatcher_New_UsesCPUCoreFallback(t *testing.T) {
+	m, err := dispatcher.NewPooledDispatcher(dispatcher.PooledDispatcherParams{
+		Config: dispatcher.PooledDispatcherConfig{
 			MaxWorkers: 0,
 		},
 		Context: context.Background(),
 		Log:     zap.NewNop(),
 	})
-	assert.Error(t, err)
-	assert.Nil(t, m)
+	assert.NoError(t, err)
+	assert.NotNil(t, m)
 }
 
 func TestPooledDispatcher_New_CreatesNewDispatcher(t *testing.T) {
@@ -34,21 +34,25 @@ func TestPooledDispatcher_New_CreatesNewDispatcher(t *testing.T) {
 func TestPooledDispatcher_Send(t *testing.T) {
 	m, sv, _ := createPooledDispatcher(t)
 
-	sv.EXPECT().Start(mock.Anything).Return(nil)
-	sv.EXPECT().Send(mock.Anything, "data").Return(&supervisor.Result[any]{Data: "data"}, nil)
+	data := map[string]any{"data": "data"}
 
-	_, err := m.Send(context.Background(), "data")
+	sv.EXPECT().Start(mock.Anything).Return(nil)
+	sv.EXPECT().Send(mock.Anything, "test", data).Return(&supervisor.Result{Data: data}, nil)
+
+	_, err := m.Send(context.Background(), "test", data)
 	assert.NoError(t, err)
 }
 
 func TestPooledDispatcher_Send_FailsToAcquireSupervisor(t *testing.T) {
-	factory := func(params supervisor.Params[any, any]) (supervisor.Supervisor[any, any], error) {
+	factory := func(params supervisor.Params) (supervisor.Supervisor, error) {
 		return nil, assert.AnError
 	}
 
 	m, _ := createPooledDispatcherWithFactory(factory)
 
-	_, err := m.Send(context.Background(), "data")
+	data := map[string]any{"data": "data"}
+
+	_, err := m.Send(context.Background(), "test", data)
 	assert.ErrorIs(t, err, assert.AnError)
 }
 
@@ -57,18 +61,22 @@ func TestPooledDispatcher_Send_FailsToAcquireSupervisorStartFails(t *testing.T) 
 
 	sv.EXPECT().Start(mock.Anything).Return(assert.AnError)
 
-	_, err := m.Send(context.Background(), "data")
+	data := map[string]any{"data": "data"}
+
+	_, err := m.Send(context.Background(), "test", data)
 	assert.ErrorIs(t, err, assert.AnError)
 }
 
 func TestPooledDispatcher_Send_Fails(t *testing.T) {
 	m, sv, _ := createPooledDispatcher(t)
 
+	data := map[string]any{"data": "data"}
+
 	sv.EXPECT().Start(mock.Anything).Return(nil)
 	sv.EXPECT().Shutdown(mock.Anything).Return(nil, nil)
-	sv.EXPECT().Send(mock.Anything, "data").Return(nil, assert.AnError)
+	sv.EXPECT().Send(mock.Anything, "test", data).Return(nil, assert.AnError)
 
-	_, err := m.Send(context.Background(), "data")
+	_, err := m.Send(context.Background(), "test", data)
 	assert.ErrorIs(t, err, assert.AnError)
 
 	sv.AssertCalled(t, "Start", mock.Anything)
@@ -87,16 +95,18 @@ func TestPooledDispatcher_Send_ReleaseSupervisorWait(t *testing.T) {
 		return nil
 	}
 
-	result := &supervisor.Result[any]{
-		Data:    "data",
+	data := map[string]any{"data": "data"}
+
+	result := &supervisor.Result{
+		Data:    data,
 		Release: release,
 	}
 
 	sv.EXPECT().Start(mock.Anything).Return(nil)
 	sv.EXPECT().Shutdown(mock.Anything).Return(nil, nil)
-	sv.EXPECT().Send(mock.Anything, "data").Return(result, nil)
+	sv.EXPECT().Send(mock.Anything, "test", data).Return(result, nil)
 
-	_, err := m.Send(context.Background(), "data")
+	_, err := m.Send(context.Background(), "test", data)
 	assert.NoError(t, err)
 
 	// wait for the release to happen in the background goroutine
@@ -115,16 +125,18 @@ func TestPooledDispatcher_Send_ReleaseSupervisorWaitError(t *testing.T) {
 		return assert.AnError
 	}
 
-	result := &supervisor.Result[any]{
-		Data:    "data",
+	data := map[string]any{"data": "data"}
+
+	result := &supervisor.Result{
+		Data:    data,
 		Release: release,
 	}
 
 	sv.EXPECT().Start(mock.Anything).Return(nil)
 	sv.EXPECT().Shutdown(mock.Anything).Return(nil, nil)
-	sv.EXPECT().Send(mock.Anything, "data").Return(result, nil)
+	sv.EXPECT().Send(mock.Anything, "test", data).Return(result, nil)
 
-	_, err := m.Send(context.Background(), "data")
+	_, err := m.Send(context.Background(), "test", data)
 	assert.NoError(t, err)
 
 	// wait for the release to happen in the background goroutine
@@ -143,21 +155,23 @@ func TestPooledDispatcher_Send_ReleaseSupervisorWaitErrorOnDestroy(t *testing.T)
 		return assert.AnError
 	}
 
-	result := &supervisor.Result[any]{
-		Data:    "data",
-		Release: release,
-	}
-
 	wait := func() error {
 		waited++
 		return nil
 	}
 
+	data := map[string]any{"data": "data"}
+
+	result := &supervisor.Result{
+		Data:    data,
+		Release: release,
+	}
+
 	sv.EXPECT().Start(mock.Anything).Return(nil)
 	sv.EXPECT().Shutdown(mock.Anything).Return(wait, nil)
-	sv.EXPECT().Send(mock.Anything, "data").Return(result, nil)
+	sv.EXPECT().Send(mock.Anything, "test", data).Return(result, nil)
 
-	_, err := m.Send(context.Background(), "data")
+	_, err := m.Send(context.Background(), "test", data)
 	assert.NoError(t, err)
 
 	// wait for the release to happen in a goroutine
@@ -176,21 +190,23 @@ func TestPooledDispatcher_Send_ReleaseSupervisorWaitErrorShutdown(t *testing.T) 
 		return assert.AnError
 	}
 
-	result := &supervisor.Result[any]{
-		Data:    "data",
-		Release: release,
-	}
-
 	wait := func() error {
 		waited++
 		return nil
 	}
 
+	data := map[string]any{"data": "data"}
+
+	result := &supervisor.Result{
+		Data:    data,
+		Release: release,
+	}
+
 	sv.EXPECT().Start(mock.Anything).Return(nil)
 	sv.EXPECT().Shutdown(mock.Anything).Return(wait, assert.AnError)
-	sv.EXPECT().Send(mock.Anything, "data").Return(result, nil)
+	sv.EXPECT().Send(mock.Anything, "test", data).Return(result, nil)
 
-	_, err := m.Send(context.Background(), "data")
+	_, err := m.Send(context.Background(), "test", data)
 	assert.NoError(t, err)
 
 	// wait for the release to happen in a goroutine
@@ -202,15 +218,17 @@ func TestPooledDispatcher_Send_ReleaseSupervisorWaitErrorShutdown(t *testing.T) 
 func TestPooledDispatcher_Shutdown_DestroysSupervisor(t *testing.T) {
 	m, sv, _ := createPooledDispatcher(t)
 
-	result := &supervisor.Result[any]{
-		Data: "data",
+	data := map[string]any{"data": "data"}
+
+	result := &supervisor.Result{
+		Data: data,
 	}
 
 	sv.EXPECT().Start(mock.Anything).Return(nil)
 	sv.EXPECT().Shutdown(mock.Anything).Return(nil, nil)
-	sv.EXPECT().Send(mock.Anything, "data").Return(result, nil)
+	sv.EXPECT().Send(mock.Anything, "test", data).Return(result, nil)
 
-	_, err := m.Send(context.Background(), "data")
+	_, err := m.Send(context.Background(), "test", data)
 	assert.NoError(t, err)
 
 	m.Shutdown(context.Background())
@@ -218,10 +236,10 @@ func TestPooledDispatcher_Shutdown_DestroysSupervisor(t *testing.T) {
 
 // MARK: - helpers
 
-func createPooledDispatcher(t *testing.T) (dispatcher.Dispatcher[any, any], *supervisor.MockSupervisor[any, any], error) {
-	sv := supervisor.NewMockSupervisor[any, any](t)
+func createPooledDispatcher(t *testing.T) (dispatcher.Dispatcher, *supervisor.MockSupervisor, error) {
+	sv := supervisor.NewMockSupervisor(t)
 
-	factory := func(params supervisor.Params[any, any]) (supervisor.Supervisor[any, any], error) {
+	factory := func(params supervisor.Params) (supervisor.Supervisor, error) {
 		return sv, nil
 	}
 
@@ -234,10 +252,10 @@ func createPooledDispatcher(t *testing.T) (dispatcher.Dispatcher[any, any], *sup
 }
 
 func createPooledDispatcherWithFactory(
-	factory dispatcher.SupervisorFactory[any, any],
-) (dispatcher.Dispatcher[any, any], error) {
-	return dispatcher.NewPooledDispatcher(dispatcher.PooledDispatcherParams[any, any]{
-		Config: dispatcher.PooledDispatcherConfig[any, any]{
+	factory dispatcher.SupervisorFactory,
+) (dispatcher.Dispatcher, error) {
+	return dispatcher.NewPooledDispatcher(dispatcher.PooledDispatcherParams{
+		Config: dispatcher.PooledDispatcherConfig{
 			MaxWorkers: 1,
 		},
 		Context:           context.Background(),

@@ -1,7 +1,9 @@
 package supervisor
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"testing"
 
 	"github.com/lambda-feedback/shimmy/internal/execution/worker"
@@ -10,27 +12,41 @@ import (
 	"go.uber.org/zap"
 )
 
-func createStdioAdapter(t *testing.T) (*stdioAdapter[any, any], *worker.MockWorker) {
+type rwc struct {
+	*bytes.Buffer
+}
+
+func (rwc *rwc) Close() error {
+	return nil
+}
+
+func newRwc() io.ReadWriteCloser {
+	return &rwc{Buffer: new(bytes.Buffer)}
+}
+
+func createRpcAdapter(t *testing.T) (*rpcAdapter, *worker.MockWorker) {
 	w := worker.NewMockWorker(t)
 
 	workerFactory := func(context.Context, worker.StartConfig) (worker.Worker, error) {
 		return w, nil
 	}
 
-	adapter := &stdioAdapter[any, any]{
+	adapter := &rpcAdapter{
 		workerFactory: workerFactory,
 		log:           zap.NewNop(),
+		config:        RpcConfig{Transport: StdioTransport},
 	}
 
 	return adapter, w
 }
 
 func TestStdioAdapter_Start(t *testing.T) {
-	a, w := createStdioAdapter(t)
+	a, w := createRpcAdapter(t)
 
 	ctx := context.Background()
 	params := worker.StartConfig{}
 
+	w.EXPECT().DuplexPipe().Return(newRwc(), nil)
 	w.EXPECT().Start(ctx).Return(nil)
 
 	err := a.Start(ctx, params)
@@ -38,11 +54,12 @@ func TestStdioAdapter_Start(t *testing.T) {
 }
 
 func TestStdioAdapter_Start_PassesError(t *testing.T) {
-	a, w := createStdioAdapter(t)
+	a, w := createRpcAdapter(t)
 
 	ctx := context.Background()
 	params := worker.StartConfig{}
 
+	w.EXPECT().DuplexPipe().Return(newRwc(), nil)
 	w.EXPECT().Start(ctx).Return(assert.AnError)
 
 	err := a.Start(ctx, params)
@@ -50,10 +67,11 @@ func TestStdioAdapter_Start_PassesError(t *testing.T) {
 }
 
 func TestStdioAdapter_Stop(t *testing.T) {
-	a, w := createStdioAdapter(t)
+	a, w := createRpcAdapter(t)
 
+	w.EXPECT().DuplexPipe().Return(newRwc(), nil)
 	w.EXPECT().Start(mock.Anything).Return(nil)
-	w.EXPECT().Terminate().Return(nil)
+	w.EXPECT().Stop().Return(nil)
 
 	err := a.Start(context.Background(), worker.StartConfig{})
 	assert.NoError(t, err)
@@ -63,17 +81,18 @@ func TestStdioAdapter_Stop(t *testing.T) {
 }
 
 func TestStdioAdapter_Stop_FailsIfNotStarted(t *testing.T) {
-	a, _ := createStdioAdapter(t)
+	a, _ := createRpcAdapter(t)
 
 	_, err := a.Stop(worker.StopConfig{})
 	assert.Error(t, err)
 }
 
 func TestStdioAdapter_Stop_PassesError(t *testing.T) {
-	a, w := createStdioAdapter(t)
+	a, w := createRpcAdapter(t)
 
+	w.EXPECT().DuplexPipe().Return(newRwc(), nil)
 	w.EXPECT().Start(mock.Anything).Return(nil)
-	w.EXPECT().Terminate().Return(assert.AnError)
+	w.EXPECT().Stop().Return(assert.AnError)
 
 	err := a.Start(context.Background(), worker.StartConfig{})
 	assert.NoError(t, err)
@@ -83,13 +102,14 @@ func TestStdioAdapter_Stop_PassesError(t *testing.T) {
 }
 
 func TestStdioAdapter_Stop_WaitFor(t *testing.T) {
-	a, w := createStdioAdapter(t)
+	a, w := createRpcAdapter(t)
 
 	ctx := context.Background()
 	params := worker.StopConfig{Timeout: 10}
 
+	w.EXPECT().DuplexPipe().Return(newRwc(), nil)
 	w.EXPECT().Start(mock.Anything).Return(nil)
-	w.EXPECT().Terminate().Return(nil)
+	w.EXPECT().Stop().Return(nil)
 	w.EXPECT().WaitFor(ctx, params.Timeout).Return(worker.ExitEvent{}, nil)
 
 	err := a.Start(context.Background(), worker.StartConfig{})
@@ -103,13 +123,14 @@ func TestStdioAdapter_Stop_WaitFor(t *testing.T) {
 }
 
 func TestStdioAdapter_Stop_WaitForError(t *testing.T) {
-	a, w := createStdioAdapter(t)
+	a, w := createRpcAdapter(t)
 
 	ctx := context.Background()
 	params := worker.StopConfig{Timeout: 10}
 
+	w.EXPECT().DuplexPipe().Return(newRwc(), nil)
 	w.EXPECT().Start(mock.Anything).Return(nil)
-	w.EXPECT().Terminate().Return(nil)
+	w.EXPECT().Stop().Return(nil)
 	w.EXPECT().WaitFor(ctx, params.Timeout).Return(worker.ExitEvent{}, assert.AnError)
 
 	err := a.Start(context.Background(), worker.StartConfig{})

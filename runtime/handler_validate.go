@@ -64,21 +64,19 @@ func (r *RuntimeHandler) validate(t validationType, command Command, data map[st
 
 	schemaType, err := getSchemaType(command)
 	if err != nil {
-		log.Debug("could not get schema type", zap.Error(err))
+		log.Error("could not get schema type", zap.Error(err))
 		return errSchemaNotFound
 	}
 
 	res, err := schema.Validate(schemaType, data)
 	if err != nil {
-		log.Debug("validation failed", zap.Error(err))
+		log.Error("validation failed", zap.Error(err))
 		return errValidationFailed
 	}
 
 	if res.Valid() {
 		return nil
 	}
-
-	r.log.Debug("invalid data", zap.Any("errors", res.Errors()))
 
 	return newValidationError(t, res)
 }

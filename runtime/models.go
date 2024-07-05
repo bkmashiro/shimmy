@@ -27,10 +27,18 @@ func ParseCommand(path string) (Command, bool) {
 	return "", false
 }
 
-type Message map[string]any
+type EvaluationRequest struct {
+	Command Command
+
+	Data map[string]any
+}
 
 // NewRequestMessage creates a new message.
-func NewRequestMessage(command Command, data map[string]any) Message {
-	data["command"] = command
-	return data
+func NewRequestMessage(command Command, data map[string]any) EvaluationRequest {
+	return EvaluationRequest{
+		Command: command,
+		Data:    data,
+	}
 }
+
+type EvaluationResponse map[string]any

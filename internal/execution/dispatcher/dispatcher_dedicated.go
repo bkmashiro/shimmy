@@ -8,32 +8,32 @@ import (
 	"go.uber.org/zap"
 )
 
-type DedicatedDispatcher[I, O any] struct {
-	supervisor supervisor.Supervisor[I, O]
+type DedicatedDispatcher struct {
+	supervisor supervisor.Supervisor
 	log        *zap.Logger
 }
 
-var _ Dispatcher[any, any] = (*DedicatedDispatcher[any, any])(nil)
+var _ Dispatcher = (*DedicatedDispatcher)(nil)
 
-type DedicatedDispatcherConfig[I, O any] struct {
+type DedicatedDispatcherConfig struct {
 	// SupervisorConfig is the configuration to use for the supervisor
-	Supervisor supervisor.Config[I, O] `conf:"supervisor,squash"`
+	Supervisor supervisor.Config `conf:"supervisor,squash"`
 }
 
-type DedicatedDispatcherParams[I, O any] struct {
+type DedicatedDispatcherParams struct {
 	// Config is the config for the dispatcher and the underlying supervisors
-	Config DedicatedDispatcherConfig[I, O]
+	Config DedicatedDispatcherConfig
 
 	// SupervisorFactory is the factory function to create a new supervisor
-	SupervisorFactory SupervisorFactory[I, O]
+	SupervisorFactory SupervisorFactory
 
 	// Log is the logger to use for the dispatcher
 	Log *zap.Logger
 }
 
-func NewDedicatedDispatcher[I, O any](
-	params DedicatedDispatcherParams[I, O],
-) (Dispatcher[I, O], error) {
+func NewDedicatedDispatcher(
+	params DedicatedDispatcherParams,
+) (Dispatcher, error) {
 	if params.SupervisorFactory == nil {
 		params.SupervisorFactory = defaultSupervisorFactory
 	}
@@ -43,52 +43,44 @@ func NewDedicatedDispatcher[I, O any](
 		return nil, err
 	}
 
-	return &DedicatedDispatcher[I, O]{
+	return &DedicatedDispatcher{
 		supervisor: supervisor,
 		log:        params.Log.Named("dispatcher_dedicated"),
 	}, nil
 }
 
-func (m *DedicatedDispatcher[I, O]) Start(ctx context.Context) error {
-	m.log.Debug("booting")
-
+func (m *DedicatedDispatcher) Start(ctx context.Context) error {
 	if err := m.supervisor.Start(ctx); err != nil {
 		m.log.Error("error booting", zap.Error(err))
 		return err
 	}
 
-	m.log.Debug("done booting")
-
 	return nil
 }
 
-func (m *DedicatedDispatcher[I, O]) Send(
+func (m *DedicatedDispatcher) Send(
 	ctx context.Context,
-	data I,
-) (O, error) {
-	m.log.Debug("sending message")
-
-	res, err := m.supervisor.Send(ctx, data)
+	method string,
+	data map[string]any,
+) (map[string]any, error) {
+	res, err := m.supervisor.Send(ctx, method, data)
 	if err != nil {
 		m.log.Error("error sending message", zap.Error(err))
-		var zero O
-		return zero, fmt.Errorf("error sending data: %w", err)
+		return nil, fmt.Errorf("error sending data: %w", err)
 	}
 
 	// TODO: ignore release error?
 	// TODO: move into background goroutine?
 	if err := res.Release(ctx); err != nil {
 		m.log.Error("error releasing worker", zap.Error(err))
-		return res.Data, fmt.Errorf("error releasing worker: %w", err)
+		return nil, fmt.Errorf("error releasing worker: %w", err)
 	}
-
-	m.log.Debug("message sent")
 
 	return res.Data, nil
 }
 
 // Shutdown stops the dispatcher and waits for all workers to finish.
-func (m *DedicatedDispatcher[I, O]) Shutdown(ctx context.Context) error {
+func (m *DedicatedDispatcher) Shutdown(ctx context.Context) error {
 	m.log.Debug("shutting down")
 
 	wait, err := m.supervisor.Shutdown(ctx)
@@ -107,15 +99,13 @@ func (m *DedicatedDispatcher[I, O]) Shutdown(ctx context.Context) error {
 		return err
 	}
 
-	m.log.Debug("shut down")
-
 	return nil
 }
 
-func createSupervisor[I, O any](
-	params DedicatedDispatcherParams[I, O],
-) (supervisor.Supervisor[I, O], error) {
-	return params.SupervisorFactory(supervisor.Params[I, O]{
+func createSupervisor(
+	params DedicatedDispatcherParams,
+) (supervisor.Supervisor, error) {
+	return params.SupervisorFactory(supervisor.Params{
 		Config: params.Config.Supervisor,
 		Log:    params.Log,
 	})

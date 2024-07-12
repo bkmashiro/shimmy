@@ -38,7 +38,7 @@ VERSION:
    local
 
 COMMANDS:
-   handle  Run the AWS Lambda handler
+   lambda  Run the AWS Lambda handler.
    run     Detect execution environment and start shim.
    serve   Start a http server and listen for events.
 
@@ -50,12 +50,25 @@ GLOBAL OPTIONS:
 
    function
 
-   --arg value, -a value [ --arg value, -a value ]  additional arguments to pass to the worker process. [$FUNCTION_ARGS]
-   --command value, -c value                        the command to invoke in order to start the worker process. [$FUNCTION_COMMAND]
-   --cwd value, -d value                            the working directory to use when invoking the worker process. [$FUNCTION_WORKING_DIR]
-   --env value, -e value [ --env value, -e value ]  additional environment variables to pass to the worker process. [$FUNCTION_ENV]
-   --interface value, -i value                      the interface to use for communication with the worker process. Options: rpc, file. (default: "rpc") [$FUNCTION_INTERFACE]
-   --max-workers value, -n value                    (default: 1) [$FUNCTION_MAX_PROCS]
+   --arg value, -a value [ --arg value, -a value ]  additional arguments for to the worker process. [$FUNCTION_ARGS]
+   --command value, -c value                        the command to invoke to start the worker process. [$FUNCTION_COMMAND]
+   --cwd value, -d value                            the working directory for the worker process. [$FUNCTION_WORKING_DIR]
+   --env value, -e value [ --env value, -e value ]  additional environment variables for the worker process. [$FUNCTION_ENV]
+   --interface value, -i value                      the interface to use for worker process communication. Options: rpc, file. (default: "rpc") [$FUNCTION_INTERFACE]
+   --max-workers value, -n value                    the maximum number of worker processes to run concurrently. (default: number of CPU cores) [$FUNCTION_MAX_PROCS]
+
+   rpc
+
+   --rpc-transport value, -t value     the transport to use for the RPC interface. Options: stdio, ipc, http, tcp, ws. (default: "stdio") [$FUNCTION_RPC_TRANSPORT]
+   --rpc-transport-http-url value      the url to use for the HTTP transport. Default: http://127.0.0.1:7321 (default: "http://127.0.0.1:7321") [$FUNCTION_RPC_TRANSPORT_HTTP_URL]
+   --rpc-transport-ipc-endpoint value  the IPC endpoint to use for the IPC transport. Default: /tmp/eval.sock [$FUNCTION_RPC_TRANSPORT_IPC_ENDPOINT]
+   --rpc-transport-tcp-address value   the address to use for the TCP transport. Default: 127.0.0.1:7321 (default: "127.0.0.1:7321") [$FUNCTION_RPC_TRANSPORT_TCP_ADDRESS]
+   --rpc-transport-ws-url value        the url to use for the WebSocket transport. Default: ws://127.0.0.1:7321 (default: "ws://127.0.0.1:7321") [$FUNCTION_RPC_TRANSPORT_WS_URL]
+
+   worker
+
+   --worker-send-timeout value  the timeout for a single message send operation. (default: 30s) [$FUNCTION_WORKER_SEND_TIMEOUT]
+   --worker-stop-timeout value  the duration to wait for a worker process to stop. (default: 5s) [$FUNCTION_WORKER_STOP_TIMEOUT]
 ```
 
 ## Evaluation Runtime Interface

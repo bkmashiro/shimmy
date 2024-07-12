@@ -27,7 +27,7 @@ func newRwc() io.ReadWriteCloser {
 func createRpcAdapter(t *testing.T) (*rpcAdapter, *worker.MockWorker) {
 	w := worker.NewMockWorker(t)
 
-	workerFactory := func(context.Context, worker.StartConfig) (worker.Worker, error) {
+	workerFactory := func(worker.StartConfig) (worker.Worker, error) {
 		return w, nil
 	}
 
@@ -76,14 +76,14 @@ func TestStdioAdapter_Stop(t *testing.T) {
 	err := a.Start(context.Background(), worker.StartConfig{})
 	assert.NoError(t, err)
 
-	_, err = a.Stop(worker.StopConfig{})
+	_, err = a.Stop()
 	assert.NoError(t, err)
 }
 
 func TestStdioAdapter_Stop_FailsIfNotStarted(t *testing.T) {
 	a, _ := createRpcAdapter(t)
 
-	_, err := a.Stop(worker.StopConfig{})
+	_, err := a.Stop()
 	assert.Error(t, err)
 }
 
@@ -97,7 +97,7 @@ func TestStdioAdapter_Stop_PassesError(t *testing.T) {
 	err := a.Start(context.Background(), worker.StartConfig{})
 	assert.NoError(t, err)
 
-	_, err = a.Stop(worker.StopConfig{})
+	_, err = a.Stop()
 	assert.ErrorIs(t, err, assert.AnError)
 }
 
@@ -105,17 +105,16 @@ func TestStdioAdapter_Stop_WaitFor(t *testing.T) {
 	a, w := createRpcAdapter(t)
 
 	ctx := context.Background()
-	params := worker.StopConfig{Timeout: 10}
 
 	w.EXPECT().DuplexPipe().Return(newRwc(), nil)
 	w.EXPECT().Start(mock.Anything).Return(nil)
 	w.EXPECT().Stop().Return(nil)
-	w.EXPECT().WaitFor(ctx, params.Timeout).Return(worker.ExitEvent{}, nil)
+	w.EXPECT().Wait(ctx).Return(worker.ExitEvent{}, nil)
 
 	err := a.Start(context.Background(), worker.StartConfig{})
 	assert.NoError(t, err)
 
-	wait, err := a.Stop(params)
+	wait, err := a.Stop()
 	assert.NoError(t, err)
 
 	err = wait(ctx)
@@ -126,17 +125,16 @@ func TestStdioAdapter_Stop_WaitForError(t *testing.T) {
 	a, w := createRpcAdapter(t)
 
 	ctx := context.Background()
-	params := worker.StopConfig{Timeout: 10}
 
 	w.EXPECT().DuplexPipe().Return(newRwc(), nil)
 	w.EXPECT().Start(mock.Anything).Return(nil)
 	w.EXPECT().Stop().Return(nil)
-	w.EXPECT().WaitFor(ctx, params.Timeout).Return(worker.ExitEvent{}, assert.AnError)
+	w.EXPECT().Wait(ctx).Return(worker.ExitEvent{}, assert.AnError)
 
 	err := a.Start(context.Background(), worker.StartConfig{})
 	assert.NoError(t, err)
 
-	wait, err := a.Stop(params)
+	wait, err := a.Stop()
 	assert.NoError(t, err)
 
 	err = wait(ctx)

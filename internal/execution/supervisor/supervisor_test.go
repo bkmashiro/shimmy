@@ -111,7 +111,7 @@ func TestSupervisor_Suspend_Transient_StopsWorker(t *testing.T) {
 	data := map[string]any{"data": "data"}
 
 	a.EXPECT().Start(mock.Anything, mock.Anything).Return(nil)
-	a.EXPECT().Stop(mock.Anything).Return(nil, nil)
+	a.EXPECT().Stop().Return(nil, nil)
 	a.EXPECT().Send(mock.Anything, "test", data, mock.Anything).Return(nil, nil)
 
 	_, _ = s.Send(context.Background(), "test", data)
@@ -150,7 +150,7 @@ func TestSupervisor_Shutdown_Transient_StopsWorker(t *testing.T) {
 	data := map[string]any{"data": "data"}
 
 	a.EXPECT().Start(mock.Anything, mock.Anything).Return(nil)
-	a.EXPECT().Stop(mock.Anything).Return(nil, nil)
+	a.EXPECT().Stop().Return(nil, nil)
 	a.EXPECT().Send(mock.Anything, "test", data, mock.Anything).Return(nil, nil)
 
 	_, _ = s.Send(context.Background(), "test", data)
@@ -170,7 +170,7 @@ func TestSupervisor_Shutdown_Persistent_StopsWorker(t *testing.T) {
 	data := map[string]any{"data": "data"}
 
 	a.EXPECT().Start(mock.Anything, mock.Anything).Return(nil)
-	a.EXPECT().Stop(mock.Anything).Return(nil, nil)
+	a.EXPECT().Stop().Return(nil, nil)
 	a.EXPECT().Send(mock.Anything, "test", data, mock.Anything).Return(nil, nil)
 
 	_, _ = s.Send(context.Background(), "test", data)
@@ -206,7 +206,7 @@ func TestSupervisor_Send_Transient_DoesNotReuseWorker(t *testing.T) {
 	data := map[string]any{"data": "data"}
 
 	a.EXPECT().Start(mock.Anything, mock.Anything).Return(nil)
-	a.EXPECT().Stop(mock.Anything).Return(nil, nil)
+	a.EXPECT().Stop().Return(nil, nil)
 	a.EXPECT().Send(mock.Anything, "test", data, mock.Anything).Return(nil, nil)
 
 	// boots first, transient worker
@@ -257,7 +257,7 @@ func TestSupervisor_Send_FailsToReleaseWorker(t *testing.T) {
 	resData := map[string]any{"result": "result"}
 
 	a.EXPECT().Start(mock.Anything, mock.Anything).Return(nil)
-	a.EXPECT().Stop(mock.Anything).Return(nil, assert.AnError)
+	a.EXPECT().Stop().Return(nil, assert.AnError)
 	a.EXPECT().Send(mock.Anything, "test", data, mock.Anything).Return(resData, nil)
 
 	res, err := s.Send(context.Background(), "test", data)
@@ -308,6 +308,7 @@ func createSupervisorWithFactory(
 		Config: supervisor.Config{
 			IO: supervisor.IOConfig{Interface: mode},
 		},
+		Context:        context.Background(),
 		AdapterFactory: factory,
 		Log:            zap.NewNop(),
 	})

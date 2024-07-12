@@ -25,7 +25,7 @@ func TestFileAdapter_Start_DoesNotStartWorker(t *testing.T) {
 func TestFileAdapter_Stop_DoesNotStopWorker(t *testing.T) {
 	a, w := createFileAdapter(t)
 
-	_, err := a.Stop(worker.StopConfig{})
+	_, err := a.Stop()
 	assert.NoError(t, err)
 
 	w.AssertNotCalled(t, "Terminate")
@@ -36,7 +36,7 @@ func TestFileAdapter_Send(t *testing.T) {
 
 	var sp *worker.StartConfig
 
-	workerFactory := func(ctx context.Context, params worker.StartConfig) (worker.Worker, error) {
+	workerFactory := func(params worker.StartConfig) (worker.Worker, error) {
 		sp = &params
 		return w, nil
 	}
@@ -63,7 +63,7 @@ func TestFileAdapter_Send(t *testing.T) {
 	})
 	w.EXPECT().ReadPipe().Return(io.NopCloser(strings.NewReader("")), nil)
 	var cell int
-	w.EXPECT().WaitFor(mock.Anything, mock.Anything).Return(worker.ExitEvent{Code: &cell}, nil)
+	w.EXPECT().Wait(mock.Anything).Return(worker.ExitEvent{Code: &cell}, nil)
 
 	res, err := a.Send(ctx, "test", data, 10)
 	assert.NoError(t, err)
@@ -83,7 +83,7 @@ func TestFileAdapter_Send_ReturnsStartError(t *testing.T) {
 	data := map[string]any{"foo": "bar"}
 
 	w.EXPECT().ReadPipe().Return(io.NopCloser(strings.NewReader("")), nil)
-	w.EXPECT().Start(ctx).Return(assert.AnError)
+	w.EXPECT().Start(mock.Anything).Return(assert.AnError)
 
 	_, err := a.Send(ctx, "test", data, 0)
 	assert.ErrorIs(t, err, assert.AnError)
@@ -95,9 +95,9 @@ func TestFileAdapter_Send_ReturnsWaitForError(t *testing.T) {
 	ctx := context.Background()
 	data := map[string]any{"foo": "bar"}
 
-	w.EXPECT().Start(ctx).Return(nil)
+	w.EXPECT().Start(mock.Anything).Return(nil)
 	w.EXPECT().ReadPipe().Return(io.NopCloser(strings.NewReader("")), nil)
-	w.EXPECT().WaitFor(ctx, mock.Anything).Return(worker.ExitEvent{}, assert.AnError)
+	w.EXPECT().Wait(mock.Anything).Return(worker.ExitEvent{}, assert.AnError)
 
 	_, err := a.Send(ctx, "test", data, 0)
 	assert.ErrorIs(t, err, assert.AnError)
@@ -109,10 +109,10 @@ func TestFileAdapter_Send_ReturnsReadError(t *testing.T) {
 	ctx := context.Background()
 	data := map[string]any{"foo": "bar"}
 
-	w.EXPECT().Start(ctx).Return(nil)
+	w.EXPECT().Start(mock.Anything).Return(nil)
 	w.EXPECT().ReadPipe().Return(io.NopCloser(strings.NewReader("")), nil)
 	var cell int
-	w.EXPECT().WaitFor(ctx, mock.Anything).Return(worker.ExitEvent{Code: &cell}, nil)
+	w.EXPECT().Wait(mock.Anything).Return(worker.ExitEvent{Code: &cell}, nil)
 
 	_, err := a.Send(ctx, "test", data, 0)
 	assert.ErrorIs(t, err, io.EOF)
@@ -134,7 +134,7 @@ func TestFileAdapter_Send_ReturnsInvalidDataError(t *testing.T) {
 func createFileAdapter(t *testing.T) (*fileAdapter, *worker.MockWorker) {
 	w := worker.NewMockWorker(t)
 
-	workerFactory := func(ctx context.Context, params worker.StartConfig) (worker.Worker, error) {
+	workerFactory := func(params worker.StartConfig) (worker.Worker, error) {
 		return w, nil
 	}
 

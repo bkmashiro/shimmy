@@ -7,7 +7,6 @@ require (
 	github.com/getsentry/sentry-go v0.27.0
 	github.com/jackc/puddle/v2 v2.2.1
 	github.com/knadh/koanf/maps v0.1.1
-	github.com/knadh/koanf/parsers/dotenv v0.1.0
 	github.com/knadh/koanf/parsers/json v0.1.0
 	github.com/knadh/koanf/providers/confmap v0.1.0
 	github.com/knadh/koanf/providers/env v0.1.0
@@ -43,7 +42,6 @@ require (
 	github.com/ethereum/go-ethereum v1.14.5
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.0.0-alpha.1 // indirect
-	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/mitchellh/copystructure v1.2.0 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect

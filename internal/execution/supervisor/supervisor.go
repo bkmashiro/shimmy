@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/lambda-feedback/shimmy/internal/execution/worker"
 	"go.uber.org/zap"
@@ -31,14 +32,19 @@ type Supervisor interface {
 	Shutdown(ctx context.Context) (WaitFunc, error)
 }
 
+type workerRef struct {
+	cancel context.CancelFunc
+	worker Adapter
+}
+
 type WorkerSupervisor struct {
 	persistent bool
 
 	sendLock sync.Mutex
 
-	createAdapter func() (Adapter, error)
+	createWorker func() (*workerRef, error)
 
-	worker     Adapter
+	workerRef  *workerRef
 	workerLock sync.Mutex
 
 	startParams StartConfig
@@ -55,6 +61,9 @@ type WorkerFactoryFn func(context.Context, worker.StartConfig, *zap.Logger) (wor
 type Params struct {
 	// Config is the config used to set up the supervisor and its workers.
 	Config Config
+
+	// Context is the context to use for the supervisor
+	Context context.Context
 
 	// AdapterFactory is a factory function to create a new adapter. This
 	// is called when the supervisor needs to create a communication adapter.
@@ -84,36 +93,39 @@ func New(params Params) (Supervisor, error) {
 		params.AdapterFactory = defaultAdapterFactory
 	}
 
-	workerFactory := func(
-		ctx context.Context,
-		config worker.StartConfig,
-	) (worker.Worker, error) {
-		return params.WorkerFactory(ctx, config, params.Log)
-	}
+	createAdapter := func() (*workerRef, error) {
+		workerCtx, cancel := context.WithCancel(params.Context)
 
-	createAdapter := func() (Adapter, error) {
+		workerFactory := func(config worker.StartConfig) (worker.Worker, error) {
+			return params.WorkerFactory(workerCtx, config, params.Log)
+		}
+
 		adapter, err := params.AdapterFactory(
 			workerFactory,
 			config.IO,
 			params.Log,
 		)
 		if err != nil {
+			defer cancel()
 			return nil, fmt.Errorf("failed to create adapter: %w", err)
 		}
 
-		return adapter, nil
+		return &workerRef{
+			worker: adapter,
+			cancel: cancel,
+		}, nil
 	}
 
 	// the worker is persistent if the IO interface is RPC
 	persistent := config.IO.Interface == RpcIO
 
 	return &WorkerSupervisor{
-		createAdapter: createAdapter,
-		persistent:    persistent,
-		startParams:   config.StartParams,
-		stopParams:    config.StopParams,
-		sendParams:    config.SendParams,
-		log:           params.Log.Named("supervisor"),
+		createWorker: createAdapter,
+		persistent:   persistent,
+		startParams:  config.StartParams,
+		stopParams:   config.StopParams,
+		sendParams:   config.SendParams,
+		log:          params.Log.Named("supervisor"),
 	}, nil
 }
 
@@ -165,9 +177,7 @@ func (s *WorkerSupervisor) Send(
 	}, err
 }
 
-func (s *WorkerSupervisor) Suspend(
-	ctx context.Context,
-) (WaitFunc, error) {
+func (s *WorkerSupervisor) Suspend(ctx context.Context) (WaitFunc, error) {
 	release, err := s.releaseWorker()
 	if err != nil {
 		return nil, err
@@ -178,9 +188,7 @@ func (s *WorkerSupervisor) Suspend(
 	}, nil
 }
 
-func (s *WorkerSupervisor) Shutdown(
-	ctx context.Context,
-) (WaitFunc, error) {
+func (s *WorkerSupervisor) Shutdown(ctx context.Context) (WaitFunc, error) {
 	release, err := s.terminateWorker()
 	if err != nil {
 		return nil, err
@@ -191,26 +199,24 @@ func (s *WorkerSupervisor) Shutdown(
 	}, nil
 }
 
-func (s *WorkerSupervisor) acquireWorker(
-	ctx context.Context,
-) (Adapter, error) {
+func (s *WorkerSupervisor) acquireWorker(ctx context.Context) (Adapter, error) {
 	s.workerLock.Lock()
 	defer s.workerLock.Unlock()
 
-	if s.worker != nil {
+	if s.workerRef != nil {
 		// TODO: what if the worker is in use, and s.persistent is false?
-		return s.worker, nil
+		return s.workerRef.worker, nil
 	}
 
 	// boot a new worker
-	worker, err := s.bootWorker(ctx)
+	ref, err := s.bootWorker(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to boot worker: %w", err)
 	}
 
-	s.worker = worker
+	s.workerRef = ref
 
-	return worker, nil
+	return ref.worker, nil
 }
 
 func (s *WorkerSupervisor) releaseWorker() (ReleaseFunc, error) {
@@ -230,30 +236,65 @@ func (s *WorkerSupervisor) terminateWorker() (ReleaseFunc, error) {
 	defer s.workerLock.Unlock()
 
 	// if there is no worker, we have nothing to release
-	if s.worker == nil {
+	if s.workerRef == nil {
 		s.log.Debug("no worker to release")
 		return noopReleaseFunc, nil
 	}
 
-	// ensure we set the worker to nil
+	// ensure we set the reference to the worker to nil
 	defer func() {
-		s.worker = nil
+		s.workerRef = nil
 	}()
 
-	return s.worker.Stop(s.stopParams)
+	wait, err := s.workerRef.worker.Stop()
+	if err != nil {
+		// if we fail to stop the worker, we'll still cancel the
+		// worker context to ensure the worker is terminated.
+		s.workerRef.cancel()
+		return nil, err
+	}
+
+	// keep a reference to the worker context cancel function
+	cancel := s.workerRef.cancel
+
+	return func(ctx context.Context) error {
+		done := make(chan struct{})
+		defer close(done)
+
+		go func() {
+			// cancel the worker context if either the wait function
+			// returns, or the stop timeout is reached. this way we
+			// give the worker a chance to stop gracefully, while
+			// ensuring it is terminated eventually.
+			defer cancel()
+
+			select {
+			case <-done:
+				// worker has stopped or context is done
+				return
+			case <-time.After(s.stopParams.Timeout):
+				// worker stop timeout reached
+				return
+			}
+		}()
+
+		// wait for the worker to stop, or until the context is done
+		// either way, the wait function will return eventually.
+		return wait(ctx)
+	}, nil
 }
 
-func (s *WorkerSupervisor) bootWorker(ctx context.Context) (Adapter, error) {
-	adapter, err := s.createAdapter()
+func (s *WorkerSupervisor) bootWorker(ctx context.Context) (*workerRef, error) {
+	ref, err := s.createWorker()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create worker: %w", err)
 	}
 
-	if err = adapter.Start(ctx, s.startParams); err != nil {
+	if err = ref.worker.Start(ctx, s.startParams); err != nil {
 		return nil, fmt.Errorf("failed to start worker: %w", err)
 	}
 
-	return adapter, nil
+	return ref, nil
 }
 
 func defaultWorkerFactory(

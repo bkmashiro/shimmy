@@ -34,4 +34,7 @@ const (
 
 	// Ws describes communication w/ processes over websockets
 	WsTransport IOTransport = "ws"
+
+	// Tcp describes communication w/ processes over tcp
+	TcpTransport IOTransport = "tcp"
 )

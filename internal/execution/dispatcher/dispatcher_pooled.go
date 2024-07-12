@@ -27,11 +27,11 @@ type PooledDispatcherConfig struct {
 }
 
 type PooledDispatcherParams struct {
-	// Context is the context to use for the dispatcher
-	Context context.Context
-
 	// Config is the config for the dispatcher and the underlying supervisors
 	Config PooledDispatcherConfig
+
+	// Context is the context to use for the dispatcher
+	Context context.Context
 
 	// SupervisorFactory is the factory function to create a new supervisor
 	SupervisorFactory SupervisorFactory
@@ -156,8 +156,9 @@ func createPool(
 
 	constructor := func(ctx context.Context) (supervisor.Supervisor, error) {
 		sv, err := params.SupervisorFactory(supervisor.Params{
-			Config: params.Config.Supervisor,
-			Log:    params.Log,
+			Context: ctx,
+			Config:  params.Config.Supervisor,
+			Log:     params.Log,
 		})
 		if err != nil {
 			return nil, err

@@ -28,6 +28,9 @@ type fileAdapter struct {
 	// uses the startParams to start the worker during Send.
 	startParams worker.StartConfig
 
+	// worker is the worker that is managed by the adapter.
+	worker worker.Worker
+
 	log *zap.Logger
 }
 
@@ -65,6 +68,9 @@ func (a *fileAdapter) Send(
 	if a.workerFactory == nil {
 		return nil, errors.New("no worker factory provided")
 	}
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
 	// temp dir path
 	workingDir := path.Join(os.TempDir(), "shimmy")
@@ -142,10 +148,13 @@ func (a *fileAdapter) Send(
 	)
 
 	// create the worker with modified args and env
-	worker, err := a.workerFactory(ctx, startParams)
+	worker, err := a.workerFactory(startParams)
 	if err != nil {
 		return nil, fmt.Errorf("error creating worker: %w", err)
 	}
+
+	// store worker for later use
+	a.worker = worker
 
 	pipe, err := worker.ReadPipe()
 	if err != nil {
@@ -177,7 +186,7 @@ func (a *fileAdapter) Send(
 	stdoutWg.Wait()
 
 	// wait for worker to terminate (find another way to read res earlier?)
-	exitEvent, err := worker.WaitFor(ctx, timeout)
+	exitEvent, err := worker.Wait(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error waiting for process: %w", err)
 	}
@@ -196,9 +205,7 @@ func (a *fileAdapter) Send(
 	return response, nil
 }
 
-func (a *fileAdapter) Stop(
-	worker.StopConfig,
-) (ReleaseFunc, error) {
+func (a *fileAdapter) Stop() (ReleaseFunc, error) {
 	// for fileio, we already stopped the worker, as we do need to wait
 	// for the process to finish in order to read the response data.
 	// therefore, we don't need to do anything here.

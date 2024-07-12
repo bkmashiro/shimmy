@@ -25,37 +25,44 @@ func (s *Shell) Run(ctx context.Context, options ...fx.Option) error {
 	// 0. after run ends, flush the logger
 	defer s.log.Sync()
 
-	// 1. create execution context
+	// 1. create shell context
 	shellCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// 2. create fx application
-	fxApp := s.createFxApp(shellCtx, options...)
+	// 2. create execution context
+	appCtx, cancelApp := context.WithCancel(ctx)
+	defer cancelApp()
+
+	// 3. create fx application with app context
+	fxApp := s.createFxApp(appCtx, options...)
 	s.fxApp = fxApp
 
-	// 3. create start context w/ timeout
-	startCtx, cancel := context.WithTimeout(shellCtx, fxApp.StartTimeout())
-	defer cancel()
+	// 4. create start context w/ timeout
+	startCtx, cancelStart := context.WithTimeout(shellCtx, fxApp.StartTimeout())
+	defer cancelStart()
 
-	// 4. start the application, exit on error
+	// 5. start the application, exit on error
 	if err := fxApp.Start(startCtx); err != nil {
 		return NewExitError(1)
 	}
 
-	// 5. wait for done signal by OS
+	// 6. wait for done signal by OS
 	sig := <-fxApp.Wait()
 	exitCode := sig.ExitCode
 
-	// 6. create shutdown context
-	stopCtx, cancel := context.WithTimeout(shellCtx, fxApp.StopTimeout())
-	defer cancel()
+	// 7. cancel app context
+	// cancelApp()
 
-	// 7. gracefully shutdown the app, exit on error
+	// 8. create shutdown context
+	stopCtx, cancelStop := context.WithTimeout(shellCtx, fxApp.StopTimeout())
+	defer cancelStop()
+
+	// 9. gracefully shutdown the app, exit on error
 	if err := fxApp.Stop(stopCtx); err != nil {
 		return NewExitError(1)
 	}
 
-	// 8. return with 0 exit code
+	// 10. return with 0 exit code
 	return NewExitError(exitCode)
 }
 

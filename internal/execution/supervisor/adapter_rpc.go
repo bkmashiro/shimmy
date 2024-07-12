@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"runtime"
 	"time"
 
@@ -45,12 +46,21 @@ type RpcConfig struct {
 
 	// WsTransport is the configuration for the websocket transport.
 	Ws WsTransportConfig `conf:"ws"`
+
+	// TcpTransport is the configuration for the tcp transport.
+	Tcp TcpTransportConfig `config:"tcp"`
 }
 
 // HttpTransportConfig describes the configuration for http transport.
 type HttpTransportConfig struct {
 	// Url is the url to send http requests to.
 	Url string `conf:"url"`
+}
+
+// TcpTransportConfig describes the configuration for tcp transport.
+type TcpTransportConfig struct {
+	// Address is the address to send tcp requests to.
+	Address string `conf:"address"`
 }
 
 // IpcTransportConfig describes the configuration for unix socket transport.
@@ -105,7 +115,7 @@ func (a *rpcAdapter) Start(
 	params.Env = buildEnv(params.Env, a.config)
 
 	// create the worker
-	worker, err := a.workerFactory(ctx, params)
+	worker, err := a.workerFactory(params)
 	if err != nil {
 		return fmt.Errorf("error creating worker: %w", err)
 	}
@@ -134,8 +144,8 @@ func (a *rpcAdapter) Start(
 	// dial the rpc client
 	return a.dialRpcWithRetry(
 		ctx,
-		100*time.Millisecond,
-		10*time.Second,
+		100*time.Millisecond, // initial delay
+		10*time.Second,       // max delay
 	)
 }
 
@@ -155,6 +165,9 @@ func (a *rpcAdapter) Send(
 
 	var result map[string]any
 
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	if err := a.rpcClient.CallContext(ctx, &result, method, data); err != nil {
 		return nil, fmt.Errorf("error sending rpc request: %w", err)
 	}
@@ -162,14 +175,12 @@ func (a *rpcAdapter) Send(
 	return map[string]any{"result": result, "command": method}, nil
 }
 
-func (a *rpcAdapter) Stop(
-	params worker.StopConfig,
-) (ReleaseFunc, error) {
+func (a *rpcAdapter) Stop() (ReleaseFunc, error) {
 	if a.worker == nil {
 		return nil, errors.New("no worker provided")
 	}
 
-	return stopWorker(a.worker, params)
+	return stopWorker(a.worker)
 }
 
 func (a *rpcAdapter) dialRpcWithRetry(
@@ -194,7 +205,7 @@ func (a *rpcAdapter) dialRpcWithRetry(
 			zap.Int("retry", i),
 			zap.Duration("backoff", backoffDelay),
 			zap.Error(err),
-		).Debug("error dialing rpc")
+		).Debug("error dialing")
 
 		// Wait for the backoff delay or until the context is done
 		select {
@@ -216,22 +227,44 @@ func (a *rpcAdapter) dialRpc(
 		return nil, errors.New("worker not available")
 	}
 
+	log := a.log.With(
+		zap.String("transport", string(config.Transport)),
+	)
+
 	switch config.Transport {
 	case StdioTransport:
 		if a.stdioPipe == nil {
 			return nil, errors.New("stdio pipe not available")
 		}
 
+		log.Debug("dialing")
+
 		return rpc.DialIO(ctx, a.stdioPipe, a.stdioPipe)
+
 	case IpcTransport:
-		return rpc.DialIPC(ctx, getIPCEndpoint(config.Ipc))
+		endpoint := getIPCEndpoint(config.Ipc)
+
+		log.Debug("dialing", zap.String("endpoint", endpoint))
+
+		return rpc.DialIPC(ctx, endpoint)
+
 	case HttpTransport:
+		log.Debug("dialing", zap.String("url", config.Http.Url))
+
 		// TODO: use custom client
 		return rpc.DialHTTP(config.Http.Url)
+
 	case WsTransport:
+		log.Debug("dialing", zap.String("url", config.Ws.Url))
+
 		// TODO: use custom dialer
 		// TODO: do we need to set custom origin?
 		return rpc.DialWebsocket(ctx, config.Ws.Url, "")
+
+	case TcpTransport:
+		log.Debug("dialing", zap.String("address", config.Tcp.Address))
+
+		return dialTCP(ctx, config.Tcp.Address)
 	}
 
 	return nil, ErrUnsupportedIOTransport
@@ -266,7 +299,22 @@ func buildEnv(env []string, config RpcConfig) []string {
 		env = append(env, "EVAL_RPC_HTTP_URL="+config.Http.Url)
 	case WsTransport:
 		env = append(env, "EVAL_RPC_WS_URL="+config.Ws.Url)
+	case TcpTransport:
+		env = append(env, "EVAL_RPC_TCP_ADDRESS="+config.Tcp.Address)
 	}
 
 	return env
+}
+
+func dialTCP(ctx context.Context, address string) (*rpc.Client, error) {
+	conn, err := newTCPConnection(ctx, address)
+	if err != nil {
+		return nil, err
+	}
+
+	return rpc.DialIO(ctx, conn, conn)
+}
+
+func newTCPConnection(ctx context.Context, endpoint string) (net.Conn, error) {
+	return new(net.Dialer).DialContext(ctx, "tcp", endpoint)
 }

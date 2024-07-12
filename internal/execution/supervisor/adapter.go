@@ -10,7 +10,7 @@ import (
 
 // AdapterWorkerFactoryFn is a type alias for a function that creates a worker
 // based on the given context and configuration.
-type AdapterWorkerFactoryFn func(context.Context, worker.StartConfig) (worker.Worker, error)
+type AdapterWorkerFactoryFn func(worker.StartConfig) (worker.Worker, error)
 
 // AdapterFactoryFn is a type alias for a function that creates an adapter
 // based on the given IO mode.
@@ -33,7 +33,7 @@ type Adapter interface {
 	// Stop stops the worker with the given configuration. The worker is
 	// expected to be stopped in a non-blocking manner. The returned
 	// ReleaseFunc can be used to wait for the worker to terminate.
-	Stop(worker.StopConfig) (ReleaseFunc, error)
+	Stop() (ReleaseFunc, error)
 
 	// Send sends the given data to the worker and returns the response.
 	Send(context.Context, string, map[string]any, time.Duration) (map[string]any, error)
@@ -62,7 +62,7 @@ func defaultAdapterFactory(
 
 // stopWorker is a helper function to stop a worker and return a wait
 // function that can be used to wait for the worker to terminate.
-func stopWorker(w worker.Worker, params worker.StopConfig) (ReleaseFunc, error) {
+func stopWorker(w worker.Worker) (ReleaseFunc, error) {
 
 	// TODO: what if shutdown fails? we have a zombie worker then...
 
@@ -74,7 +74,7 @@ func stopWorker(w worker.Worker, params worker.StopConfig) (ReleaseFunc, error) 
 
 	releaseFunc := func(ctx context.Context) error {
 		// wait for the worker to terminate
-		_, err := w.WaitFor(ctx, params.Timeout)
+		_, err := w.Wait(ctx)
 		if err != nil {
 			return err
 		}

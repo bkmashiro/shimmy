@@ -30,16 +30,15 @@ type Params struct {
 	Log *zap.Logger
 }
 
-func NewDispatcher(
-	params Params,
-) (dispatcher.Dispatcher, error) {
+func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 	if params.Config.Supervisor.IO.Interface == supervisor.RpcIO {
 		return dispatcher.NewDedicatedDispatcher(
 			dispatcher.DedicatedDispatcherParams{
 				Config: dispatcher.DedicatedDispatcherConfig{
 					Supervisor: params.Config.Supervisor,
 				},
-				Log: params.Log,
+				Context: params.Context,
+				Log:     params.Log,
 			},
 		)
 	} else {

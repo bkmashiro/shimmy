@@ -10,7 +10,10 @@ import (
 type StartConfig = worker.StartConfig
 
 // StopConfig describes the configuration for stopping the worker.
-type StopConfig = worker.StopConfig
+type StopConfig struct {
+	// Timeout is the timeout for stopping the worker.
+	Timeout time.Duration
+}
 
 // SendConfig describes the configuration for sending messages to the worker.
 type SendConfig struct {

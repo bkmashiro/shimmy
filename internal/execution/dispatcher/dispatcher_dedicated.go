@@ -24,6 +24,9 @@ type DedicatedDispatcherParams struct {
 	// Config is the config for the dispatcher and the underlying supervisors
 	Config DedicatedDispatcherConfig
 
+	// Context is the context to use for the dispatcher
+	Context context.Context
+
 	// SupervisorFactory is the factory function to create a new supervisor
 	SupervisorFactory SupervisorFactory
 
@@ -106,7 +109,8 @@ func createSupervisor(
 	params DedicatedDispatcherParams,
 ) (supervisor.Supervisor, error) {
 	return params.SupervisorFactory(supervisor.Params{
-		Config: params.Config.Supervisor,
-		Log:    params.Log,
+		Context: params.Context,
+		Config:  params.Config.Supervisor,
+		Log:     params.Log,
 	})
 }

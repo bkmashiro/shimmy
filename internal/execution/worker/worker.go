@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"strings"
@@ -148,6 +149,16 @@ func (w *ProcessWorker) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to get stderr pipe: %w", err)
 	}
 
+	// overwrite the command's cancel function with our
+	// own implementation, which ensures the stderr pipe
+	// is closed as well.
+	w.cmd.Cancel = func() error {
+		// TODO: we might have to do the same for any opened
+		//       stdin / stdout pipes as well.
+		stderrPipe.Close()
+		return w.cmd.Process.Kill()
+	}
+
 	// wait for the process to terminate,
 	// and send the exit event to the channel
 	go func() {
@@ -188,8 +199,17 @@ func (w *ProcessWorker) Start(ctx context.Context) error {
 		defer w.stderrWg.Done()
 
 		// read from stderr and save it for later use
+		// TODO: use some prefix / suffix reader as stderr could get big big
 		_, err := io.Copy(&w.stderr, stderrPipe)
-		if err != nil && err != io.EOF {
+		if errors.Is(err, io.EOF) {
+			w.log.Debug("stderr EOF")
+			return
+		}
+		if errors.Is(err, fs.ErrClosed) {
+			w.log.Debug("stderr closed")
+			return
+		}
+		if err != nil {
 			w.log.Warn("failed to read from stderr", zap.Error(err))
 		}
 	}()
@@ -435,6 +455,7 @@ func createCmd(ctx context.Context, config StartConfig) *exec.Cmd {
 	// as we could run into deadlocks otherwise, if the system's stdout
 	// or stderr buffers run full.
 
+	// perform os-specific initialization for the given cmd.
 	initCmd(cmd)
 
 	return cmd

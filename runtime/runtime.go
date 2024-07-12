@@ -73,11 +73,11 @@ func NewLifecycleRuntime(params RuntimeParams, lc fx.Lifecycle) (Runtime, error)
 	}
 
 	lc.Append(fx.Hook{
-		OnStart: func(context.Context) error {
-			return r.Start(context.Background())
+		OnStart: func(ctx context.Context) error {
+			return r.Start(ctx)
 		},
-		OnStop: func(context.Context) error {
-			return r.Shutdown(context.Background())
+		OnStop: func(ctx context.Context) error {
+			return r.Shutdown(ctx)
 		},
 	})
 

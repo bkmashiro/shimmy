@@ -1,7 +1,6 @@
 package supervisor
 
 import (
-	"context"
 	"testing"
 
 	"github.com/lambda-feedback/shimmy/internal/execution/worker"
@@ -12,7 +11,7 @@ import (
 func TestDefaultAdapterFactory(t *testing.T) {
 	w := worker.NewMockWorker(t)
 
-	workerFactory := func(context.Context, worker.StartConfig) (worker.Worker, error) {
+	workerFactory := func(worker.StartConfig) (worker.Worker, error) {
 		return w, nil
 	}
 
@@ -27,7 +26,7 @@ func TestDefaultAdapterFactory(t *testing.T) {
 func TestDefaultAdapterFactory_Fails(t *testing.T) {
 	w := worker.NewMockWorker(t)
 
-	workerFactory := func(context.Context, worker.StartConfig) (worker.Worker, error) {
+	workerFactory := func(worker.StartConfig) (worker.Worker, error) {
 		return w, nil
 	}
 

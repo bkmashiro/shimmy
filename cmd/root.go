@@ -36,6 +36,13 @@ functions on arbitrary, serverless platforms.`
 				Usage:   "set the log format. Options: production, development.",
 				EnvVars: []string{"LOG_FORMAT"},
 			},
+			// auth flags
+			&cli.StringFlag{
+				Name:     "auth-key",
+				Usage:    "the secret key for the application.",
+				Category: "auth",
+				EnvVars:  []string{"AUTH_KEY"},
+			},
 			// shim flags
 			&cli.StringFlag{
 				Name:     "interface",
@@ -242,6 +249,7 @@ func parseRootConfig(ctx *cli.Context) (config.Config, error) {
 
 	// map cli flags to config fields
 	cliMap := map[string]string{
+		"auth-key":                   "auth.key",
 		"max-workers":                "runtime.max_workers",
 		"command":                    "runtime.cmd",
 		"cwd":                        "runtime.cwd",

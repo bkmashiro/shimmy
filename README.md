@@ -48,6 +48,10 @@ GLOBAL OPTIONS:
    --log-level value   set the log level. Options: debug, info, warn, error, panic, fatal. [$LOG_LEVEL]
    --version           print the version
 
+   auth
+
+   --auth-key value, -k value  the authentication key to use for incoming requests. [$AUTH_KEY]
+
    function
 
    --arg value, -a value [ --arg value, -a value ]  additional arguments for to the worker process. [$FUNCTION_ARGS]

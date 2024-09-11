@@ -9,8 +9,9 @@ import (
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
-	"github.com/lambda-feedback/shimmy/util/cliflags"
 	"github.com/urfave/cli/v2"
+
+	"github.com/lambda-feedback/shimmy/util/cliflags"
 )
 
 type ParseOptions struct {

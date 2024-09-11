@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/getsentry/sentry-go"
+
 	"github.com/lambda-feedback/shimmy/cmd"
 	"github.com/lambda-feedback/shimmy/util"
 )

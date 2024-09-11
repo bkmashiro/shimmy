@@ -5,11 +5,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lambda-feedback/shimmy/internal/execution/dispatcher"
-	"github.com/lambda-feedback/shimmy/internal/execution/supervisor"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
+
+	"github.com/lambda-feedback/shimmy/internal/execution/dispatcher"
+	"github.com/lambda-feedback/shimmy/internal/execution/supervisor"
 )
 
 func TestPooledDispatcher_New_UsesCPUCoreFallback(t *testing.T) {

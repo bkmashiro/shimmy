@@ -12,8 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lambda-feedback/shimmy/internal/execution/worker"
 	"go.uber.org/zap"
+
+	"github.com/lambda-feedback/shimmy/internal/execution/worker"
 )
 
 // fileAdapter is an adapter that allows supervisors to use files to

@@ -6,10 +6,11 @@ import (
 	"io"
 	"testing"
 
-	"github.com/lambda-feedback/shimmy/internal/execution/worker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
+
+	"github.com/lambda-feedback/shimmy/internal/execution/worker"
 )
 
 type rwc struct {

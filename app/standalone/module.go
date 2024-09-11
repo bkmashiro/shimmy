@@ -1,10 +1,11 @@
 package standalone
 
 import (
+	"go.uber.org/fx"
+
 	"github.com/lambda-feedback/shimmy/handler"
 	"github.com/lambda-feedback/shimmy/internal/server"
 	"github.com/lambda-feedback/shimmy/util/logging"
-	"go.uber.org/fx"
 )
 
 func Module(config Config) fx.Option {

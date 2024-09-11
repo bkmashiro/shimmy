@@ -27,4 +27,3 @@ packages:
       dir: "{{.InterfaceDir}}"
     interfaces:
       Dispatcher:
-# testonly: True

@@ -3,9 +3,10 @@ package runtime
 import (
 	"context"
 
-	"github.com/lambda-feedback/shimmy/internal/execution"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
+
+	"github.com/lambda-feedback/shimmy/internal/execution"
 )
 
 // Runtime is the interface for a runtime.

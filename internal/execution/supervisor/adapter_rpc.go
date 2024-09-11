@@ -11,8 +11,9 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/rpc"
-	"github.com/lambda-feedback/shimmy/internal/execution/worker"
 	"go.uber.org/zap"
+
+	"github.com/lambda-feedback/shimmy/internal/execution/worker"
 )
 
 // RpcConfig describes the configuration for the rpc interface.

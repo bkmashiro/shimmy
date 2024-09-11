@@ -6,8 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lambda-feedback/shimmy/internal/execution/worker"
 	"go.uber.org/zap"
+
+	"github.com/lambda-feedback/shimmy/internal/execution/worker"
 )
 
 type Supervisor interface {

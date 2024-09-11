@@ -1,11 +1,12 @@
 package cmd
 
 import (
+	"github.com/urfave/cli/v2"
+
 	"github.com/lambda-feedback/shimmy/app"
 	"github.com/lambda-feedback/shimmy/app/lambda"
 	"github.com/lambda-feedback/shimmy/util/conf"
 	"github.com/lambda-feedback/shimmy/util/logging"
-	"github.com/urfave/cli/v2"
 )
 
 var (

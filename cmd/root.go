@@ -6,11 +6,12 @@ import (
 	"os"
 	"time"
 
+	"github.com/urfave/cli/v2"
+	"go.uber.org/zap"
+
 	"github.com/lambda-feedback/shimmy/config"
 	"github.com/lambda-feedback/shimmy/util/conf"
 	"github.com/lambda-feedback/shimmy/util/logging"
-	"github.com/urfave/cli/v2"
-	"go.uber.org/zap"
 )
 
 var (

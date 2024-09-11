@@ -3,9 +3,10 @@ package runtime
 import (
 	"fmt"
 
-	"github.com/lambda-feedback/shimmy/runtime/schema"
 	"github.com/xeipuuv/gojsonschema"
 	"go.uber.org/zap"
+
+	"github.com/lambda-feedback/shimmy/runtime/schema"
 )
 
 // validationType is the type of validation.

@@ -6,8 +6,9 @@ import (
 	"runtime"
 
 	"github.com/jackc/puddle/v2"
-	"github.com/lambda-feedback/shimmy/internal/execution/supervisor"
 	"go.uber.org/zap"
+
+	"github.com/lambda-feedback/shimmy/internal/execution/supervisor"
 )
 
 type PooledDispatcher struct {

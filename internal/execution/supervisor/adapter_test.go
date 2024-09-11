@@ -3,9 +3,10 @@ package supervisor
 import (
 	"testing"
 
-	"github.com/lambda-feedback/shimmy/internal/execution/worker"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
+
+	"github.com/lambda-feedback/shimmy/internal/execution/worker"
 )
 
 func TestDefaultAdapterFactory(t *testing.T) {

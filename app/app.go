@@ -1,13 +1,14 @@
 package app
 
 import (
+	"github.com/urfave/cli/v2"
+	"go.uber.org/fx"
+
 	"github.com/lambda-feedback/shimmy/config"
 	"github.com/lambda-feedback/shimmy/internal/shell"
 	"github.com/lambda-feedback/shimmy/runtime"
 	"github.com/lambda-feedback/shimmy/util/conf"
 	"github.com/lambda-feedback/shimmy/util/logging"
-	"github.com/urfave/cli/v2"
-	"go.uber.org/fx"
 )
 
 func New(ctx *cli.Context) (*shell.Shell, error) {

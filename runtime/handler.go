@@ -124,6 +124,12 @@ func (h *RuntimeHandler) handle(ctx context.Context, req Request) ([]byte, error
 		return nil, err
 	}
 
+	/* TODO: if cases present
+	1. Iterate each case
+	2. Create new requestMsg
+	3. Handle requestMsg
+	How is the current implementation working? How to chose a case? The first with a valid response?
+	*/
 	// Create a new message with the parsed command and request data
 	requestMsg := NewRequestMessage(command, reqData)
 

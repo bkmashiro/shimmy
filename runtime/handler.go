@@ -124,12 +124,6 @@ func (h *RuntimeHandler) handle(ctx context.Context, req Request) ([]byte, error
 		return nil, err
 	}
 
-	/* TODO: if cases present
-	1. Iterate each case
-	2. Create new requestMsg
-	3. Handle requestMsg
-	How is the current implementation working? How to chose a case? The first with a valid response?
-	*/
 	// Create a new message with the parsed command and request data
 	requestMsg := NewRequestMessage(command, reqData)
 
@@ -150,6 +144,25 @@ func (h *RuntimeHandler) handle(ctx context.Context, req Request) ([]byte, error
 	if err != nil {
 		log.Error("failed to marshal response data", zap.Error(err))
 		return nil, err
+	}
+
+	/* TODO: if cases present
+	1. Iterate each case
+	2. Create new requestMsg
+	3. Handle requestMsg
+	How is the current implementation working? How to chose a case? The first with a valid response?
+	*/
+	var respBody map[string]any
+	err = json.Unmarshal(resData, &respBody)
+	result, ok := respBody["result"].(map[string]interface{})
+
+	if !ok {
+		log.Error("failed to unmarshal response data", zap.Error(err))
+		return nil, err
+	}
+
+	if result["is_correct"] == false {
+		panic("invalid response")
 	}
 
 	// Return the response data

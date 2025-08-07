@@ -187,3 +187,71 @@ func TestRuntimeHandler_Handle_Single_Feedback_Case(t *testing.T) {
 	require.False(t, hasFeedback)
 
 }
+
+func TestRuntimeHandler_Handle_Single_Feedback_Case_Match(t *testing.T) {
+	log := zaptest.NewLogger(t)
+
+	var mockRT = new(mockRuntime)
+
+	var mockResponse = runtime.EvaluationResponse{
+		"command": "eval",
+		"result": map[string]interface{}{
+			"is_correct":   false,
+			"matched_case": 0,
+			"feedback":     "should be 'hello'.",
+		},
+	}
+
+	mockRT.On("Handle", mock.Anything, mock.Anything).Return(mockResponse, nil)
+
+	handler, err := runtime.NewRuntimeHandler(runtime.HandlerParams{
+		Runtime: mockRT,
+		Log:     log,
+	})
+	require.NoError(t, err)
+
+	body := map[string]any{
+		"response": "hello",
+		"answer":   "hello",
+		"params": map[string]any{
+			"cases": []map[string]any{
+				{
+					"answer":   "other",
+					"feedback": "should be 'hello'.",
+				},
+			},
+		},
+	}
+	bodyBytes, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	req := runtime.Request{
+		Method: http.MethodPost,
+		Path:   "/eval",
+		Body:   bodyBytes,
+		Header: http.Header{
+			"command": []string{"eval"},
+		},
+	}
+
+	resp := handler.Handle(context.Background(), req)
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var respBody map[string]any
+	err = json.Unmarshal(resp.Body, &respBody)
+	require.NoError(t, err)
+
+	result, _ := respBody["result"].(map[string]interface{})
+
+	require.False(t, result["is_correct"].(bool))
+
+	_, hasMatchedCase := result["matched_case"]
+	require.True(t, hasMatchedCase)
+	require.Equal(t, result["matched_case"], float64(0))
+
+	_, hasFeedback := result["feedback"]
+	require.True(t, hasFeedback)
+	require.Equal(t, result["feedback"], "should be 'hello'.")
+
+}

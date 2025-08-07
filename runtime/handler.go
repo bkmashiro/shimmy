@@ -162,7 +162,17 @@ func (h *RuntimeHandler) handle(ctx context.Context, req Request) ([]byte, error
 	}
 
 	if result["is_correct"] == false {
-		panic("invalid response")
+		if cases, ok := result["cases"]; ok {
+			if caseList, ok := cases.([]interface{}); ok && len(caseList) > 0 {
+				panic("To Implement")
+			}
+		}
+	}
+
+	resData, err = json.Marshal(respBody)
+	if err != nil {
+		log.Error("failed to marshal response data", zap.Error(err))
+		return nil, err
 	}
 
 	// Return the response data

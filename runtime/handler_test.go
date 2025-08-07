@@ -6,6 +6,7 @@ import (
 	"github.com/lambda-feedback/shimmy/runtime"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 	"net/http"
 	"testing"
@@ -32,12 +33,50 @@ func (m *mockRuntime) Shutdown(ctx context.Context) error {
 	panic("Not required")
 }
 
-func TestRuntimeHandler_Handle_Success(t *testing.T) {
-	log := zaptest.NewLogger(t)
+func setupLogger(t *testing.T) *zap.Logger {
+	return zaptest.NewLogger(t)
+}
 
+func setupHandlerWithMock(t *testing.T, mockResponse runtime.EvaluationResponse) runtime.Handler {
 	mockRT := new(mockRuntime)
+	mockRT.On("Handle", mock.Anything, mock.Anything).Return(mockResponse, nil)
 
-	var correctFeedback = runtime.EvaluationResponse{
+	handler, err := runtime.NewRuntimeHandler(runtime.HandlerParams{
+		Runtime: mockRT,
+		Log:     setupLogger(t),
+	})
+	require.NoError(t, err)
+
+	return handler
+}
+
+func createRequestBody(t *testing.T, body map[string]any) []byte {
+	bodyBytes, err := json.Marshal(body)
+	require.NoError(t, err)
+	return bodyBytes
+}
+
+func createRequest(method, path string, body []byte, header http.Header) runtime.Request {
+	return runtime.Request{
+		Method: method,
+		Path:   path,
+		Body:   body,
+		Header: header,
+	}
+}
+
+func parseResponseBody(t *testing.T, resp runtime.Response) map[string]any {
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var respBody map[string]any
+	err := json.Unmarshal(resp.Body, &respBody)
+	require.NoError(t, err)
+
+	return respBody
+}
+
+func TestRuntimeHandler_Handle_Success(t *testing.T) {
+	mockResponse := runtime.EvaluationResponse{
 		"command": "eval",
 		"result": map[string]interface{}{
 			"is_correct": true,
@@ -45,155 +84,83 @@ func TestRuntimeHandler_Handle_Success(t *testing.T) {
 		},
 	}
 
-	mockRT.On("Handle", mock.Anything, mock.Anything).Return(correctFeedback, nil)
+	handler := setupHandlerWithMock(t, mockResponse)
 
-	// Create the runtime handler with mockRuntime
-	handler, err := runtime.NewRuntimeHandler(runtime.HandlerParams{
-		Runtime: mockRT,
-		Log:     log,
-	})
-	require.NoError(t, err)
-
-	// Request body that matches the request schema
-	body := map[string]any{
+	body := createRequestBody(t, map[string]any{
 		"response": 1,
 		"answer":   1,
-	}
-	bodyBytes, err := json.Marshal(body)
-	require.NoError(t, err)
+	})
 
-	req := runtime.Request{
-		Method: http.MethodPost,
-		Path:   "/eval",
-		Body:   bodyBytes,
-		Header: http.Header{
-			"command": []string{"eval"},
-		},
-	}
+	req := createRequest(http.MethodPost, "/eval", body, http.Header{
+		"command": []string{"eval"},
+	})
 
 	resp := handler.Handle(context.Background(), req)
+	respBody := parseResponseBody(t, resp)
 
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-
-	var respBody map[string]any
-	err = json.Unmarshal(resp.Body, &respBody)
-	require.NoError(t, err)
-	require.Equal(t, correctFeedback["result"], respBody["result"])
-
-	mockRT.AssertExpectations(t)
+	require.Equal(t, mockResponse["result"], respBody["result"])
 }
 
 func TestRuntimeHandler_Handle_InvalidCommand(t *testing.T) {
-	log := zaptest.NewLogger(t)
-
 	handler, err := runtime.NewRuntimeHandler(runtime.HandlerParams{
 		Runtime: &mockRuntime{},
-		Log:     log,
+		Log:     setupLogger(t),
 	})
 	require.NoError(t, err)
 
-	// Use an invalid command that will fail to parse
-	req := runtime.Request{
-		Method: http.MethodPost,
-		Path:   "/!invalid", // Will trigger ParseCommand failure
-		Body:   []byte(`{}`),
-		Header: http.Header{},
-	}
-
+	req := createRequest(http.MethodPost, "/!invalid", []byte(`{}`), http.Header{})
 	resp := handler.Handle(context.Background(), req)
+
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
 
 func TestRuntimeHandler_Handle_InvalidMethod(t *testing.T) {
-	log := zaptest.NewLogger(t)
-
 	handler, err := runtime.NewRuntimeHandler(runtime.HandlerParams{
 		Runtime: &mockRuntime{},
-		Log:     log,
+		Log:     setupLogger(t),
 	})
 	require.NoError(t, err)
 
-	req := runtime.Request{
-		Method: http.MethodGet, // Not allowed
-		Path:   "/eval",
-		Body:   []byte(`{}`),
-		Header: http.Header{},
-	}
-
+	req := createRequest(http.MethodGet, "/eval", []byte(`{}`), http.Header{})
 	resp := handler.Handle(context.Background(), req)
+
 	require.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
 }
 
 func TestRuntimeHandler_Handle_Single_Feedback_Case(t *testing.T) {
-	log := zaptest.NewLogger(t)
-
-	var mockRT = new(mockRuntime)
-
-	var correctFeedback = runtime.EvaluationResponse{
+	mockResponse := runtime.EvaluationResponse{
 		"command": "eval",
 		"result": map[string]interface{}{
 			"is_correct": true,
 		},
 	}
 
-	mockRT.On("Handle", mock.Anything, mock.Anything).Return(correctFeedback, nil)
+	handler := setupHandlerWithMock(t, mockResponse)
 
-	handler, err := runtime.NewRuntimeHandler(runtime.HandlerParams{
-		Runtime: mockRT,
-		Log:     log,
-	})
-	require.NoError(t, err)
-
-	body := map[string]any{
+	body := createRequestBody(t, map[string]any{
 		"response": "hello",
 		"answer":   "hello",
 		"params": map[string]any{
 			"cases": []map[string]any{
-				{
-					"answer":   "other",
-					"feedback": "should be 'hello'.",
-				},
+				{"answer": "other", "feedback": "should be 'hello'."},
 			},
 		},
-	}
-	bodyBytes, err := json.Marshal(body)
-	require.NoError(t, err)
+	})
 
-	req := runtime.Request{
-		Method: http.MethodPost,
-		Path:   "/eval",
-		Body:   bodyBytes,
-		Header: http.Header{
-			"command": []string{"eval"},
-		},
-	}
+	req := createRequest(http.MethodPost, "/eval", body, http.Header{
+		"command": []string{"eval"},
+	})
 
 	resp := handler.Handle(context.Background(), req)
-
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-
-	var respBody map[string]any
-	err = json.Unmarshal(resp.Body, &respBody)
-	require.NoError(t, err)
-
-	result, _ := respBody["result"].(map[string]interface{})
+	result := parseResponseBody(t, resp)["result"].(map[string]interface{})
 
 	require.True(t, result["is_correct"].(bool))
-
-	_, hasMatchedCase := result["matched_case"]
-	require.False(t, hasMatchedCase)
-
-	_, hasFeedback := result["feedback"]
-	require.False(t, hasFeedback)
-
+	require.NotContains(t, result, "matched_case")
+	require.NotContains(t, result, "feedback")
 }
 
 func TestRuntimeHandler_Handle_Single_Feedback_Case_Match(t *testing.T) {
-	log := zaptest.NewLogger(t)
-
-	var mockRT = new(mockRuntime)
-
-	var mockResponse = runtime.EvaluationResponse{
+	mockResponse := runtime.EvaluationResponse{
 		"command": "eval",
 		"result": map[string]interface{}{
 			"is_correct":   false,
@@ -202,56 +169,26 @@ func TestRuntimeHandler_Handle_Single_Feedback_Case_Match(t *testing.T) {
 		},
 	}
 
-	mockRT.On("Handle", mock.Anything, mock.Anything).Return(mockResponse, nil)
+	handler := setupHandlerWithMock(t, mockResponse)
 
-	handler, err := runtime.NewRuntimeHandler(runtime.HandlerParams{
-		Runtime: mockRT,
-		Log:     log,
-	})
-	require.NoError(t, err)
-
-	body := map[string]any{
+	body := createRequestBody(t, map[string]any{
 		"response": "hello",
 		"answer":   "hello",
 		"params": map[string]any{
 			"cases": []map[string]any{
-				{
-					"answer":   "other",
-					"feedback": "should be 'hello'.",
-				},
+				{"answer": "other", "feedback": "should be 'hello'."},
 			},
 		},
-	}
-	bodyBytes, err := json.Marshal(body)
-	require.NoError(t, err)
+	})
 
-	req := runtime.Request{
-		Method: http.MethodPost,
-		Path:   "/eval",
-		Body:   bodyBytes,
-		Header: http.Header{
-			"command": []string{"eval"},
-		},
-	}
+	req := createRequest(http.MethodPost, "/eval", body, http.Header{
+		"command": []string{"eval"},
+	})
 
 	resp := handler.Handle(context.Background(), req)
-
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-
-	var respBody map[string]any
-	err = json.Unmarshal(resp.Body, &respBody)
-	require.NoError(t, err)
-
-	result, _ := respBody["result"].(map[string]interface{})
+	result := parseResponseBody(t, resp)["result"].(map[string]interface{})
 
 	require.False(t, result["is_correct"].(bool))
-
-	_, hasMatchedCase := result["matched_case"]
-	require.True(t, hasMatchedCase)
-	require.Equal(t, result["matched_case"], float64(0))
-
-	_, hasFeedback := result["feedback"]
-	require.True(t, hasFeedback)
-	require.Equal(t, result["feedback"], "should be 'hello'.")
-
+	require.Equal(t, float64(0), result["matched_case"])
+	require.Equal(t, "should be 'hello'.", result["feedback"])
 }

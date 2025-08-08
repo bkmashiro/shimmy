@@ -354,7 +354,7 @@ func EvaluateCase(params map[string]any, caseData map[string]any, index int, req
 		return CaseResult{
 			Warning: &CaseWarning{
 				Case:    index,
-				Message: "failed to evaluate response",
+				Message: err.Error(),
 			},
 		}
 	}

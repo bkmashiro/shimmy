@@ -426,3 +426,91 @@ func TestRunTimeHandler_Healthcheck(t *testing.T) {
 	require.Contains(t, result, "tests_passed")
 
 }
+
+func TestRunTimeHandler_Valid_Preview(t *testing.T) {
+	mockResponse := runtime.EvaluationResponse{
+		"command": "preview",
+		"result": map[string]interface{}{
+			"preview": map[string]interface{}{
+				"latex": "hello",
+			},
+		},
+	}
+
+	handler := setupHandlerWithStaticMock(t, mockResponse)
+	body := createRequestBody(t, map[string]any{
+		"response": "hello",
+	})
+
+	req := createRequest(http.MethodPost, "/preview", body, http.Header{
+		"command": []string{"preview"},
+	})
+
+	resp := handler.Handle(context.Background(), req)
+	result := parseResponseBody(t, resp)["result"].(map[string]interface{})
+
+	require.Contains(t, result, "preview")
+
+	preview := result["preview"].(map[string]interface{})
+	require.Equal(t, "hello", preview["latex"])
+
+}
+
+func TestRunTimeHandler_Invalid_Preview_No_Body(t *testing.T) {
+	mockResponse := runtime.EvaluationResponse{
+		"command": "preview",
+		"result": map[string]interface{}{
+			"preview": map[string]interface{}{
+				"latex": "hello",
+			},
+		},
+	}
+
+	handler := setupHandlerWithStaticMock(t, mockResponse)
+	body := createRequestBody(t, map[string]any{})
+
+	req := createRequest(http.MethodPost, "/preview", body, http.Header{
+		"command": []string{"preview"},
+	})
+
+	resp := handler.Handle(context.Background(), req)
+	var respBody map[string]any
+	err := json.Unmarshal(resp.Body, &respBody)
+	require.NoError(t, err)
+
+	require.Contains(t, respBody, "error")
+	responseErrors := respBody["error"].(map[string]interface{})
+	require.Equal(t, "request validation error", responseErrors["message"])
+
+}
+
+func TestRunTimeHandler_Invalid_Preview_Incorrect_Args(t *testing.T) {
+	mockResponse := runtime.EvaluationResponse{
+		"command": "preview",
+		"result": map[string]interface{}{
+			"preview": map[string]interface{}{
+				"latex": "hello",
+			},
+		},
+	}
+
+	handler := setupHandlerWithStaticMock(t, mockResponse)
+	body := createRequestBody(t, map[string]any{
+		"response": "hello",
+		"answer":   "world",
+	})
+
+	req := createRequest(http.MethodPost, "/preview", body, http.Header{
+		"command": []string{"preview"},
+	})
+
+	resp := handler.Handle(context.Background(), req)
+	var respBody map[string]any
+	err := json.Unmarshal(resp.Body, &respBody)
+	require.NoError(t, err)
+
+	require.Contains(t, respBody, "error")
+	responseErrors := respBody["error"].(map[string]interface{})
+	require.Equal(t, "request validation error", responseErrors["message"])
+
+}

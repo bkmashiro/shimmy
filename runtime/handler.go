@@ -126,8 +126,8 @@ func (h *RuntimeHandler) handle(ctx context.Context, req Request) ([]byte, error
 
 	resData, err := SendCommand(req, command, h, ctx)
 	if err != nil {
-		log.Debug("invalid command")
-		return nil, errInvalidCommand
+		log.Debug("unable to send command")
+		return nil, err
 	}
 
 	var reqBody map[string]any

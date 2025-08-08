@@ -401,3 +401,28 @@ func TestRuntimeHandler_override_feedback_to_incorrect_case(t *testing.T) {
 	require.Equal(t, float64(0), result["matched_case"])
 	require.Equal(t, "should be 'hello'.", result["feedback"])
 }
+
+func TestRunTimeHandler_Healthcheck(t *testing.T) {
+	mockResponse := runtime.EvaluationResponse{
+		"command": "healthcheck",
+		"result": map[string]interface{}{
+			"tests_passed": true,
+			"successes":    []bool{true, false},
+			"failures":     []bool{true, false},
+			"errors":       []bool{true, false},
+		},
+	}
+
+	handler := setupHandlerWithStaticMock(t, mockResponse)
+	body := createRequestBody(t, map[string]any{})
+
+	req := createRequest(http.MethodPost, "/healthcheck", body, http.Header{
+		"command": []string{"healthcheck"},
+	})
+
+	resp := handler.Handle(context.Background(), req)
+	result := parseResponseBody(t, resp)["result"].(map[string]interface{})
+
+	require.Contains(t, result, "tests_passed")
+
+}

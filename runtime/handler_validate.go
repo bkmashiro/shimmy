@@ -56,6 +56,11 @@ func (r *RuntimeHandler) validate(t validationType, command Command, data map[st
 		zap.Stringer("type", t),
 	)
 
+	if t == validationTypeRequest && command == CommandHealth {
+		// Health does not have a request schema, no need to validate
+		return nil
+	}
+
 	schema, ok := r.schemas[t]
 	if !ok {
 		log.Error("validation schema not found")
@@ -88,6 +93,8 @@ func getSchemaType(command Command) (schema.SchemaType, error) {
 		return schema.SchemaTypeEval, nil
 	case CommandPreview:
 		return schema.SchemaTypePreview, nil
+	case CommandHealth:
+		return schema.SchemaTypeHealth, nil
 	default:
 		return 0, errInvalidCommand
 	}

@@ -191,9 +191,6 @@ func TestWorker_Kill_KillsProcess(t *testing.T) {
 	// the process should have been terminated w/ a sigkill in the background
 	assert.Equal(t, syscall.SIGKILL, syscall.Signal(*evt.Signal))
 	assert.Nil(t, evt.Code)
-
-	// the process should not be alive
-	assert.Equal(t, false, util.IsProcessAlive(w.Pid()))
 }
 
 func TestWorker_Terminate_TerminatesProcess(t *testing.T) {

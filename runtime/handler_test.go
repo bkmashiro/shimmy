@@ -58,6 +58,25 @@ func setupHandlerWithStaticMock(t *testing.T, mockResponse runtime.EvaluationRes
 	return handler
 }
 
+func mockEvalFunc(req runtime.EvaluationRequest) (runtime.EvaluationResponse, error) {
+	if req.Data["answer"] == req.Data["response"] {
+		return runtime.EvaluationResponse{
+			"command": "eval",
+			"result": map[string]interface{}{
+				"is_correct": true,
+				"feedback":   "should be 'yes'.",
+			},
+		}, nil
+	}
+	return runtime.EvaluationResponse{
+		"command": "eval",
+		"result": map[string]interface{}{
+			"is_correct": false,
+			"feedback":   "should be 'hello'.",
+		},
+	}, nil
+}
+
 func setupHandlerWithMockFunc(t *testing.T, mockResponse func(req runtime.EvaluationRequest) (runtime.EvaluationResponse, error)) runtime.Handler {
 	mockRT := new(mockRuntime)
 	mockRT.On("Handle", mock.Anything, mock.Anything).Return(mockResponse, nil)
@@ -181,19 +200,10 @@ func TestRuntimeHandler_Handle_Single_Feedback_Case(t *testing.T) {
 }
 
 func TestRuntimeHandler_Handle_Single_Feedback_Case_Match(t *testing.T) {
-	mockResponse := runtime.EvaluationResponse{
-		"command": "eval",
-		"result": map[string]interface{}{
-			"is_correct":   false,
-			"matched_case": 0,
-			"feedback":     "should be 'hello'.",
-		},
-	}
-
-	handler := setupHandlerWithStaticMock(t, mockResponse)
+	handler := setupHandlerWithMockFunc(t, mockEvalFunc)
 
 	body := createRequestBody(t, map[string]any{
-		"response": "hello",
+		"response": "other",
 		"answer":   "hello",
 		"params": map[string]any{
 			"cases": []map[string]any{
@@ -255,26 +265,7 @@ func TestRunTimeHandler_Warning_Data_Structure(t *testing.T) {
 
 func TestRuntimeHandler_Handle_Multi_Cases_Single_Match(t *testing.T) {
 
-	mockResponse := func(req runtime.EvaluationRequest) (runtime.EvaluationResponse, error) {
-		if req.Data["answer"] == req.Data["response"] {
-			return runtime.EvaluationResponse{
-				"command": "eval",
-				"result": map[string]interface{}{
-					"is_correct": true,
-					"feedback":   "should be 'yes'.",
-				},
-			}, nil
-		}
-		return runtime.EvaluationResponse{
-			"command": "eval",
-			"result": map[string]interface{}{
-				"is_correct": false,
-				"feedback":   "should be 'hello'.",
-			},
-		}, nil
-	}
-
-	handler := setupHandlerWithMockFunc(t, mockResponse)
+	handler := setupHandlerWithMockFunc(t, mockEvalFunc)
 
 	body := createRequestBody(t, map[string]any{
 		"response": "yes",
@@ -302,26 +293,7 @@ func TestRuntimeHandler_Handle_Multi_Cases_Single_Match(t *testing.T) {
 
 func TestRuntimeHandler_Handle_Multi_Cases_Many_Match(t *testing.T) {
 
-	mockResponse := func(req runtime.EvaluationRequest) (runtime.EvaluationResponse, error) {
-		if req.Data["answer"] == req.Data["response"] {
-			return runtime.EvaluationResponse{
-				"command": "eval",
-				"result": map[string]interface{}{
-					"is_correct": true,
-					"feedback":   "should be 'yes'.",
-				},
-			}, nil
-		}
-		return runtime.EvaluationResponse{
-			"command": "eval",
-			"result": map[string]interface{}{
-				"is_correct": false,
-				"feedback":   "should be 'hello'.",
-			},
-		}, nil
-	}
-
-	handler := setupHandlerWithMockFunc(t, mockResponse)
+	handler := setupHandlerWithMockFunc(t, mockEvalFunc)
 
 	body := createRequestBody(t, map[string]any{
 		"response": "yes",

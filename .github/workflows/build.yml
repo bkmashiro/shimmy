@@ -71,13 +71,13 @@ jobs:
         run: go mod download
 
       - name: Run Tests
-        run: go test -json ./... > TestResults.json
+        run: go test -json ./...
 
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        with:
-          name: Go-results
-          path: TestResults.json
+#      - name: Upload test results
+#        uses: actions/upload-artifact@v4
+#        with:
+#          name: Go-results
+#          path: TestResults.json
 
   build_docker:
     name: Build Docker Image

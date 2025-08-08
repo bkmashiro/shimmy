@@ -184,9 +184,6 @@ func TestWorker_Kill_KillsProcess(t *testing.T) {
 		evt, waitError = w.Wait(context.Background())
 		return waitError == nil && evt.Signal != nil
 	}, time.Second, 10*time.Millisecond)
-
-	require.NoError(t, waitError)
-	require.NotNil(t, evt)
 }
 
 func TestWorker_Terminate_TerminatesProcess(t *testing.T) {

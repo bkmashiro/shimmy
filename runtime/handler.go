@@ -145,13 +145,30 @@ func (h *RuntimeHandler) handle(ctx context.Context, req Request) ([]byte, error
 		return nil, err
 	}
 
+	if command == "eval" {
+		ProcessEval(reqBody, result, req, command, h, ctx)
+	}
+
+	resData, err = json.Marshal(respBody)
+	if err != nil {
+		log.Error("failed to marshal response data", zap.Error(err))
+		return nil, err
+	}
+
+	// Return the response data
+	return resData, nil
+}
+
+func ProcessEval(reqBody map[string]any, result map[string]any, req Request, command Command,
+	h *RuntimeHandler, ctx context.Context) {
+
 	params, ok := reqBody["params"].(map[string]interface{})
 	cases, ok := params["cases"].([]interface{})
 
 	if result["is_correct"] == false {
 
 		if ok && len(cases) > 0 {
-			match, warnings := GetCaseFeedback(respBody, params, params["cases"].([]interface{}), req, command, h, ctx)
+			match, warnings := GetCaseFeedback(params, params["cases"].([]interface{}), req, command, h, ctx)
 
 			if warnings != nil {
 				result["warnings"] = warnings
@@ -173,15 +190,6 @@ func (h *RuntimeHandler) handle(ctx context.Context, req Request) ([]byte, error
 			}
 		}
 	}
-
-	resData, err = json.Marshal(respBody)
-	if err != nil {
-		log.Error("failed to marshal response data", zap.Error(err))
-		return nil, err
-	}
-
-	// Return the response data
-	return resData, nil
 }
 
 func SendCommand(req Request, command Command, h *RuntimeHandler, ctx context.Context) ([]byte, error) {
@@ -223,15 +231,9 @@ func SendCommand(req Request, command Command, h *RuntimeHandler, ctx context.Co
 	return resData, nil
 }
 
-func GetCaseFeedback(
-	response any,
-	params map[string]any,
-	cases []interface{},
-	req Request,
-	command Command,
-	h *RuntimeHandler,
-	ctx context.Context,
-) (map[string]any, []CaseWarning) {
+func GetCaseFeedback(params map[string]any, cases []interface{}, req Request, command Command, h *RuntimeHandler,
+	ctx context.Context) (map[string]any, []CaseWarning) {
+
 	// Simulate find_first_matching_case
 	matches, feedback, warnings := FindFirstMatchingCase(params, cases, req, command, h, ctx)
 

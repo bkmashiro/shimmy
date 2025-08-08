@@ -161,9 +161,14 @@ func (h *RuntimeHandler) handle(ctx context.Context, req Request) ([]byte, error
 				result["feedback"] = match["feedback"]
 				result["matched_case"] = match["id"]
 
-				mark, exists := match["mark"].(map[string]interface{})
+				mark, exists := match["mark"].(float64)
 				if exists {
-					result["is_correct"] = mark
+					if int(mark) == 1 {
+						result["is_correct"] = true
+					} else {
+						result["is_correct"] = false
+					}
+
 				}
 			}
 		}

@@ -371,3 +371,33 @@ func TestRuntimeHandler_Catch_Exception(t *testing.T) {
 	require.Equal(t, "catches exception as warning test", warningContent["message"])
 	require.Equal(t, float64(0), warningContent["case"])
 }
+
+func TestRuntimeHandler_override_feedback_to_incorrect_case(t *testing.T) {
+
+	handler := setupHandlerWithMockFunc(t, mockEvalFunc)
+
+	body := createRequestBody(t, map[string]any{
+		"response": "other",
+		"answer":   "hello",
+		"params": map[string]any{
+			"cases": []map[string]any{
+				{
+					"answer":   "other",
+					"feedback": "should be 'hello'.",
+					"mark":     1,
+				},
+			},
+		},
+	})
+
+	req := createRequest(http.MethodPost, "/eval", body, http.Header{
+		"command": []string{"eval"},
+	})
+
+	resp := handler.Handle(context.Background(), req)
+	result := parseResponseBody(t, resp)["result"].(map[string]interface{})
+
+	require.True(t, result["is_correct"].(bool))
+	require.Equal(t, float64(0), result["matched_case"])
+	require.Equal(t, "should be 'hello'.", result["feedback"])
+}

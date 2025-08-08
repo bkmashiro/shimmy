@@ -19,8 +19,14 @@ type mockRuntime struct {
 
 func (m *mockRuntime) Handle(ctx context.Context, request runtime.EvaluationRequest) (runtime.EvaluationResponse, error) {
 	args := m.Called(ctx, request)
-	return args.Get(0).(runtime.EvaluationResponse), args.Error(1)
 
+	// If you want to generate a response based on the request dynamically:
+	if responseFunc, ok := args.Get(0).(func(runtime.EvaluationRequest) runtime.EvaluationResponse); ok {
+		return responseFunc(request), args.Error(1)
+	}
+
+	// Otherwise, return the static response
+	return args.Get(0).(runtime.EvaluationResponse), args.Error(1)
 }
 
 func (m *mockRuntime) Start(ctx context.Context) error {
@@ -37,7 +43,20 @@ func setupLogger(t *testing.T) *zap.Logger {
 	return zaptest.NewLogger(t)
 }
 
-func setupHandlerWithMock(t *testing.T, mockResponse runtime.EvaluationResponse) runtime.Handler {
+func setupHandlerWithStaticMock(t *testing.T, mockResponse runtime.EvaluationResponse) runtime.Handler {
+	mockRT := new(mockRuntime)
+	mockRT.On("Handle", mock.Anything, mock.Anything).Return(mockResponse, nil)
+
+	handler, err := runtime.NewRuntimeHandler(runtime.HandlerParams{
+		Runtime: mockRT,
+		Log:     setupLogger(t),
+	})
+	require.NoError(t, err)
+
+	return handler
+}
+
+func setupHandlerWithMockFunc(t *testing.T, mockResponse func(req runtime.EvaluationRequest) runtime.EvaluationResponse) runtime.Handler {
 	mockRT := new(mockRuntime)
 	mockRT.On("Handle", mock.Anything, mock.Anything).Return(mockResponse, nil)
 
@@ -84,7 +103,7 @@ func TestRuntimeHandler_Handle_Success(t *testing.T) {
 		},
 	}
 
-	handler := setupHandlerWithMock(t, mockResponse)
+	handler := setupHandlerWithStaticMock(t, mockResponse)
 
 	body := createRequestBody(t, map[string]any{
 		"response": 1,
@@ -135,7 +154,7 @@ func TestRuntimeHandler_Handle_Single_Feedback_Case(t *testing.T) {
 		},
 	}
 
-	handler := setupHandlerWithMock(t, mockResponse)
+	handler := setupHandlerWithStaticMock(t, mockResponse)
 
 	body := createRequestBody(t, map[string]any{
 		"response": "hello",
@@ -169,7 +188,7 @@ func TestRuntimeHandler_Handle_Single_Feedback_Case_Match(t *testing.T) {
 		},
 	}
 
-	handler := setupHandlerWithMock(t, mockResponse)
+	handler := setupHandlerWithStaticMock(t, mockResponse)
 
 	body := createRequestBody(t, map[string]any{
 		"response": "hello",
@@ -193,7 +212,6 @@ func TestRuntimeHandler_Handle_Single_Feedback_Case_Match(t *testing.T) {
 	require.Equal(t, "should be 'hello'.", result["feedback"])
 }
 
-// TODO: Rewrite this test potentially the mock response as it should currently fail.
 func TestRunTimeHandler_Warning_Data_Structure(t *testing.T) {
 	mockResponse := runtime.EvaluationResponse{
 		"command": "eval",
@@ -203,7 +221,7 @@ func TestRunTimeHandler_Warning_Data_Structure(t *testing.T) {
 		},
 	}
 
-	handler := setupHandlerWithMock(t, mockResponse)
+	handler := setupHandlerWithStaticMock(t, mockResponse)
 
 	body := createRequestBody(t, map[string]any{
 		"response": "hello",
@@ -231,4 +249,51 @@ func TestRunTimeHandler_Warning_Data_Structure(t *testing.T) {
 	warningContent := warnings[0].(map[string]interface{})
 	require.Equal(t, "Missing answer field", warningContent["message"])
 	require.Equal(t, float64(0), warningContent["case"])
+}
+
+func TestRuntimeHandler_Handle_Multi_Cases_Single_Match(t *testing.T) {
+
+	mockResponse := func(req runtime.EvaluationRequest) runtime.EvaluationResponse {
+		if req.Data["answer"] == req.Data["response"] {
+			return runtime.EvaluationResponse{
+				"command": "eval",
+				"result": map[string]interface{}{
+					"is_correct": true,
+					"feedback":   "should be 'yes'.",
+				},
+			}
+		}
+		return runtime.EvaluationResponse{
+			"command": "eval",
+			"result": map[string]interface{}{
+				"is_correct": false,
+				"feedback":   "should be 'hello'.",
+			},
+		}
+	}
+
+	handler := setupHandlerWithMockFunc(t, mockResponse)
+
+	body := createRequestBody(t, map[string]any{
+		"response": "yes",
+		"answer":   "world",
+		"params": map[string]any{
+			"cases": []map[string]any{
+				{"answer": "hello", "feedback": "should be 'hello'."},
+				{"answer": "yes", "feedback": "should be 'yes'."},
+				{"answer": "no", "feedback": "should be 'no'."},
+			},
+		},
+	})
+
+	req := createRequest(http.MethodPost, "/eval", body, http.Header{
+		"command": []string{"eval"},
+	})
+
+	resp := handler.Handle(context.Background(), req)
+	result := parseResponseBody(t, resp)["result"].(map[string]interface{})
+
+	require.False(t, result["is_correct"].(bool))
+	require.Equal(t, float64(1), result["matched_case"])
+	require.Equal(t, "should be 'yes'.", result["feedback"])
 }

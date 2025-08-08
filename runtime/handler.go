@@ -228,7 +228,7 @@ func GetCaseFeedback(
 	ctx context.Context,
 ) (map[string]any, []CaseWarning) {
 	// Simulate find_first_matching_case
-	matches, feedback, warnings := FindFirstMatchingCase(response, params, cases, req, command, h, ctx)
+	matches, feedback, warnings := FindFirstMatchingCase(params, cases, req, command, h, ctx)
 
 	if len(matches) == 0 {
 		return nil, warnings
@@ -259,21 +259,15 @@ func GetCaseFeedback(
 	return match, warnings
 }
 
-func FindFirstMatchingCase(
-	response any,
-	params map[string]any,
-	cases []interface{},
-	req Request,
-	command Command,
-	h *RuntimeHandler,
-	ctx context.Context,
-) ([]int, []string, []CaseWarning) {
+func FindFirstMatchingCase(params map[string]any, cases []interface{}, req Request, command Command, h *RuntimeHandler,
+	ctx context.Context) ([]int, []string, []CaseWarning) {
+
 	var matches []int
 	var feedback []string
 	var warnings []CaseWarning
 
 	for index, c := range cases {
-		result := EvaluateCase(response, params, c.(map[string]interface{}), index, req, command, h, ctx)
+		result := EvaluateCase(params, c.(map[string]interface{}), index, req, command, h, ctx)
 
 		if result.Warning != nil {
 			warnings = append(warnings, *result.Warning)
@@ -289,16 +283,8 @@ func FindFirstMatchingCase(
 	return matches, feedback, warnings
 }
 
-func EvaluateCase(
-	response any,
-	params map[string]any,
-	caseData map[string]any,
-	index int,
-	req Request,
-	command Command,
-	h *RuntimeHandler,
-	ctx context.Context,
-) CaseResult {
+func EvaluateCase(params map[string]any, caseData map[string]any, index int, req Request, command Command,
+	h *RuntimeHandler, ctx context.Context) CaseResult {
 	// Check for required fields
 	if _, hasAnswer := caseData["answer"]; !hasAnswer {
 		return CaseResult{
@@ -350,8 +336,8 @@ func EvaluateCase(
 		}
 	}
 
-	// TODO: Update req
-	//reqBody[""]
+	reqBody["answer"] = caseData["answer"]
+	reqBody["params"] = combinedParams
 
 	req.Body, err = json.Marshal(reqBody)
 	if err != nil {

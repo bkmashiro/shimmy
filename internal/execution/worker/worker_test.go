@@ -187,15 +187,19 @@ func TestWorker_Kill_KillsProcess(t *testing.T) {
 }
 
 func TestWorker_Terminate_TerminatesProcess(t *testing.T) {
-	w := worker.NewProcessWorker(context.Background(), worker.StartConfig{Cmd: "cat"}, zap.NewNop())
+	w := worker.NewProcessWorker(context.Background(), worker.StartConfig{Cmd: "sleep", Args: []string{"10"}}, zap.NewNop())
 
 	err := w.Start(context.Background())
 	assert.NoError(t, err)
 
 	w.Stop()
 
-	evt, err := w.Wait(context.Background())
-	assert.NoError(t, err)
+	var evt worker.ExitEvent
+	var waitError error
+	require.Eventually(t, func() bool {
+		evt, waitError = w.Wait(context.Background())
+		return waitError == nil && evt.Signal != nil
+	}, time.Second, 10*time.Millisecond)
 
 	// the process should have been terminated w/ a sigterm in the background
 	assert.Equal(t, syscall.SIGTERM, syscall.Signal(*evt.Signal))

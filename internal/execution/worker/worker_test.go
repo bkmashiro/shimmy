@@ -171,7 +171,7 @@ func TestWorker_WaitFor_ReturnsErrorIfTimeout(t *testing.T) {
 }
 
 func TestWorker_Kill_KillsProcess(t *testing.T) {
-	w := worker.NewProcessWorker(context.Background(), worker.StartConfig{Cmd: "cat"}, zap.NewNop())
+	w := worker.NewProcessWorker(context.Background(), worker.StartConfig{Cmd: "sleep", Args: []string{"10"}}, zap.NewNop())
 
 	err := w.Start(context.Background())
 	assert.NoError(t, err)

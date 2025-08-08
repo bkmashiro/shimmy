@@ -192,3 +192,43 @@ func TestRuntimeHandler_Handle_Single_Feedback_Case_Match(t *testing.T) {
 	require.Equal(t, float64(0), result["matched_case"])
 	require.Equal(t, "should be 'hello'.", result["feedback"])
 }
+
+// TODO: Rewrite this test potentially the mock response as it should currently fail.
+func TestRunTimeHandler_Warning_Data_Structure(t *testing.T) {
+	mockResponse := runtime.EvaluationResponse{
+		"command": "eval",
+		"result": map[string]interface{}{
+			"is_correct": false,
+			"feedback":   "Missing answer/feedback field",
+		},
+	}
+
+	handler := setupHandlerWithMock(t, mockResponse)
+
+	body := createRequestBody(t, map[string]any{
+		"response": "hello",
+		"answer":   "world",
+		"params": map[string]any{
+			"cases": []map[string]any{
+				{"feedback": "should be 'hello'."},
+				{"answer": "other", "feedback": "should be 'hello'."},
+			},
+		},
+	})
+
+	req := createRequest(http.MethodPost, "/eval", body, http.Header{
+		"command": []string{"eval"},
+	})
+
+	resp := handler.Handle(context.Background(), req)
+	result := parseResponseBody(t, resp)["result"].(map[string]interface{})
+
+	require.False(t, result["is_correct"].(bool))
+	require.Contains(t, result, "warnings")
+
+	warnings := result["warnings"].([]interface{})
+	require.Len(t, warnings, 1)
+	warningContent := warnings[0].(map[string]interface{})
+	require.Equal(t, "Missing answer field", warningContent["message"])
+	require.Equal(t, float64(0), warningContent["case"])
+}

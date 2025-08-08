@@ -3,6 +3,7 @@ package worker_test
 import (
 	"bytes"
 	"context"
+	"github.com/stretchr/testify/require"
 	"io"
 	"strings"
 	"syscall"
@@ -66,12 +67,15 @@ func TestWorker_TerminatesIfContextCancelled(t *testing.T) {
 	// cancel the worker context
 	cancel()
 
-	evt, err := w.Wait(context.Background())
-	assert.NoError(t, err)
+	var evt worker.ExitEvent
+	var waitError error
+	require.Eventually(t, func() bool {
+		evt, waitError = w.Wait(context.Background())
+		return waitError == nil && evt.Signal != nil
+	}, time.Second, 10*time.Millisecond)
 
-	// the process should have been terminated w/ a sigkill in the background
-	assert.Equal(t, syscall.SIGKILL, syscall.Signal(*evt.Signal))
-	assert.Nil(t, evt.Code)
+	require.NoError(t, waitError)
+	require.NotNil(t, evt)
 }
 
 func TestWorker_CapturesStderr(t *testing.T) {

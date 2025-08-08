@@ -178,8 +178,15 @@ func TestWorker_Kill_KillsProcess(t *testing.T) {
 
 	w.Kill()
 
-	evt, err := w.Wait(context.Background())
-	assert.NoError(t, err)
+	var evt worker.ExitEvent
+	var waitError error
+	require.Eventually(t, func() bool {
+		evt, waitError = w.Wait(context.Background())
+		return waitError == nil && evt.Signal != nil
+	}, time.Second, 10*time.Millisecond)
+
+	require.NoError(t, waitError)
+	require.NotNil(t, evt)
 
 	// the process should have been terminated w/ a sigkill in the background
 	assert.Equal(t, syscall.SIGKILL, syscall.Signal(*evt.Signal))

@@ -1,6 +1,6 @@
 module github.com/lambda-feedback/shimmy
 
-go 1.22.0
+go 1.24.5
 
 require (
 	github.com/aws/aws-lambda-go v1.46.0

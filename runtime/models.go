@@ -13,6 +13,9 @@ const (
 
 	// CommandEvaluate is the command to evaluate the response.
 	CommandEvaluate Command = "eval"
+
+	// CommandHealth is the command for healthcheck
+	CommandHealth = "healthcheck"
 )
 
 // ParseCommand parses a command from a given path.
@@ -22,6 +25,8 @@ func ParseCommand(path string) (Command, bool) {
 		return CommandEvaluate, true
 	case "preview":
 		return CommandPreview, true
+	case "healthcheck":
+		return CommandHealth, true
 	}
 
 	return "", false

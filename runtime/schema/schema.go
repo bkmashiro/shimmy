@@ -13,17 +13,19 @@ type SchemaType int
 const (
 	SchemaTypeEval SchemaType = iota
 	SchemaTypePreview
+	SchemaTypeHealth
 )
 
 type Schema struct {
 	schemas map[SchemaType]*gojsonschema.Schema
 }
 
-func new(eval *gojsonschema.Schema, preview *gojsonschema.Schema) *Schema {
+func new(eval *gojsonschema.Schema, preview *gojsonschema.Schema, health *gojsonschema.Schema) *Schema {
 	return &Schema{
 		schemas: map[SchemaType]*gojsonschema.Schema{
 			SchemaTypeEval:    eval,
 			SchemaTypePreview: preview,
+			SchemaTypeHealth:  health,
 		},
 	}
 }
@@ -67,7 +69,7 @@ func NewRequestSchema() (*Schema, error) {
 		return nil, err
 	}
 
-	return new(evalSchema, previewSchema), nil
+	return new(evalSchema, previewSchema, nil), nil
 }
 
 //go:embed response-eval.json
@@ -77,6 +79,10 @@ var evalResponseLoader = gojsonschema.NewBytesLoader(evalResponse)
 //go:embed response-preview.json
 var previewResponse json.RawMessage
 var previewResponseLoader = gojsonschema.NewBytesLoader(previewResponse)
+
+//go:embed response-health.json
+var healthResponse json.RawMessage
+var healthResponseLoader = gojsonschema.NewBytesLoader(healthResponse)
 
 func NewResponseSchema() (*Schema, error) {
 	evalSchema, err := gojsonschema.NewSchema(evalResponseLoader)
@@ -89,5 +95,10 @@ func NewResponseSchema() (*Schema, error) {
 		return nil, err
 	}
 
-	return new(evalSchema, previewSchema), nil
+	healthSchema, err := gojsonschema.NewSchema(healthResponseLoader)
+	if err != nil {
+		return nil, err
+	}
+
+	return new(evalSchema, previewSchema, healthSchema), nil
 }

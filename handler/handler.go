@@ -4,27 +4,32 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/lambda-feedback/shimmy/runtime"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
+
+	"github.com/lambda-feedback/shimmy/config"
+	"github.com/lambda-feedback/shimmy/runtime"
 )
 
 type CommandHandlerParams struct {
 	fx.In
 
 	Handler runtime.Handler
+	Config  config.Config
 	Log     *zap.Logger
 }
 
 func NewCommandHandler(params CommandHandlerParams) *CommandHandler {
 	return &CommandHandler{
 		handler: params.Handler,
+		config:  params.Config,
 		log:     params.Log,
 	}
 }
 
 type CommandHandler struct {
 	handler runtime.Handler
+	config  config.Config
 	log     *zap.Logger
 }
 
@@ -33,6 +38,13 @@ func (h *CommandHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		zap.String("path", r.URL.Path),
 		zap.String("method", r.Method),
 	)
+
+	// Check for authorization
+	if h.config.Auth.Key != "" && r.Header.Get("api-key") != h.config.Auth.Key {
+		log.Debug("unauthorized request")
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {

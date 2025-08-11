@@ -3,8 +3,9 @@ package util_test
 import (
 	"testing"
 
-	"github.com/lambda-feedback/shimmy/util"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/lambda-feedback/shimmy/util"
 )
 
 func TestTruthy(t *testing.T) {

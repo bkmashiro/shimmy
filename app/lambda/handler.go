@@ -7,9 +7,10 @@ import (
 
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/awslabs/aws-lambda-go-api-proxy/httpadapter"
-	"github.com/lambda-feedback/shimmy/internal/server"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
+
+	"github.com/lambda-feedback/shimmy/internal/server"
 )
 
 // LambdaHandlerParams represents the parameters required for

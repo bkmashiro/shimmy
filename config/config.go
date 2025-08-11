@@ -8,6 +8,11 @@ const (
 	JSON MessageEncoding = "json"
 )
 
+type AuthConfig struct {
+	// Key is the secret key for the application
+	Key string `conf:"key"`
+}
+
 type Config struct {
 	// LogLevel is the log level for the application
 	LogLevel string `conf:"log_level"`
@@ -17,4 +22,7 @@ type Config struct {
 
 	// Runtime is the runtime configuration
 	Runtime runtime.Config `conf:"runtime"`
+
+	// Auth is the authentication configuration
+	Auth AuthConfig `conf:"auth"`
 }

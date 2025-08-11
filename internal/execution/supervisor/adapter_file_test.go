@@ -7,10 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lambda-feedback/shimmy/internal/execution/worker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
+
+	"github.com/lambda-feedback/shimmy/internal/execution/worker"
 )
 
 func TestFileAdapter_Start_DoesNotStartWorker(t *testing.T) {

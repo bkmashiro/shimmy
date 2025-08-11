@@ -3,8 +3,9 @@ package cmd
 import (
 	"os"
 
-	"github.com/lambda-feedback/shimmy/util/logging"
 	"github.com/urfave/cli/v2"
+
+	"github.com/lambda-feedback/shimmy/util/logging"
 )
 
 var (

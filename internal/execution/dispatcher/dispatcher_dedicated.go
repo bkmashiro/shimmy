@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/lambda-feedback/shimmy/internal/execution/supervisor"
 	"go.uber.org/zap"
+
+	"github.com/lambda-feedback/shimmy/internal/execution/supervisor"
 )
 
 type DedicatedDispatcher struct {

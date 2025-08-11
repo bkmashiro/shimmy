@@ -4,8 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/lambda-feedback/shimmy/internal/execution/worker"
 	"go.uber.org/zap"
+
+	"github.com/lambda-feedback/shimmy/internal/execution/worker"
 )
 
 // AdapterWorkerFactoryFn is a type alias for a function that creates a worker

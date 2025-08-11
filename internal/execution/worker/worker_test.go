@@ -10,10 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lambda-feedback/shimmy/internal/execution/worker"
-	"github.com/lambda-feedback/shimmy/util"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
+
+	"github.com/lambda-feedback/shimmy/internal/execution/worker"
+	"github.com/lambda-feedback/shimmy/util"
 )
 
 func TestWorker_Start_IsAlive(t *testing.T) {

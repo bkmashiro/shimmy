@@ -4,10 +4,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/lambda-feedback/shimmy/internal/execution/supervisor"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
+
+	"github.com/lambda-feedback/shimmy/internal/execution/supervisor"
 )
 
 func TestSupervisor_New_DefaultWorkerFactory(t *testing.T) {

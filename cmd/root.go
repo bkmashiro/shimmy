@@ -6,11 +6,12 @@ import (
 	"os"
 	"time"
 
+	"github.com/urfave/cli/v2"
+	"go.uber.org/zap"
+
 	"github.com/lambda-feedback/shimmy/config"
 	"github.com/lambda-feedback/shimmy/util/conf"
 	"github.com/lambda-feedback/shimmy/util/logging"
-	"github.com/urfave/cli/v2"
-	"go.uber.org/zap"
 )
 
 var (
@@ -34,6 +35,13 @@ functions on arbitrary, serverless platforms.`
 				Name:    "log-format",
 				Usage:   "set the log format. Options: production, development.",
 				EnvVars: []string{"LOG_FORMAT"},
+			},
+			// auth flags
+			&cli.StringFlag{
+				Name:     "auth-key",
+				Usage:    "the secret key for the application.",
+				Category: "auth",
+				EnvVars:  []string{"AUTH_KEY"},
 			},
 			// shim flags
 			&cli.StringFlag{
@@ -241,6 +249,7 @@ func parseRootConfig(ctx *cli.Context) (config.Config, error) {
 
 	// map cli flags to config fields
 	cliMap := map[string]string{
+		"auth-key":                   "auth.key",
 		"max-workers":                "runtime.max_workers",
 		"command":                    "runtime.cmd",
 		"cwd":                        "runtime.cwd",

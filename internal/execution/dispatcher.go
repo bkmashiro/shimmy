@@ -3,9 +3,10 @@ package execution
 import (
 	"context"
 
+	"go.uber.org/zap"
+
 	"github.com/lambda-feedback/shimmy/internal/execution/dispatcher"
 	"github.com/lambda-feedback/shimmy/internal/execution/supervisor"
-	"go.uber.org/zap"
 )
 
 type Dispatcher dispatcher.Dispatcher

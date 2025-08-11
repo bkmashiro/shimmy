@@ -9,9 +9,10 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/lambda-feedback/shimmy/runtime/schema"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
+
+	"github.com/lambda-feedback/shimmy/runtime/schema"
 )
 
 var (

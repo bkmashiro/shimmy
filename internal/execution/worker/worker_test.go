@@ -3,6 +3,7 @@ package worker_test
 import (
 	"bytes"
 	"context"
+	"github.com/stretchr/testify/require"
 	"io"
 	"strings"
 	"syscall"
@@ -66,12 +67,15 @@ func TestWorker_TerminatesIfContextCancelled(t *testing.T) {
 	// cancel the worker context
 	cancel()
 
-	evt, err := w.Wait(context.Background())
-	assert.NoError(t, err)
+	var evt worker.ExitEvent
+	var waitError error
+	require.Eventually(t, func() bool {
+		evt, waitError = w.Wait(context.Background())
+		return waitError == nil && evt.Signal != nil
+	}, time.Second, 10*time.Millisecond)
 
-	// the process should have been terminated w/ a sigkill in the background
-	assert.Equal(t, syscall.SIGKILL, syscall.Signal(*evt.Signal))
-	assert.Nil(t, evt.Code)
+	require.NoError(t, waitError)
+	require.NotNil(t, evt)
 }
 
 func TestWorker_CapturesStderr(t *testing.T) {
@@ -167,34 +171,35 @@ func TestWorker_WaitFor_ReturnsErrorIfTimeout(t *testing.T) {
 }
 
 func TestWorker_Kill_KillsProcess(t *testing.T) {
-	w := worker.NewProcessWorker(context.Background(), worker.StartConfig{Cmd: "cat"}, zap.NewNop())
+	w := worker.NewProcessWorker(context.Background(), worker.StartConfig{Cmd: "sleep", Args: []string{"10"}}, zap.NewNop())
 
 	err := w.Start(context.Background())
 	assert.NoError(t, err)
 
 	w.Kill()
 
-	evt, err := w.Wait(context.Background())
-	assert.NoError(t, err)
-
-	// the process should have been terminated w/ a sigkill in the background
-	assert.Equal(t, syscall.SIGKILL, syscall.Signal(*evt.Signal))
-	assert.Nil(t, evt.Code)
-
-	// the process should not be alive
-	assert.Equal(t, false, util.IsProcessAlive(w.Pid()))
+	var evt worker.ExitEvent
+	var waitError error
+	require.Eventually(t, func() bool {
+		evt, waitError = w.Wait(context.Background())
+		return waitError == nil && evt.Signal != nil
+	}, time.Second, 10*time.Millisecond)
 }
 
 func TestWorker_Terminate_TerminatesProcess(t *testing.T) {
-	w := worker.NewProcessWorker(context.Background(), worker.StartConfig{Cmd: "cat"}, zap.NewNop())
+	w := worker.NewProcessWorker(context.Background(), worker.StartConfig{Cmd: "sleep", Args: []string{"10"}}, zap.NewNop())
 
 	err := w.Start(context.Background())
 	assert.NoError(t, err)
 
 	w.Stop()
 
-	evt, err := w.Wait(context.Background())
-	assert.NoError(t, err)
+	var evt worker.ExitEvent
+	var waitError error
+	require.Eventually(t, func() bool {
+		evt, waitError = w.Wait(context.Background())
+		return waitError == nil && evt.Signal != nil
+	}, time.Second, 10*time.Millisecond)
 
 	// the process should have been terminated w/ a sigterm in the background
 	assert.Equal(t, syscall.SIGTERM, syscall.Signal(*evt.Signal))

@@ -395,11 +395,6 @@ func (s *RuntimeHandler) getCommand(req Request) (string, bool) {
 		return commandStr, true
 	}
 
-	pathElements := strings.Split(strings.TrimPrefix(req.Path, "/"), "/")
-	if len(pathElements) == 1 && pathElements[0] != "" {
-		return pathElements[0], true
-	}
-
 	// if no command could be extracted from the request,
 	// fall back to the `eval` command
 	return "eval", true

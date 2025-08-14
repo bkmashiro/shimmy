@@ -151,7 +151,37 @@ func TestRuntimeHandler_Handle_InvalidCommand(t *testing.T) {
 	req := createRequest(http.MethodPost, "/!invalid", []byte(`{}`), http.Header{})
 	resp := handler.Handle(context.Background(), req)
 
-	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	var respBody map[string]any
+	err = json.Unmarshal(resp.Body, &respBody)
+	require.NoError(t, err)
+
+	responseError := respBody["error"].(map[string]interface{})
+
+	require.Equal(t, "request validation error", responseError["message"])
+}
+
+func TestRuntimeHandler_Handle_Empty_Command(t *testing.T) {
+	mockResponse := runtime.EvaluationResponse{
+		"command": "eval",
+		"result": map[string]interface{}{
+			"is_correct": true,
+			"feedback":   "Well done! Your answer is correct.",
+		},
+	}
+
+	handler := setupHandlerWithStaticMock(t, mockResponse)
+
+	body := createRequestBody(t, map[string]any{
+		"response": 1,
+		"answer":   1,
+	})
+
+	req := createRequest(http.MethodPost, "", body, http.Header{})
+
+	resp := handler.Handle(context.Background(), req)
+	respBody := parseResponseBody(t, resp)
+
+	require.Equal(t, mockResponse["result"], respBody["result"])
 }
 
 func TestRuntimeHandler_Handle_InvalidMethod(t *testing.T) {
@@ -416,8 +446,8 @@ func TestRunTimeHandler_Healthcheck(t *testing.T) {
 	handler := setupHandlerWithStaticMock(t, mockResponse)
 	body := createRequestBody(t, map[string]any{})
 
-	req := createRequest(http.MethodPost, "/healthcheck", body, http.Header{
-		"command": []string{"healthcheck"},
+	req := createRequest(http.MethodPost, "/", body, http.Header{
+		"Command": []string{"healthcheck"},
 	})
 
 	resp := handler.Handle(context.Background(), req)
@@ -443,7 +473,7 @@ func TestRunTimeHandler_Valid_Preview(t *testing.T) {
 	})
 
 	req := createRequest(http.MethodPost, "/preview", body, http.Header{
-		"command": []string{"preview"},
+		"Command": []string{"preview"},
 	})
 
 	resp := handler.Handle(context.Background(), req)
@@ -501,7 +531,7 @@ func TestRunTimeHandler_Invalid_Preview_Incorrect_Args(t *testing.T) {
 	})
 
 	req := createRequest(http.MethodPost, "/preview", body, http.Header{
-		"command": []string{"preview"},
+		"Command": []string{"preview"},
 	})
 
 	resp := handler.Handle(context.Background(), req)

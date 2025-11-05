@@ -117,8 +117,8 @@ func (a *fileAdapter) Send(
 	}()
 
 	message := map[string]any{
-		"method": method,
-		"params": data,
+		"command": method,
+		"params":  data,
 	}
 
 	// write message to request file

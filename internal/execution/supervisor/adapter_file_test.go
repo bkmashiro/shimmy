@@ -68,7 +68,7 @@ func TestFileAdapter_Send(t *testing.T) {
 
 	res, err := a.Send(ctx, "test", data, 10)
 	assert.NoError(t, err)
-	assert.Equal(t, map[string]any{"method": "test", "params": data}, res)
+	assert.Equal(t, map[string]any{"command": "test", "params": data}, res)
 
 	// check that the request and response files were cleaned up
 	_, err = os.Stat(requestFileName)

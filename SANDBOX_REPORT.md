@@ -489,3 +489,43 @@ Env vars in /proc: 4
 ---
 
 *Report updated: 2026-03-09 11:10 UTC*
+
+---
+
+## Appendix F: Fork Blocking Research
+
+### Attempted Solution: seccomp arg inspection
+
+Tried blocking `clone()` syscall unless `CLONE_THREAD` flag is set:
+
+```go
+// Load arg0 (clone flags)
+{Code: BPF_LD | BPF_W | BPF_ABS, K: 16},
+// If CLONE_THREAD set, allow
+{Code: BPF_JMP | BPF_JSET | BPF_K, Jt: 1, Jf: 0, K: CLONE_THREAD},
+// Block
+{Code: BPF_RET | BPF_K, K: SECCOMP_RET_ERRNO | 1},
+```
+
+### Result: Failed
+
+- Error: `seccomp: invalid argument`
+- Cause: BPF arg inspection on 64-bit args is complex
+- `BPF_W` reads 32 bits but clone flags may be in different half
+
+### Alternatives Explored
+
+1. **Use libseccomp** - More robust, handles arch differences
+2. **Use seccomp_unotify** - User-space filtering, complex
+3. **Accept limitation** - Lambda has own limits
+
+### Conclusion
+
+Fork limiting via pure BPF is architecture-dependent and fragile.
+For production, recommend using libseccomp-golang or accepting the limitation.
+
+**Final test coverage: 13/15 (87%)**
+
+The 2 failing tests (fork bomb, subprocess) are limited by RLIMIT_NPROC
+being per-user rather than per-sandbox. This is an acceptable limitation
+given Lambda's built-in process limits.

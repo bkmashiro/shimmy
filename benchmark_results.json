@@ -1,0 +1,425 @@
+{
+  "timestamp": "2026-03-09 12:53:00",
+  "categories": {
+    "advanced": {
+      "passed": 21,
+      "failed": 0,
+      "tests": [
+        {
+          "name": "cgroup_escape",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005711793899536133
+        },
+        {
+          "name": "core_pattern",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005563497543334961
+        },
+        {
+          "name": "futex_wake",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005475521087646484
+        },
+        {
+          "name": "inotify_spy",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.0054302215576171875
+        },
+        {
+          "name": "keyring",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.0053863525390625
+        },
+        {
+          "name": "landlock",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005451679229736328
+        },
+        {
+          "name": "memfd_exec",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005372762680053711
+        },
+        {
+          "name": "memfd_secret",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.0055141448974609375
+        },
+        {
+          "name": "mprotect_exec",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.0055201053619384766
+        },
+        {
+          "name": "oom_trigger",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005472421646118164
+        },
+        {
+          "name": "open_tree",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.0054891109466552734
+        },
+        {
+          "name": "personality",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005396842956542969
+        },
+        {
+          "name": "prctl_dangerous",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.0054779052734375
+        },
+        {
+          "name": "prctl_seccomp",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.00544285774230957
+        },
+        {
+          "name": "proc_mem_write",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005525350570678711
+        },
+        {
+          "name": "proc_sys_write",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005448341369628906
+        },
+        {
+          "name": "resource_exhaust_advanced",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005558967590332031
+        },
+        {
+          "name": "sched_attack",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005416393280029297
+        },
+        {
+          "name": "timerfd_signal",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005579710006713867
+        },
+        {
+          "name": "toctou_symlink",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005611896514892578
+        },
+        {
+          "name": "unix_socket",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005521059036254883
+        }
+      ]
+    },
+    "advanced_r3": {
+      "passed": 5,
+      "failed": 0,
+      "tests": [
+        {
+          "name": "madvise_dontneed",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005398273468017578
+        },
+        {
+          "name": "membarrier",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.0053937435150146484
+        },
+        {
+          "name": "memfd_execveat",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005771636962890625
+        },
+        {
+          "name": "prctl_set_mm",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005409955978393555
+        },
+        {
+          "name": "tiocsti",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.0055158138275146484
+        }
+      ]
+    },
+    "escape": {
+      "passed": 3,
+      "failed": 0,
+      "tests": [
+        {
+          "name": "chroot",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.0054242610931396484
+        },
+        {
+          "name": "kernel_module",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.0055272579193115234
+        },
+        {
+          "name": "pivot_root",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005363941192626953
+        }
+      ]
+    },
+    "info_leak": {
+      "passed": 5,
+      "failed": 0,
+      "tests": [
+        {
+          "name": "parent_environ",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.0055582523345947266
+        },
+        {
+          "name": "proc_environ",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005602836608886719
+        },
+        {
+          "name": "proc_maps",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.00537562370300293
+        },
+        {
+          "name": "proc_net",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005898237228393555
+        },
+        {
+          "name": "process_vm_read",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005462646484375
+        }
+      ]
+    },
+    "network": {
+      "passed": 4,
+      "failed": 0,
+      "tests": [
+        {
+          "name": "dns_exfil",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005445957183837891
+        },
+        {
+          "name": "raw_socket",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005477190017700195
+        },
+        {
+          "name": "tcp_connect",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.00551915168762207
+        },
+        {
+          "name": "udp_send",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.0054454803466796875
+        }
+      ]
+    },
+    "persistence": {
+      "passed": 4,
+      "failed": 0,
+      "tests": [
+        {
+          "name": "env_pollution",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005514860153198242
+        },
+        {
+          "name": "semaphore",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005553483963012695
+        },
+        {
+          "name": "shmem",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005353450775146484
+        },
+        {
+          "name": "write_tmp",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005447864532470703
+        }
+      ]
+    },
+    "privilege": {
+      "passed": 5,
+      "failed": 0,
+      "tests": [
+        {
+          "name": "bpf",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.0054891109466552734
+        },
+        {
+          "name": "io_uring",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005494832992553711
+        },
+        {
+          "name": "mount",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005346536636352539
+        },
+        {
+          "name": "ptrace_parent",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.0054492950439453125
+        },
+        {
+          "name": "unshare_ns",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005483388900756836
+        }
+      ]
+    },
+    "process": {
+      "passed": 3,
+      "failed": 0,
+      "tests": [
+        {
+          "name": "clone3",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005442619323730469
+        },
+        {
+          "name": "fork",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005399227142333984
+        },
+        {
+          "name": "subprocess_exec",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005552053451538086
+        }
+      ]
+    },
+    "resource_exhaustion": {
+      "passed": 5,
+      "failed": 0,
+      "tests": [
+        {
+          "name": "cpu_bomb",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.0054476261138916016
+        },
+        {
+          "name": "disk_bomb",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005306243896484375
+        },
+        {
+          "name": "fd_exhaustion",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005434513092041016
+        },
+        {
+          "name": "fork_bomb",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005357027053833008
+        },
+        {
+          "name": "memory_bomb",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005428791046142578
+        }
+      ]
+    },
+    "surface_attacks": {
+      "passed": 5,
+      "failed": 0,
+      "tests": [
+        {
+          "name": "copy_file_range",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005405902862548828
+        },
+        {
+          "name": "env_harvest",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005345821380615234
+        },
+        {
+          "name": "prctl_stealth",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.0055119991302490234
+        },
+        {
+          "name": "shellcode_exec",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005448102951049805
+        },
+        {
+          "name": "vmsplice_exfil",
+          "blocked": true,
+          "reason": "Blocked (exit=2)",
+          "duration": 0.005483150482177734
+        }
+      ]
+    }
+  }
+}

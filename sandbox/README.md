@@ -12,7 +12,7 @@ The sandbox system uses a `SandboxBackend` interface with three implementations:
 | `sandlock` | Linux | `sandlock` | rlimit + seccomp via wrapper binary |
 | `wasm` | All | `wasmtime` | WASI runtime for precompiled wasm |
 
-If a requested backend is unavailable, the system automatically falls back to `direct`.
+If `SHIMMY_SANDBOX_BACKEND` is unset, the system auto-detects the best available backend (sandlock → wasm → direct). If a requested backend is unavailable, it falls back to `direct`.
 
 ## Configuration
 
@@ -21,7 +21,7 @@ If a requested backend is unavailable, the system automatically falls back to `d
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `SHIMMY_SANDBOX` | Set to `1` to enable sandboxing | (disabled) |
-| `SHIMMY_SANDBOX_BACKEND` | Backend name: `direct`, `sandlock`, `wasm` | `direct` |
+| `SHIMMY_SANDBOX_BACKEND` | Backend name: `direct`, `sandlock`, `wasm` | auto-detect |
 | `SHIMMY_SANDLOCK_PATH` | Custom path to sandlock binary | auto-detect |
 | `SHIMMY_WASMTIME_PATH` | Custom path to wasmtime binary | auto-detect |
 
@@ -72,7 +72,7 @@ export SHIMMY_SANDBOX=1
 export SHIMMY_SANDBOX_BACKEND=wasm
 ```
 
-The worker's `createCmd()` automatically wraps commands with the selected backend when `SHIMMY_SANDBOX=1`. If the backend is unavailable or `WrapCommand` fails, it falls back to direct execution.
+The worker's `createCmd()` automatically wraps commands with the selected backend when `SHIMMY_SANDBOX=1`. If the backend is unavailable or `WrapCommand` fails, it falls back to direct execution with a warning log.
 
 ### Command Line Wrapper (standalone, Linux only)
 
@@ -100,7 +100,7 @@ Binary resolution order:
 1. Configured `binaryPath` (internal)
 2. `SHIMMY_SANDLOCK_PATH` env var
 3. `sandlock` in `$PATH`
-4. Default path
+4. `$HOME/.openclaw/workspace/sandlock/sandlock`
 
 ### WasmBackend
 

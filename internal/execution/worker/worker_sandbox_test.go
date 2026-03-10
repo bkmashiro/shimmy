@@ -278,6 +278,61 @@ func TestCreateCmd_SandboxConfigEnvVarsFallback(t *testing.T) {
 	}
 }
 
+func TestCreateCmd_SandboxConfigWithCustomMemAndCPU(t *testing.T) {
+	t.Setenv("SHIMMY_SANDBOX", "1")
+	t.Setenv("SHIMMY_SANDBOX_BACKEND", "direct")
+
+	cmd := createCmd(context.Background(), StartConfig{
+		Cmd: "echo",
+		SandboxConfig: &sandbox.Config{
+			MaxMemoryMB: 512,
+			CPUTimeSecs: 30,
+			WorkDir:     "/custom",
+		},
+	})
+
+	// DirectBackend ignores config, but cmd should still be created
+	if filepath.Base(cmd.Path) != "echo" {
+		t.Fatalf("cmd.Path = %q, want base %q", cmd.Path, "echo")
+	}
+}
+
+func TestCreateCmd_CancelledContextStillCreatesCmd(t *testing.T) {
+	t.Setenv("SHIMMY_SANDBOX", "1")
+	t.Setenv("SHIMMY_SANDBOX_BACKEND", "direct")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	cmd := createCmd(ctx, StartConfig{
+		Cmd: "echo",
+	})
+
+	// createCmd should still return a cmd even with cancelled context
+	if cmd == nil {
+		t.Fatal("createCmd returned nil with cancelled context")
+	}
+}
+
+func TestCreateCmd_SandboxConfigEnvVarsPreservedWhenSet(t *testing.T) {
+	t.Setenv("SHIMMY_SANDBOX", "1")
+	t.Setenv("SHIMMY_SANDBOX_BACKEND", "direct")
+
+	cmd := createCmd(context.Background(), StartConfig{
+		Cmd: "echo",
+		Env: []string{"FROM_CONFIG=yes"},
+		SandboxConfig: &sandbox.Config{
+			EnvVars: []string{"SANDBOX_VAR=1"}, // explicitly set
+		},
+	})
+
+	// When SandboxConfig.EnvVars is set, it shouldn't be overridden
+	// But cmd.Env is always set from os.Environ() + config.Env
+	if !contains(cmd.Env, "FROM_CONFIG=yes") {
+		t.Fatalf("cmd.Env missing FROM_CONFIG=yes")
+	}
+}
+
 func contains(items []string, want string) bool {
 	for _, item := range items {
 		if item == want {

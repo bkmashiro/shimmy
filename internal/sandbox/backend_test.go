@@ -1065,6 +1065,64 @@ func TestWasmBackend_WrapCommandBadBinaryReturnsError(t *testing.T) {
 	}
 }
 
+// --- resolveProgram edge cases ---
+
+func TestWasmBackend_ResolveProgramAbsoluteWasmPath(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	program := filepath.Join(dir, "abs.wasm")
+	if err := os.WriteFile(program, []byte("wasm"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	bin := writeExecutable(t, "wasmtime")
+	backend := &WasmBackend{wasmtimePath: bin}
+	// Absolute path with .wasm → should use as-is without looking in workdir
+	cmd, err := backend.WrapCommand(context.Background(), program, nil, Config{WorkDir: "/different/dir"})
+	if err != nil {
+		t.Fatalf("WrapCommand() error = %v", err)
+	}
+
+	found := false
+	for _, a := range cmd.Args {
+		if a == program {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("absolute .wasm path not in args: %v", cmd.Args)
+	}
+}
+
+func TestWasmBackend_ResolveProgramImplicitAbsoluteNotInWorkDir(t *testing.T) {
+	t.Parallel()
+
+	bin := writeExecutable(t, "wasmtime")
+	backend := &WasmBackend{wasmtimePath: bin}
+	// "nonexistent" without .wasm and not in workdir → error
+	_, err := backend.WrapCommand(context.Background(), "nonexistent", nil, Config{WorkDir: t.TempDir()})
+	if err == nil {
+		t.Fatal("expected error for nonexistent program")
+	}
+	if !strings.Contains(err.Error(), "wasm program not found") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestWasmBackend_ResolveProgramNoWorkDir(t *testing.T) {
+	t.Parallel()
+
+	bin := writeExecutable(t, "wasmtime")
+	backend := &WasmBackend{wasmtimePath: bin}
+	// No workdir, no .wasm suffix, not found in current dir → error
+	_, err := backend.WrapCommand(context.Background(), "something", nil, Config{})
+	if err == nil {
+		t.Fatal("expected error for program without workdir")
+	}
+}
+
 func TestSandlockBackend_WrapCommandNoNetworkFlagContent(t *testing.T) {
 	t.Parallel()
 

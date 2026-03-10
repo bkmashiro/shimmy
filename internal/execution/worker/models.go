@@ -2,6 +2,8 @@ package worker
 
 import (
 	"fmt"
+
+	"github.com/lambda-feedback/shimmy/internal/sandbox"
 )
 
 var (
@@ -22,4 +24,7 @@ type StartConfig struct {
 	// Env is a map of environment variables
 	// to set when running the command
 	Env []string `conf:"env"`
+
+	// SandboxConfig overrides sandbox defaults when SHIMMY_SANDBOX=1.
+	SandboxConfig *sandbox.Config
 }

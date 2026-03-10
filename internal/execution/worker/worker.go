@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/lambda-feedback/shimmy/internal/sandbox"
 	"go.uber.org/zap"
 )
 
@@ -436,17 +437,42 @@ func (s *iostream) Close() error {
 }
 
 func createCmd(ctx context.Context, config StartConfig) *exec.Cmd {
-	// start process w/ context, so the process is SIGKILL'd when
-	// the context is cancelled. This ensures we don't have zombie
-	// processes when normal termination fails.
-	cmd := exec.CommandContext(ctx, config.Cmd, config.Args...)
-
 	env := os.Environ()
 	if config.Env != nil {
 		env = append(env, config.Env...)
 	}
-	cmd.Env = env
+	sandboxEnabled := os.Getenv("SHIMMY_SANDBOX") == "1"
 
+	var (
+		cmd *exec.Cmd
+		err error
+	)
+	if sandboxEnabled {
+		backend := sandbox.NewBackendFromEnv()
+		sandboxCfg := sandbox.DefaultConfig()
+		sandboxCfg.WorkDir = config.Cwd
+		sandboxCfg.EnvVars = env
+		if config.SandboxConfig != nil {
+			sandboxCfg = *config.SandboxConfig
+			if sandboxCfg.WorkDir == "" {
+				sandboxCfg.WorkDir = config.Cwd
+			}
+			if sandboxCfg.EnvVars == nil {
+				sandboxCfg.EnvVars = env
+			}
+		}
+
+		cmd, err = backend.WrapCommand(ctx, config.Cmd, config.Args, sandboxCfg)
+		if err != nil {
+			cmd = exec.CommandContext(ctx, config.Cmd, config.Args...)
+		}
+	} else {
+		// start process w/ context, so the process is SIGKILL'd when
+		// the context is cancelled. This ensures we don't have zombie
+		// processes when normal termination fails.
+		cmd = exec.CommandContext(ctx, config.Cmd, config.Args...)
+	}
+	cmd.Env = env
 	if config.Cwd != "" {
 		cmd.Dir = config.Cwd
 	}

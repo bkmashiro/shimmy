@@ -9,7 +9,7 @@ import (
 	"strconv"
 )
 
-const defaultSandlockPath = "/Users/yuzhe/.openclaw/workspace/sandlock/sandlock"
+const sandlockRelativePath = ".openclaw/workspace/sandlock/sandlock"
 const sandlockPathEnv = "SHIMMY_SANDLOCK_PATH"
 
 // SandlockBackend wraps a process with the sandlock binary.
@@ -61,8 +61,11 @@ func (b *SandlockBackend) resolveBinary() (string, error) {
 	if customPath := os.Getenv(sandlockPathEnv); customPath != "" {
 		return exec.LookPath(customPath)
 	}
-	if _, err := exec.LookPath(filepath.Base(defaultSandlockPath)); err == nil {
-		return filepath.Base(defaultSandlockPath), nil
+	if _, err := exec.LookPath("sandlock"); err == nil {
+		return "sandlock", nil
 	}
-	return exec.LookPath(defaultSandlockPath)
+	if home, err := os.UserHomeDir(); err == nil {
+		return exec.LookPath(filepath.Join(home, sandlockRelativePath))
+	}
+	return "", exec.ErrNotFound
 }

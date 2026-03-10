@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"runtime"
 	"testing"
 )
@@ -185,18 +186,43 @@ func TestFallback_DirectBackendWrapCommandWorks(t *testing.T) {
 // ============================================================
 
 func TestSandlockBackend_ResolveBinaryFallbackChain(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("sandlock binary resolution only meaningful on Linux")
-	}
-
-	// With empty PATH and no env var set, should try default path
-	t.Setenv("PATH", "")
+	// With empty PATH and no env var set, should try $HOME fallback
+	t.Setenv("PATH", t.TempDir()) // empty dir
 	t.Setenv("SHIMMY_SANDLOCK_PATH", "")
 
 	backend := &SandlockBackend{}
 	_, err := backend.resolveBinary()
-	// We just check it doesn't panic; it may or may not find the binary
-	_ = err
+	// Should error since sandlock isn't installed at $HOME/.openclaw/...
+	if err == nil {
+		// May succeed if sandlock is actually installed at $HOME path
+		t.Log("resolveBinary() succeeded (sandlock found at home dir path)")
+	}
+}
+
+func TestSandlockBackend_ResolveBinaryHomeDir(t *testing.T) {
+	// Create a fake sandlock in a fake home dir
+	fakeHome := t.TempDir()
+	sandlockDir := filepath.Join(fakeHome, ".openclaw", "workspace", "sandlock")
+	if err := os.MkdirAll(sandlockDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	sandlockBin := filepath.Join(sandlockDir, "sandlock")
+	if err := os.WriteFile(sandlockBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	t.Setenv("HOME", fakeHome)
+	t.Setenv("PATH", t.TempDir()) // empty dir, no sandlock in PATH
+	t.Setenv("SHIMMY_SANDLOCK_PATH", "")
+
+	backend := &SandlockBackend{}
+	resolved, err := backend.resolveBinary()
+	if err != nil {
+		t.Fatalf("resolveBinary() error = %v (should find sandlock at home dir)", err)
+	}
+	if resolved != sandlockBin {
+		t.Fatalf("resolveBinary() = %q, want %q", resolved, sandlockBin)
+	}
 }
 
 func TestWasmBackend_ResolveBinaryFallbackChain(t *testing.T) {

@@ -109,7 +109,7 @@ func NewProcessWorker(
 	// start process w/ context, so the process is SIGKILL'd when
 	// the context is cancelled. This ensures we don't have zombie
 	// processes when normal termination fails.
-	cmd := createCmd(ctx, config)
+	cmd := createCmd(ctx, config, log)
 
 	return &ProcessWorker{
 		cmd:  cmd,
@@ -436,7 +436,7 @@ func (s *iostream) Close() error {
 	return s.stdin.Close()
 }
 
-func createCmd(ctx context.Context, config StartConfig) *exec.Cmd {
+func createCmd(ctx context.Context, config StartConfig, log *zap.Logger) *exec.Cmd {
 	env := os.Environ()
 	if config.Env != nil {
 		env = append(env, config.Env...)
@@ -464,7 +464,15 @@ func createCmd(ctx context.Context, config StartConfig) *exec.Cmd {
 
 		cmd, err = backend.WrapCommand(ctx, config.Cmd, config.Args, sandboxCfg)
 		if err != nil {
+			log.Warn("sandbox wrapping failed, falling back to direct execution",
+				zap.String("backend", backend.Name()),
+				zap.Error(err),
+			)
 			cmd = exec.CommandContext(ctx, config.Cmd, config.Args...)
+		} else {
+			log.Debug("sandbox wrapping applied",
+				zap.String("backend", backend.Name()),
+			)
 		}
 	} else {
 		// start process w/ context, so the process is SIGKILL'd when

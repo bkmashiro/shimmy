@@ -7,7 +7,10 @@ import (
 	"testing"
 
 	"github.com/lambda-feedback/shimmy/internal/sandbox"
+	"go.uber.org/zap"
 )
+
+var testLog = zap.NewNop()
 
 func TestCreateCmd_WithoutSandboxUsesOriginalCommand(t *testing.T) {
 	t.Setenv("SHIMMY_SANDBOX", "")
@@ -18,7 +21,7 @@ func TestCreateCmd_WithoutSandboxUsesOriginalCommand(t *testing.T) {
 		Args: []string{"hello"},
 		Cwd:  "/tmp",
 		Env:  []string{"FOO=bar"},
-	})
+	}, testLog)
 
 	if filepath.Base(cmd.Path) != "echo" {
 		t.Fatalf("cmd.Path = %q, want base %q", cmd.Path, "echo")
@@ -43,7 +46,7 @@ func TestCreateCmd_WithSandboxDirectBackendWrapsCommand(t *testing.T) {
 		Args: []string{"hello"},
 		Cwd:  "/tmp",
 		Env:  []string{"FOO=bar"},
-	})
+	}, testLog)
 
 	if filepath.Base(cmd.Path) != "echo" {
 		t.Fatalf("cmd.Path = %q, want base %q", cmd.Path, "echo")
@@ -66,7 +69,7 @@ func TestCreateCmd_WithUnavailableBackendFallsBackToDirect(t *testing.T) {
 	cmd := createCmd(context.Background(), StartConfig{
 		Cmd:  "echo",
 		Args: []string{"hello"},
-	})
+	}, testLog)
 
 	if filepath.Base(cmd.Path) != "echo" {
 		t.Fatalf("cmd.Path = %q, want base %q", cmd.Path, "echo")
@@ -88,7 +91,7 @@ func TestCreateCmd_UsesSandboxConfigOverride(t *testing.T) {
 			WorkDir:     "/sandbox-dir",
 			MaxMemoryMB: 512,
 		},
-	})
+	}, testLog)
 
 	// cmd.Dir comes from config.Cwd, not SandboxConfig.WorkDir
 	if cmd.Dir != "/tmp" {
@@ -105,7 +108,7 @@ func TestCreateCmd_SandboxDisabledExplicitly(t *testing.T) {
 	cmd := createCmd(context.Background(), StartConfig{
 		Cmd:  "python3",
 		Args: []string{"script.py"},
-	})
+	}, testLog)
 
 	// SHIMMY_SANDBOX != "1" means no sandbox
 	if filepath.Base(cmd.Path) != "python3" {
@@ -120,7 +123,7 @@ func TestCreateCmd_SandboxEnabledNoBackendEnv(t *testing.T) {
 	cmd := createCmd(context.Background(), StartConfig{
 		Cmd:  "echo",
 		Args: []string{"test"},
-	})
+	}, testLog)
 
 	// Empty backend env → DirectBackend fallback
 	if filepath.Base(cmd.Path) != "echo" {
@@ -135,7 +138,7 @@ func TestCreateCmd_SandboxEnabledGarbageBackend(t *testing.T) {
 	cmd := createCmd(context.Background(), StartConfig{
 		Cmd:  "echo",
 		Args: []string{"test"},
-	})
+	}, testLog)
 
 	// Unknown backend → DirectBackend fallback
 	if filepath.Base(cmd.Path) != "echo" {
@@ -153,7 +156,7 @@ func TestCreateCmd_SandboxConfigOverrideWorkDirFallsBackToCwd(t *testing.T) {
 		SandboxConfig: &sandbox.Config{
 			// WorkDir empty → should fall back to Cwd
 		},
-	})
+	}, testLog)
 
 	if cmd.Dir != "/fallback-dir" {
 		t.Fatalf("cmd.Dir = %q, want %q", cmd.Dir, "/fallback-dir")
@@ -170,7 +173,7 @@ func TestCreateCmd_SandboxConfigOverrideWorkDirTakesPrecedence(t *testing.T) {
 		SandboxConfig: &sandbox.Config{
 			WorkDir: "/override-dir",
 		},
-	})
+	}, testLog)
 
 	// SandboxConfig.WorkDir is set, so Cwd is also set from cmd.Dir line
 	// But since DirectBackend ignores Config, cmd.Dir should be set from Cwd
@@ -186,7 +189,7 @@ func TestCreateCmd_EnvMerge(t *testing.T) {
 	cmd := createCmd(context.Background(), StartConfig{
 		Cmd: "echo",
 		Env: []string{"CUSTOM1=val1", "CUSTOM2=val2"},
-	})
+	}, testLog)
 
 	if !contains(cmd.Env, "CUSTOM1=val1") {
 		t.Fatalf("cmd.Env missing CUSTOM1=val1")
@@ -206,7 +209,7 @@ func TestCreateCmd_NilEnvUsesOSEnv(t *testing.T) {
 	cmd := createCmd(context.Background(), StartConfig{
 		Cmd: "echo",
 		Env: nil,
-	})
+	}, testLog)
 
 	// Should have OS environment variables
 	osEnvLen := len(os.Environ())
@@ -220,7 +223,7 @@ func TestCreateCmd_NoCwdDoesNotSetDir(t *testing.T) {
 
 	cmd := createCmd(context.Background(), StartConfig{
 		Cmd: "echo",
-	})
+	}, testLog)
 
 	if cmd.Dir != "" {
 		t.Fatalf("cmd.Dir = %q, want empty when Cwd not set", cmd.Dir)
@@ -234,7 +237,7 @@ func TestCreateCmd_SandboxAllBackendsUnavailableStillWorks(t *testing.T) {
 	cmd := createCmd(context.Background(), StartConfig{
 		Cmd:  "echo",
 		Args: []string{"fallback"},
-	})
+	}, testLog)
 
 	// Should fall back to direct execution
 	if cmd == nil {
@@ -251,7 +254,7 @@ func TestCreateCmd_NoArgsProducesValidCmd(t *testing.T) {
 
 	cmd := createCmd(context.Background(), StartConfig{
 		Cmd: "pwd",
-	})
+	}, testLog)
 
 	if filepath.Base(cmd.Path) != "pwd" {
 		t.Fatalf("cmd.Path = %q, want base %q", cmd.Path, "pwd")
@@ -271,7 +274,7 @@ func TestCreateCmd_SandboxConfigEnvVarsFallback(t *testing.T) {
 		SandboxConfig: &sandbox.Config{
 			// EnvVars nil → should fall back to env from StartConfig + os.Environ
 		},
-	})
+	}, testLog)
 
 	if !contains(cmd.Env, "MY_VAR=test") {
 		t.Fatalf("cmd.Env missing MY_VAR=test")
@@ -289,7 +292,7 @@ func TestCreateCmd_SandboxConfigWithCustomMemAndCPU(t *testing.T) {
 			CPUTimeSecs: 30,
 			WorkDir:     "/custom",
 		},
-	})
+	}, testLog)
 
 	// DirectBackend ignores config, but cmd should still be created
 	if filepath.Base(cmd.Path) != "echo" {
@@ -306,7 +309,7 @@ func TestCreateCmd_CancelledContextStillCreatesCmd(t *testing.T) {
 
 	cmd := createCmd(ctx, StartConfig{
 		Cmd: "echo",
-	})
+	}, testLog)
 
 	// createCmd should still return a cmd even with cancelled context
 	if cmd == nil {
@@ -324,7 +327,7 @@ func TestCreateCmd_SandboxConfigEnvVarsPreservedWhenSet(t *testing.T) {
 		SandboxConfig: &sandbox.Config{
 			EnvVars: []string{"SANDBOX_VAR=1"}, // explicitly set
 		},
-	})
+	}, testLog)
 
 	// When SandboxConfig.EnvVars is set, it shouldn't be overridden
 	// But cmd.Env is always set from os.Environ() + config.Env

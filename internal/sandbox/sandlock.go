@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +19,10 @@ type SandlockBackend struct {
 }
 
 func (b *SandlockBackend) WrapCommand(ctx context.Context, name string, args []string, cfg Config) (*exec.Cmd, error) {
+	if name == "" {
+		return nil, fmt.Errorf("sandlock: command name must not be empty")
+	}
+
 	binary, err := b.resolveBinary()
 	if err != nil {
 		return nil, err

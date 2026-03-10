@@ -1019,6 +1019,56 @@ func TestAllBackendsName(t *testing.T) {
 
 // --- Ensure strings import is used ---
 
+// --- Empty command name validation ---
+
+func TestDirectBackend_WrapCommandEmptyName(t *testing.T) {
+	t.Parallel()
+
+	backend := &DirectBackend{}
+	_, err := backend.WrapCommand(context.Background(), "", nil, DefaultConfig())
+	if err == nil {
+		t.Fatal("WrapCommand() with empty name should return error")
+	}
+}
+
+func TestSandlockBackend_WrapCommandEmptyName(t *testing.T) {
+	t.Parallel()
+
+	bin := writeExecutable(t, "sandlock")
+	backend := &SandlockBackend{binaryPath: bin}
+	_, err := backend.WrapCommand(context.Background(), "", nil, DefaultConfig())
+	if err == nil {
+		t.Fatal("WrapCommand() with empty name should return error")
+	}
+}
+
+func TestWasmBackend_WrapCommandEmptyName(t *testing.T) {
+	t.Parallel()
+
+	bin := writeExecutable(t, "wasmtime")
+	backend := &WasmBackend{wasmtimePath: bin}
+	_, err := backend.WrapCommand(context.Background(), "", nil, Config{WorkDir: t.TempDir()})
+	if err == nil {
+		t.Fatal("WrapCommand() with empty name should return error")
+	}
+}
+
+// --- .wasm file existence validation ---
+
+func TestWasmBackend_WrapCommandMissingWasmFile(t *testing.T) {
+	t.Parallel()
+
+	bin := writeExecutable(t, "wasmtime")
+	backend := &WasmBackend{wasmtimePath: bin}
+	_, err := backend.WrapCommand(context.Background(), "/nonexistent/file.wasm", nil, Config{WorkDir: t.TempDir()})
+	if err == nil {
+		t.Fatal("WrapCommand() with missing .wasm file should return error")
+	}
+	if !strings.Contains(err.Error(), "wasm program not found") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 // --- Error path tests ---
 
 func TestSandlockBackend_WrapCommandBadBinaryReturnsError(t *testing.T) {

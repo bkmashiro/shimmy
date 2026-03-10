@@ -19,6 +19,10 @@ type WasmBackend struct {
 }
 
 func (b *WasmBackend) WrapCommand(ctx context.Context, name string, args []string, cfg Config) (*exec.Cmd, error) {
+	if name == "" {
+		return nil, fmt.Errorf("wasm: command name must not be empty")
+	}
+
 	wasmtime, err := b.resolveBinary()
 	if err != nil {
 		return nil, err
@@ -64,6 +68,9 @@ func (b *WasmBackend) resolveBinary() (string, error) {
 
 func (b *WasmBackend) resolveProgram(name string, workDir string) (string, error) {
 	if strings.HasSuffix(name, ".wasm") {
+		if _, err := os.Stat(name); err != nil {
+			return "", fmt.Errorf("wasm program not found: %s", name)
+		}
 		return name, nil
 	}
 

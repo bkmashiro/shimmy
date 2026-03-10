@@ -1148,6 +1148,54 @@ func writeExecutable(t *testing.T, name string) string {
 	return path
 }
 
+// --- Benchmarks ---
+
+func BenchmarkDirectBackend_WrapCommand(b *testing.B) {
+	backend := &DirectBackend{}
+	ctx := context.Background()
+	cfg := DefaultConfig()
+	for b.Loop() {
+		_, _ = backend.WrapCommand(ctx, "echo", []string{"hello"}, cfg)
+	}
+}
+
+func BenchmarkSandlockBackend_WrapCommand(b *testing.B) {
+	bin := filepath.Join(b.TempDir(), "sandlock")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		b.Fatal(err)
+	}
+	backend := &SandlockBackend{binaryPath: bin}
+	ctx := context.Background()
+	cfg := Config{MaxMemoryMB: 256, CPUTimeSecs: 10, AllowNetwork: false, WorkDir: "/tmp"}
+	for b.Loop() {
+		_, _ = backend.WrapCommand(ctx, "python3", []string{"main.py"}, cfg)
+	}
+}
+
+func BenchmarkWasmBackend_WrapCommand(b *testing.B) {
+	dir := b.TempDir()
+	program := filepath.Join(dir, "test.wasm")
+	if err := os.WriteFile(program, []byte("wasm"), 0o644); err != nil {
+		b.Fatal(err)
+	}
+	bin := filepath.Join(dir, "wasmtime")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		b.Fatal(err)
+	}
+	backend := &WasmBackend{wasmtimePath: bin}
+	ctx := context.Background()
+	cfg := Config{CPUTimeSecs: 5, WorkDir: dir}
+	for b.Loop() {
+		_, _ = backend.WrapCommand(ctx, program, nil, cfg)
+	}
+}
+
+func BenchmarkNewBackend(b *testing.B) {
+	for b.Loop() {
+		_ = NewBackend("direct")
+	}
+}
+
 var _ SandboxBackend = (*DirectBackend)(nil)
 var _ SandboxBackend = (*SandlockBackend)(nil)
 var _ SandboxBackend = (*WasmBackend)(nil)

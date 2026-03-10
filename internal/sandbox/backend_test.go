@@ -1019,6 +1019,52 @@ func TestAllBackendsName(t *testing.T) {
 
 // --- Ensure strings import is used ---
 
+// --- Error path tests ---
+
+func TestSandlockBackend_WrapCommandBadBinaryReturnsError(t *testing.T) {
+	t.Parallel()
+
+	backend := &SandlockBackend{binaryPath: "/nonexistent/sandlock-xyz-123"}
+	_, err := backend.WrapCommand(context.Background(), "echo", nil, DefaultConfig())
+	if err == nil {
+		t.Fatal("WrapCommand() with bad binary should return error")
+	}
+}
+
+func TestWasmBackend_WrapCommandFullArgsNoWorkDir(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	program := filepath.Join(dir, "prog.wasm")
+	if err := os.WriteFile(program, []byte("wasm"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	bin := writeExecutable(t, "wasmtime")
+	backend := &WasmBackend{wasmtimePath: bin}
+	cmd, err := backend.WrapCommand(context.Background(), program, []string{"--flag"}, Config{
+		CPUTimeSecs: 2,
+		// WorkDir intentionally empty
+	})
+	if err != nil {
+		t.Fatalf("WrapCommand() error = %v", err)
+	}
+	want := []string{bin, "run", "--dir", ".", "--fuel", "2000000", "--", program, "--flag"}
+	if !reflect.DeepEqual(cmd.Args, want) {
+		t.Fatalf("cmd.Args = %v, want %v", cmd.Args, want)
+	}
+}
+
+func TestWasmBackend_WrapCommandBadBinaryReturnsError(t *testing.T) {
+	t.Parallel()
+
+	backend := &WasmBackend{wasmtimePath: "/nonexistent/wasmtime-xyz-123"}
+	_, err := backend.WrapCommand(context.Background(), "test.wasm", nil, Config{WorkDir: t.TempDir()})
+	if err == nil {
+		t.Fatal("WrapCommand() with bad binary should return error")
+	}
+}
+
 func TestSandlockBackend_WrapCommandNoNetworkFlagContent(t *testing.T) {
 	t.Parallel()
 

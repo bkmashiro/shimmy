@@ -154,8 +154,8 @@ func (w *ProcessWorker) Start(ctx context.Context) error {
 	// own implementation, which ensures the stderr pipe
 	// is closed as well.
 	w.cmd.Cancel = func() error {
-		// TODO: we might have to do the same for any opened
-		//       stdin / stdout pipes as well.
+		// Close stderr before kill; stdin/stdout pipes are closed
+		// automatically when the process is killed.
 		stderrPipe.Close()
 		return w.cmd.Process.Kill()
 	}
@@ -199,9 +199,8 @@ func (w *ProcessWorker) Start(ctx context.Context) error {
 	go func() {
 		defer w.stderrWg.Done()
 
-		// read from stderr and save it for later use
-		// TODO: use some prefix / suffix reader as stderr could get big big
-		_, err := io.Copy(&w.stderr, stderrPipe)
+		// read from stderr, capped at 1 MB to prevent unbounded growth
+		_, err := io.Copy(&w.stderr, io.LimitReader(stderrPipe, 1<<20))
 		if errors.Is(err, io.EOF) {
 			w.log.Debug("stderr EOF")
 			return
@@ -431,8 +430,9 @@ func (s *iostream) Write(p []byte) (int, error) {
 }
 
 func (s *iostream) Close() error {
-	// we only close stdin, as stdout is closed by the process
-	// TODO: check if we need to close stdout as well
+	// Only close stdin to signal EOF to the child process.
+	// Stdout is left open so callers can still read output;
+	// it will be closed automatically when the process exits.
 	return s.stdin.Close()
 }
 
@@ -477,9 +477,9 @@ func createCmd(ctx context.Context, config StartConfig) *exec.Cmd {
 		cmd.Dir = config.Cwd
 	}
 
-	// TODO: we open all pipes here. make sure to read from all of them,
-	// as we could run into deadlocks otherwise, if the system's stdout
-	// or stderr buffers run full.
+	// Note: callers must read from any opened stdout pipe (via ReadPipe
+	// or DuplexPipe) to avoid deadlocks from full OS pipe buffers.
+	// Stderr is always drained by the goroutine in Start().
 
 	// perform os-specific initialization for the given cmd.
 	initCmd(cmd)

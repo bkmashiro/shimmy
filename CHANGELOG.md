@@ -13,8 +13,13 @@
 - Removed hardcoded `$HOME` path in sandlock binary resolution; uses `os.UserHomeDir()`
 - All backends validate non-empty command name in `WrapCommand`
 - `WasmBackend.resolveProgram` checks `.wasm` file existence for all paths
+- Sandbox fallback now logs warning instead of silently degrading
+- Worker stderr capped at 1MB via `io.LimitReader` to prevent unbounded growth
+- Cleaned up TODO comments in worker.go with proper documentation
 
 ### Tests
 - 217 tests across 8 packages, sandbox package at 92.1% coverage
+- Worker package: ExitEvent, WritePipe, getExitEvent, iostream coverage added
 - Benchmarks for `WrapCommand` and `NewBackend`
 - Security-oriented tests: argument injection, separator validation, empty-name handling
+- Race detector passes clean on all sandbox packages

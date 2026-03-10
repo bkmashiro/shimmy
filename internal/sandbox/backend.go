@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 )
 
@@ -28,4 +29,15 @@ func DefaultConfig() Config {
 		CPUTimeSecs:  10,
 		AllowNetwork: false,
 	}
+}
+
+// Validate checks for obviously invalid configuration values.
+func (c Config) Validate() error {
+	if c.MaxMemoryMB < 0 {
+		return fmt.Errorf("sandbox: MaxMemoryMB must be >= 0, got %d", c.MaxMemoryMB)
+	}
+	if c.CPUTimeSecs < 0 {
+		return fmt.Errorf("sandbox: CPUTimeSecs must be >= 0, got %d", c.CPUTimeSecs)
+	}
+	return nil
 }

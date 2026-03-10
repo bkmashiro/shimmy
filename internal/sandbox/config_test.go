@@ -146,3 +146,48 @@ func TestConfig_EmptyEnvVars(t *testing.T) {
 		t.Fatalf("len(EnvVars) = %d, want 0", len(cfg.EnvVars))
 	}
 }
+
+// --- Validate tests ---
+
+func TestConfig_Validate_Default(t *testing.T) {
+	t.Parallel()
+	if err := DefaultConfig().Validate(); err != nil {
+		t.Fatalf("DefaultConfig().Validate() = %v", err)
+	}
+}
+
+func TestConfig_Validate_Zero(t *testing.T) {
+	t.Parallel()
+	if err := (Config{}).Validate(); err != nil {
+		t.Fatalf("Config{}.Validate() = %v", err)
+	}
+}
+
+func TestConfig_Validate_NegativeMemory(t *testing.T) {
+	t.Parallel()
+	cfg := Config{MaxMemoryMB: -1}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() = nil, want error for negative MaxMemoryMB")
+	}
+}
+
+func TestConfig_Validate_NegativeCPU(t *testing.T) {
+	t.Parallel()
+	cfg := Config{CPUTimeSecs: -1}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() = nil, want error for negative CPUTimeSecs")
+	}
+}
+
+func TestConfig_Validate_ValidCustom(t *testing.T) {
+	t.Parallel()
+	cfg := Config{
+		MaxMemoryMB:  1024,
+		CPUTimeSecs:  60,
+		AllowNetwork: true,
+		WorkDir:      "/tmp",
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() = %v", err)
+	}
+}

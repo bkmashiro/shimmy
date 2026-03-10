@@ -776,12 +776,13 @@ func TestNewBackend_UnknownFallsToDirect(t *testing.T) {
 	}
 }
 
-func TestNewBackend_EmptyFallsToDirect(t *testing.T) {
+func TestNewBackend_EmptyAutoDetectsAvailable(t *testing.T) {
 	t.Parallel()
 
 	b := NewBackend("")
-	if _, ok := b.(*DirectBackend); !ok {
-		t.Fatalf("NewBackend(\"\") returned %T, want *DirectBackend", b)
+	// Auto-detect returns the best available backend
+	if !b.Available() {
+		t.Fatalf("NewBackend(\"\") returned unavailable backend: %s", b.Name())
 	}
 }
 
@@ -825,8 +826,9 @@ func TestNewBackendFromEnv_Unset(t *testing.T) {
 	t.Setenv("SHIMMY_SANDBOX_BACKEND", "")
 
 	b := NewBackendFromEnv()
-	if _, ok := b.(*DirectBackend); !ok {
-		t.Fatalf("NewBackendFromEnv() with empty env returned %T, want *DirectBackend", b)
+	// Auto-detection: should return an available backend
+	if !b.Available() {
+		t.Fatalf("NewBackendFromEnv() with empty env returned unavailable backend: %T", b)
 	}
 }
 

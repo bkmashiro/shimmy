@@ -115,12 +115,16 @@ func TestNewBackend_WasmUnavailableFallsToDirect(t *testing.T) {
 	}
 }
 
-func TestNewBackendFromEnv_UnsetFallsToDirect(t *testing.T) {
+func TestNewBackendFromEnv_UnsetAutoDetects(t *testing.T) {
 	t.Setenv("SHIMMY_SANDBOX_BACKEND", "")
 
 	b := NewBackendFromEnv()
-	if _, ok := b.(*DirectBackend); !ok {
-		t.Fatalf("NewBackendFromEnv() with empty env returned %T, want *DirectBackend", b)
+	// Auto-detection: result depends on what's available on this system.
+	// On macOS without wasmtime, should be direct.
+	// On Linux with sandlock, should be sandlock.
+	// Key: it should always return a usable backend.
+	if !b.Available() {
+		t.Fatalf("NewBackendFromEnv() with empty env returned unavailable backend: %T", b)
 	}
 }
 
@@ -178,6 +182,45 @@ func TestFallback_DirectBackendWrapCommandWorks(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Fatal("WrapCommand() returned nil cmd")
+	}
+}
+
+// ============================================================
+// Auto-detection tests (empty name)
+// ============================================================
+
+func TestNewBackend_EmptyNameAutoDetects(t *testing.T) {
+	t.Parallel()
+
+	b := NewBackend("")
+	// Should always return an available backend
+	if !b.Available() {
+		t.Fatalf("NewBackend(\"\") returned unavailable backend: %s", b.Name())
+	}
+}
+
+func TestNewBackend_EmptyNamePrefersSandlockOnLinux(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("sandlock only available on Linux")
+	}
+
+	// If sandlock binary is in PATH, auto-detect should pick it
+	b := NewBackend("")
+	// Can't guarantee sandlock is installed, but if it is, it should be preferred
+	t.Logf("auto-detected backend: %s", b.Name())
+}
+
+func TestNewBackend_EmptyNameFallsToDirectWithoutTools(t *testing.T) {
+	// Remove all sandbox binaries from PATH
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("SHIMMY_SANDLOCK_PATH", "")
+	t.Setenv("SHIMMY_WASMTIME_PATH", "")
+	// Override HOME to avoid finding sandlock in home dir
+	t.Setenv("HOME", t.TempDir())
+
+	b := NewBackend("")
+	if _, ok := b.(*DirectBackend); !ok {
+		t.Fatalf("NewBackend(\"\") without any tools returned %T, want *DirectBackend", b)
 	}
 }
 

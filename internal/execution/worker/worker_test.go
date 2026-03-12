@@ -80,15 +80,11 @@ func TestWorker_TerminatesIfContextCancelled(t *testing.T) {
 	// cancel the worker context
 	cancel()
 
-	var evt worker.ExitEvent
-	var waitError error
-	require.Eventually(t, func() bool {
-		evt, waitError = w.Wait(context.Background())
-		return waitError == nil && evt.Signal != nil
-	}, 5*time.Second, 10*time.Millisecond)
-
-	require.NoError(t, waitError)
-	require.NotNil(t, evt)
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel2()
+	evt, err := w.Wait(ctx2)
+	require.NoError(t, err)
+	require.NotNil(t, evt.Signal)
 }
 
 func TestWorker_CapturesStderr(t *testing.T) {
@@ -192,13 +188,11 @@ func TestWorker_Kill_KillsProcess(t *testing.T) {
 
 	w.Kill()
 
-	var evt worker.ExitEvent
-	var waitError error
-	require.Eventually(t, func() bool {
-		evt, waitError = w.Wait(context.Background())
-		return waitError == nil && evt.Signal != nil
-	}, time.Second, 10*time.Millisecond)
-	require.NoError(t, waitError)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	evt, err := w.Wait(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, evt.Signal)
 }
 
 func TestWorker_Terminate_TerminatesProcess(t *testing.T) {
@@ -209,12 +203,10 @@ func TestWorker_Terminate_TerminatesProcess(t *testing.T) {
 
 	w.Stop()
 
-	var evt worker.ExitEvent
-	var waitError error
-	require.Eventually(t, func() bool {
-		evt, waitError = w.Wait(context.Background())
-		return waitError == nil && evt.Signal != nil
-	}, time.Second, 10*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	evt, err := w.Wait(ctx)
+	require.NoError(t, err)
 
 	// the process should have been terminated w/ a sigterm in the background
 	assert.Equal(t, syscall.SIGTERM, syscall.Signal(*evt.Signal))

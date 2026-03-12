@@ -11,8 +11,10 @@ import (
 
 // headerPrefixPipe wraps another io.ReadWriteCloser and adds LSP-style headers
 type headerPrefixPipe struct {
-	stdio io.ReadWriteCloser
-	mu    sync.Mutex
+	stdio  io.ReadWriteCloser
+	mu     sync.Mutex
+	reader *bufio.Reader // persistent; avoids discarding pre-buffered bytes
+	buf    []byte        // overflow from a read where contentLength > len(p)
 }
 
 // Write writes data with an LSP-style header to the wrapped ReadWriteCloser
@@ -34,12 +36,21 @@ func (h *headerPrefixPipe) Read(p []byte) (int, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	reader := bufio.NewReader(h.stdio)
+	// Return leftover bytes from a previous oversized message first
+	if len(h.buf) > 0 {
+		n := copy(p, h.buf)
+		h.buf = h.buf[n:]
+		return n, nil
+	}
+
+	if h.reader == nil {
+		h.reader = bufio.NewReader(h.stdio)
+	}
 
 	// read headers
 	headers := ""
 	for {
-		line, err := reader.ReadString('\n')
+		line, err := h.reader.ReadString('\n')
 		if err != nil {
 			return 0, err
 		}
@@ -83,20 +94,22 @@ func (h *headerPrefixPipe) Read(p []byte) (int, error) {
 		return 0, fmt.Errorf("Content-Length header not found or zero")
 	}
 
-	if contentLength > len(p) {
-		return 0, fmt.Errorf("buffer too small for content length: %d", contentLength)
-	}
-
-	// read content
-	n, err := io.ReadFull(reader, p[:contentLength])
+	// Read exactly contentLength bytes
+	content := make([]byte, contentLength)
+	n, err := io.ReadFull(h.reader, content)
 	if err == io.ErrUnexpectedEOF {
-		return n, fmt.Errorf("unexpected EOF, expected %d bytes, got %d bytes", contentLength, n)
+		return 0, fmt.Errorf("unexpected EOF, expected %d bytes, got %d bytes", contentLength, n)
 	}
 	if err != nil {
-		return n, err
+		return 0, err
 	}
 
-	return n, nil
+	// Copy into p; if message exceeds p, buffer the remainder
+	copied := copy(p, content)
+	if copied < contentLength {
+		h.buf = content[copied:]
+	}
+	return copied, nil
 }
 
 // Close closes the wrapped ReadWriteCloser

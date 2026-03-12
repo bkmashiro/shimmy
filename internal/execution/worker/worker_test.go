@@ -72,7 +72,7 @@ func TestWorker_Start_FailsIfContextCancelled(t *testing.T) {
 func TestWorker_TerminatesIfContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	w := worker.NewProcessWorker(ctx, worker.StartConfig{Cmd: "cat"}, zap.NewNop())
+	w := worker.NewProcessWorker(ctx, worker.StartConfig{Cmd: "sleep", Args: []string{"10"}}, zap.NewNop())
 
 	err := w.Start(context.Background())
 	assert.NoError(t, err)

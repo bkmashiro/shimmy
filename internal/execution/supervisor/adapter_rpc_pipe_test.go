@@ -1,9 +1,12 @@
 package supervisor
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -102,4 +105,61 @@ func TestHeaderPrefixPipe_MultipleMessages(t *testing.T) {
 	n, err = pipe.Read(readBuf)
 	require.NoError(t, err)
 	assert.Equal(t, msg2, readBuf[:n])
+}
+
+func TestHeaderPrefixPipe_ConcurrentReadWrite(t *testing.T) {
+	// Use two separate pipes: one for the write direction, one for the read
+	// direction. This mirrors the real pipe topology where read and write are
+	// on different OS pipes, so the reader never blocks the writer.
+	inR, inW := io.Pipe()   // writerPipe writes here; readerPipe reads here
+	outR, outW := io.Pipe() // readerPipe writes here; writerPipe reads here
+
+	writerPipe := &headerPrefixPipe{stdio: &splitRWC{r: outR, w: inW}}
+	readerPipe := &headerPrefixPipe{stdio: &splitRWC{r: inR, w: outW}}
+
+	msg := []byte(`{"jsonrpc":"2.0","id":1,"method":"eval"}`)
+	done := make(chan error, 2)
+
+	// Goroutine 1: Write (mimics go-ethereum Send())
+	go func() {
+		_, err := writerPipe.Write(msg)
+		done <- err
+	}()
+
+	// Goroutine 2: Read (mimics go-ethereum background reader)
+	go func() {
+		buf := make([]byte, 512)
+		n, err := readerPipe.Read(buf)
+		if err != nil {
+			done <- err
+			return
+		}
+		if !bytes.Equal(buf[:n], msg) {
+			done <- fmt.Errorf("got %q want %q", buf[:n], msg)
+			return
+		}
+		done <- nil
+	}()
+
+	for i := 0; i < 2; i++ {
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(2 * time.Second):
+			t.Fatal("deadlock: concurrent Read and Write timed out")
+		}
+	}
+}
+
+// splitRWC allows separate r and w so reads and writes go to different pipes.
+type splitRWC struct {
+	r io.ReadCloser
+	w io.WriteCloser
+}
+
+func (s *splitRWC) Read(p []byte) (int, error)  { return s.r.Read(p) }
+func (s *splitRWC) Write(p []byte) (int, error) { return s.w.Write(p) }
+func (s *splitRWC) Close() error {
+	s.r.Close()
+	return s.w.Close()
 }

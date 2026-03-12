@@ -12,15 +12,16 @@ import (
 // headerPrefixPipe wraps another io.ReadWriteCloser and adds LSP-style headers
 type headerPrefixPipe struct {
 	stdio  io.ReadWriteCloser
-	mu     sync.Mutex
+	rmu    sync.Mutex    // guards Read path
+	wmu    sync.Mutex    // guards Write path
 	reader *bufio.Reader // persistent; avoids discarding pre-buffered bytes
 	buf    []byte        // overflow from a read where contentLength > len(p)
 }
 
 // Write writes data with an LSP-style header to the wrapped ReadWriteCloser
 func (h *headerPrefixPipe) Write(p []byte) (int, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	h.wmu.Lock()
+	defer h.wmu.Unlock()
 
 	contentLength := len(p)
 	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", contentLength)
@@ -33,8 +34,8 @@ func (h *headerPrefixPipe) Write(p []byte) (int, error) {
 }
 
 func (h *headerPrefixPipe) Read(p []byte) (int, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	h.rmu.Lock()
+	defer h.rmu.Unlock()
 
 	// Return leftover bytes from a previous oversized message first
 	if len(h.buf) > 0 {

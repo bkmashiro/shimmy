@@ -107,6 +107,26 @@ func TestHeaderPrefixPipe_MultipleMessages(t *testing.T) {
 	assert.Equal(t, msg2, readBuf[:n])
 }
 
+func TestHeaderPrefixPipe_SkipsStrayOutputBeforeContentLength(t *testing.T) {
+	buf := newRwc()
+	pipe := &headerPrefixPipe{stdio: buf}
+
+	msg := []byte(`{"jsonrpc":"2.0","id":1,"result":"ok"}`)
+
+	// Stray lines an evaluation function might emit on stdout before the
+	// server loop starts (e.g. model-loading logs, library init messages).
+	stray := "Loading model...\nReady.\n"
+	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(msg))
+	buf.(*rwc).Buffer.Write([]byte(stray))
+	buf.(*rwc).Buffer.Write([]byte(header))
+	buf.(*rwc).Buffer.Write(msg)
+
+	readBuf := make([]byte, 512)
+	n, err := pipe.Read(readBuf)
+	require.NoError(t, err)
+	assert.Equal(t, msg, readBuf[:n])
+}
+
 func TestHeaderPrefixPipe_ConcurrentReadWrite(t *testing.T) {
 	// Use two separate pipes: one for the write direction, one for the read
 	// direction. This mirrors the real pipe topology where read and write are

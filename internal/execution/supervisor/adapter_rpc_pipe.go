@@ -48,51 +48,38 @@ func (h *headerPrefixPipe) Read(p []byte) (int, error) {
 		h.reader = bufio.NewReader(h.stdio)
 	}
 
-	// read headers
-	headers := ""
+	// Scan lines until we find Content-Length:, skipping any stray output.
+	var contentLength int
 	for {
 		line, err := h.reader.ReadString('\n')
 		if err != nil {
 			return 0, err
 		}
-
-		headers += line
-
-		// Detect the end of headers with double CRLF
-		if strings.HasSuffix(headers, "\r\n\r\n") {
-			break
+		line = strings.TrimRight(line, "\r\n")
+		if !strings.HasPrefix(line, "Content-Length:") {
+			continue
 		}
-	}
-	headers = strings.TrimSpace(headers)
-
-	// get content-length value
-	var contentLength int
-	lines := strings.Split(headers, "\r\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-
-		if strings.HasPrefix(line, "Content-Length:") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) != 2 {
-				return 0, fmt.Errorf("malformed Content-Length header")
-			}
-
-			lengthStr := strings.TrimSpace(parts[1])
-
-			if lengthValue, err := strconv.Atoi(lengthStr); err != nil {
-				return 0, fmt.Errorf("invalid Content-Length value: %s", lengthStr)
-			} else {
-				contentLength = lengthValue
-			}
-
-			// found the content-length
-			break
-
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			return 0, fmt.Errorf("malformed Content-Length header")
 		}
+		v, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+		if err != nil {
+			return 0, fmt.Errorf("invalid Content-Length value: %s", parts[1])
+		}
+		contentLength = v
+		break
 	}
 
-	if contentLength == 0 {
-		return 0, fmt.Errorf("Content-Length header not found or zero")
+	// Drain remaining header lines until the blank separator.
+	for {
+		line, err := h.reader.ReadString('\n')
+		if err != nil {
+			return 0, err
+		}
+		if strings.TrimRight(line, "\r\n") == "" {
+			break
+		}
 	}
 
 	// Read exactly contentLength bytes

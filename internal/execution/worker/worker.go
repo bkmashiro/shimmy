@@ -439,7 +439,16 @@ func createCmd(ctx context.Context, config StartConfig) *exec.Cmd {
 	// start process w/ context, so the process is SIGKILL'd when
 	// the context is cancelled. This ensures we don't have zombie
 	// processes when normal termination fails.
-	cmd := exec.CommandContext(ctx, config.Cmd, config.Args...)
+	var cmd *exec.Cmd
+	if config.Sandbox.Enabled {
+		binary := config.Sandbox.BinaryPath
+		if binary == "" {
+			binary = "shimmy-sandbox"
+		}
+		cmd = exec.CommandContext(ctx, binary, buildSandboxArgs(config)...)
+	} else {
+		cmd = exec.CommandContext(ctx, config.Cmd, config.Args...)
+	}
 
 	env := os.Environ()
 	if config.Env != nil {
@@ -459,4 +468,33 @@ func createCmd(ctx context.Context, config StartConfig) *exec.Cmd {
 	initCmd(cmd)
 
 	return cmd
+}
+
+func buildSandboxArgs(config StartConfig) []string {
+	s := config.Sandbox
+	args := []string{"run"}
+
+	if s.MemoryMB > 0 {
+		args = append(args, "--memory-mb", fmt.Sprintf("%d", s.MemoryMB))
+	}
+	if s.MaxProcs > 0 {
+		args = append(args, "--max-procs", fmt.Sprintf("%d", s.MaxProcs))
+	}
+	if s.OutputLimitKB > 0 {
+		args = append(args, "--output-limit-kb", fmt.Sprintf("%d", s.OutputLimitKB))
+	}
+	if s.NoNetwork {
+		args = append(args, "--no-network")
+	}
+	if s.Backend != "" {
+		args = append(args, "--backend", s.Backend)
+	}
+	if config.Cwd != "" {
+		args = append(args, "--work-dir", config.Cwd)
+	}
+
+	args = append(args, "--", config.Cmd)
+	args = append(args, config.Args...)
+
+	return args
 }

@@ -486,6 +486,9 @@ func buildSandboxArgs(config StartConfig) []string {
 	if s.NoNetwork {
 		args = append(args, "--no-network")
 	}
+	if len(s.AllowedPaths) > 0 {
+		args = append(args, "--allowed-paths", strings.Join(s.AllowedPaths, ","))
+	}
 	if s.Backend != "" {
 		args = append(args, "--backend", s.Backend)
 	}

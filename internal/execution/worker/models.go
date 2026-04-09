@@ -15,9 +15,10 @@ type SandboxConfig struct {
 	MaxProcs      int    `conf:"max_procs"`
 	MaxFSizeMB    int    `conf:"max_fsize_mb"`
 	MaxFDs        int    `conf:"max_fds"`
-	NoNetwork     bool   `conf:"no_network"`
-	OutputLimitKB int    `conf:"output_limit_kb"`
-	Backend       string `conf:"backend"`
+	NoNetwork     bool     `conf:"no_network"`
+	AllowedPaths  []string `conf:"allowed_paths"`
+	OutputLimitKB int      `conf:"output_limit_kb"`
+	Backend       string   `conf:"backend"`
 }
 
 type StartConfig struct {

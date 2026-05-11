@@ -12,7 +12,7 @@ authors:
 repository-code: 'https://github.com/lambda-feedback/shimmy'
 abstract: >-
   Shimmy is an application written in Go that interacts with
-  language-specific evaluation functions as part of the
+  language-agnostic evaluation functions as part of the
   Lambda Feedback Platform, and exposes them as a RESTful
   API. It listens for incoming HTTP requests / events from
   feedback clients, validates the incoming data, and

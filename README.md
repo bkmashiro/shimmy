@@ -197,9 +197,9 @@ The shim keeps the evaluation function running as a persistent process and commu
 |-----------|-------------|
 | `stdio` (default) | JSON-RPC 2.0 messages over stdin/stdout. |
 | `ipc` | Unix socket (Linux/macOS) or named pipe (Windows). |
-| `http` | HTTP POST to a local URL. |
+| `http` | HTTP POST to a local URL. Experimental — custom TLS and timeout configuration is not yet supported. |
 | `tcp` | Raw TCP connection. |
-| `ws` | WebSocket connection. |
+| `ws` | WebSocket connection. Experimental — custom dialer configuration is not yet supported. |
 
 The shim injects the following environment variables into the evaluation function process so it can identify the transport it should listen on:
 

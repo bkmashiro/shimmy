@@ -2,6 +2,10 @@
 
 Shimmy is a shim written in Go that interacts with language-agnostic evaluation functions as part of the lambda feedback platform, and exposes them as a RESTful API.
 
+## Background
+
+This project was originally developed as part of a Master's dissertation: [Andreas Pfrutscheller, *MSc Report* (2024)](https://github.com/user-attachments/files/27594869/2024_AndreasPfrutscheller_MSc_report.pdf).
+
 ## Overview
 
 Shimmy listens for incoming HTTP requests / events from feedback clients, validates the incoming data, and forwards it to the underlying evaluation function. The shim is responsible for managing the lifecycle of the evaluation function, and ensures that it is available to process incoming requests. The evaluation function is expected to be a executable application that implements the evaluation runtime interface.
@@ -83,29 +87,22 @@ The evaluation function is responsible for parsing the input JSON message, perfo
 
 ### Messages
 
-The interface consists of input and output messages, which are exchanged between the shim and the evaluation function. Both the input and output to the evaluation function are expected to be valid JSON messages, conforming to the schema defined in the following.
+The shim exposes an HTTP API. Clients send a `POST` request to the shim; the shim validates the body, forwards it to the evaluation function, and returns the result.
+
+The command to execute is determined by the `command` HTTP header on the incoming request. If the header is absent the shim defaults to `eval`.
 
 #### Input
 
-The input message is a JSON-encoded object that contains the following fields:
+The HTTP request body is a JSON object. The required fields depend on the command:
 
-- `$id` (int, optional): A unique identifier for the evaluation request.
-- `command` (string): The command to be executed by the evaluation function.
-- `*` (object): The input data for the evaluation function.
+- `eval`: [Evaluation Schema](./runtime/schema/request-eval.json) — requires `response` and `answer`
+- `preview`: [Preview Schema](./runtime/schema/request-preview.json) — requires `response`
+- `healthcheck`: no body required
 
-> The `$id` field is not used for file-based communication.
-
-The object should follow one of the following schemas, depending on the command:
-
-- `eval`: [Evaluation Schema](./runtime/schema/request-eval.json)
-- `preview`: [Preview Schema](./runtime/schema/request-preview.json)
-
-An example input message for the `evaluate` command is shown below:
+An example request body for `eval`:
 
 ```json
 {
-  "$id": 1,
-  "command": "eval",
   "response": "...",
   "answer": "...",
   "params": {
@@ -116,44 +113,134 @@ An example input message for the `evaluate` command is shown below:
 
 #### Output
 
-The output message is expected to be a JSON-encoded string that contains the following fields:
+On success the shim returns a JSON object with a `result` field. On failure it returns an `error` field instead.
 
-- `$id` (int, optional): The unique identifier of the evaluation request.
-- `*` (object): The output data from the evaluation function.
-
-> The `$id` field is not used for file-based communication.
-
-The object should follow one of the following schemas, depending on the command:
+The `result` object shape depends on the command:
 
 - `eval`: [Evaluation Schema](./runtime/schema/response-eval.json)
 - `preview`: [Preview Schema](./runtime/schema/response-preview.json)
+- `healthcheck`: [Health Schema](./runtime/schema/response-health.json)
 
-An example output message for the `evaluate` command is shown below:
+Example success response for `eval`:
 
 ```json
 {
-  "$id": 1,
   "command": "eval",
   "result": {
-    "is_correct": "..."
+    "is_correct": true,
+    "feedback": "..."
+  }
+}
+```
+
+Example error response:
+
+```json
+{
+  "error": {
+    "message": "Something went wrong",
+    "error_thrown": {}
+  }
+}
+```
+
+### Cases
+
+The `eval` command supports an optional `cases` array inside `params`. Cases let you define alternative correct answers with their own feedback, handled entirely by the shim without any changes to the evaluation function.
+
+If the evaluation function returns `is_correct: false`, the shim iterates through the cases in order and re-evaluates with each case's `answer` (merged with the top-level `params`). The first case whose evaluation returns `is_correct: true` is used as the match.
+
+When a case matches, the shim replaces the result's `feedback` with the case's `feedback` and records the matched case index in `matched_case`. If the case defines a `mark` field (`0` or `1`), it also overrides `is_correct` in the result.
+
+Each case object supports the following fields:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `answer` | yes | The alternative answer to evaluate against. |
+| `feedback` | yes | The feedback string to return if this case matches. |
+| `params` | no | Additional params merged (with precedence) over the top-level `params`. |
+| `mark` | no | `1` sets `is_correct: true` in the result; `0` sets it `false`. |
+| `params.override_eval_feedback` | no | If `true`, appends the original eval feedback to the case `feedback`. |
+
+Example request using cases:
+
+```json
+{
+  "response": "x^2",
+  "answer": "x**2",
+  "params": {
+    "cases": [
+      {
+        "answer": "x^2",
+        "feedback": "Correct, but use ** for exponentiation.",
+        "mark": 1
+      },
+      {
+        "answer": "x * x",
+        "feedback": "Equivalent, but not the expected form.",
+        "params": { "override_eval_feedback": true }
+      }
+    ]
   }
 }
 ```
 
 ### Communication Channels
 
-The shim is capable of communicating with the evaluation function using two different channels:
+The shim supports two interface modes, selected with `--interface`:
 
-1. **Standard I/O (stdio)**: The shim communicates with the evaluation function using standard input and output. The evaluation function reads the input JSON object from standard input, and writes the output JSON object to standard output.
+#### RPC (`--interface rpc`, default)
 
-2. **File System (file)**: The shim communicates with the evaluation function using the file system. The evaluation function is expected to read the input JSON object from a file, and write the output JSON object to a file.
+The shim keeps the evaluation function running as a persistent process and communicates with it via [JSON-RPC 2.0](https://www.jsonrpc.org/specification). The evaluation function must implement a JSON-RPC 2.0 server. The transport used for the RPC connection is selected with `--rpc-transport`:
 
-   The file paths are always the last two command-line arguments passed to the evaluation function.
-   
-   NOTE: Using the file system is good for large request, such as base64 images.
+| Transport | Description |
+|-----------|-------------|
+| `stdio` (default) | JSON-RPC 2.0 messages over stdin/stdout. |
+| `ipc` | Unix socket (Linux/macOS) or named pipe (Windows). |
+| `http` | HTTP POST to a local URL. Experimental — custom TLS and timeout configuration is not yet supported. |
+| `tcp` | Raw TCP connection. |
+| `ws` | WebSocket connection. Experimental — custom dialer configuration is not yet supported. |
 
-   For example, a wolframscript evaluation function in `evaluation.wl`, that reads the input JSON object from a file named `input.json` and writes the output JSON object to a file named `output.json` would be invoked as follows:
+The shim injects the following environment variables into the evaluation function process so it can identify the transport it should listen on:
 
-   ```shell
-   wolframscript -file evaluation.wl input.json output.json
-   ```
+| Variable | Value |
+|----------|-------|
+| `EVAL_IO` | `rpc` |
+| `EVAL_RPC_TRANSPORT` | Transport name (e.g. `stdio`) |
+| `EVAL_RPC_IPC_ENDPOINT` | IPC endpoint path (IPC transport only) |
+| `EVAL_RPC_HTTP_URL` | HTTP URL (HTTP transport only) |
+| `EVAL_RPC_WS_URL` | WebSocket URL (WS transport only) |
+| `EVAL_RPC_TCP_ADDRESS` | TCP address (TCP transport only) |
+
+#### File System (`--interface file`)
+
+The shim starts a fresh evaluation function process for each request, passing the input and output file paths as the last two command-line arguments. The evaluation function reads the input JSON from the input file and writes the output JSON to the output file, then exits.
+
+The input file contains a JSON object with the following structure:
+
+```json
+{
+  "command": "eval",
+  "params": {
+    "response": "...",
+    "answer": "...",
+    "params": {}
+  }
+}
+```
+
+The shim also sets the following environment variables:
+
+| Variable | Value |
+|----------|-------|
+| `EVAL_IO` | `FILE` |
+| `EVAL_FILE_NAME_REQUEST` | Path to the input file |
+| `EVAL_FILE_NAME_RESPONSE` | Path to the output file |
+
+> Using the file interface is recommended for large payloads such as base64-encoded images.
+
+For example, a Wolfram Language evaluation function in `evaluation.wl` would be invoked as:
+
+```shell
+wolframscript -file evaluation.wl /tmp/shimmy/abc/request-data-123 /tmp/shimmy/abc/response-data-456
+```

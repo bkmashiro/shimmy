@@ -38,9 +38,9 @@ func NewHttpServer(params HttpServerParams) *HttpServer {
 		mux.Handle(handler.Name, handler.Handler)
 	}
 
-	var handler http.Handler = mux
+	var handler http.Handler = NormalizePath(mux)
 	if params.Config.H2c {
-		handler = h2c.NewHandler(mux, &http2.Server{})
+		handler = h2c.NewHandler(NormalizePath(mux), &http2.Server{})
 	}
 
 	server := &http.Server{

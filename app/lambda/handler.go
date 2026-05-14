@@ -101,11 +101,11 @@ func (s *LambdaHandler) Shutdown() {
 func (s *LambdaHandler) getProxyFunction() (any, error) {
 	switch s.config.ProxySource {
 	case ProxySourceApiGatewayV1:
-		return httpadapter.New(s.mux).ProxyWithContext, nil
+		return httpadapter.New(server.NormalizePath(s.mux)).ProxyWithContext, nil
 	case ProxySourceApiGatewayV2:
-		return httpadapter.NewV2(s.mux).ProxyWithContext, nil
+		return httpadapter.NewV2(server.NormalizePath(s.mux)).ProxyWithContext, nil
 	case ProxySourceAlb:
-		return httpadapter.NewALB(s.mux).ProxyWithContext, nil
+		return httpadapter.NewALB(server.NormalizePath(s.mux)).ProxyWithContext, nil
 	default:
 		return nil, fmt.Errorf("invalid proxy source: %s", s.config.ProxySource)
 	}

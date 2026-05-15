@@ -20,6 +20,7 @@ type wasmSupervisor struct {
 
 	runtime  wazero.Runtime
 	compiled wazero.CompiledModule
+	modCfg   wazero.ModuleConfig
 
 	mod     api.Module
 	adapter *wasmAdapter
@@ -35,12 +36,14 @@ type wasmSupervisor struct {
 func newWasmSupervisor(
 	rt wazero.Runtime,
 	compiled wazero.CompiledModule,
+	modCfg wazero.ModuleConfig,
 	timeout time.Duration,
 	log *zap.Logger,
 ) *wasmSupervisor {
 	return &wasmSupervisor{
 		runtime:  rt,
 		compiled: compiled,
+		modCfg:   modCfg,
 		timeout:  timeout,
 		log:      log.Named("supervisor_wasm"),
 	}
@@ -58,8 +61,10 @@ func (s *wasmSupervisor) Start(ctx context.Context) error {
 
 	s.log.Debug("instantiating wasm module")
 
-	mod, err := s.runtime.InstantiateModule(ctx, s.compiled,
-		wazero.NewModuleConfig().WithName("").WithStartFunctions("_initialize", "_start"))
+	// Apply start functions on top of the provided (sandboxed) module config.
+	instCfg := s.modCfg.WithStartFunctions("_initialize", "_start")
+
+	mod, err := s.runtime.InstantiateModule(ctx, s.compiled, instCfg)
 	if err != nil {
 		return fmt.Errorf("wasm: instantiate module: %w", err)
 	}

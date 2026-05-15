@@ -19,10 +19,10 @@ import (
 // instances). Requests are dispatched by acquiring a supervisor from the pool,
 // calling its Send, and returning it to the pool.
 type Dispatcher struct {
-	cfg     Config
-	rt      wazero.Runtime
-	pool    chan *wasmSupervisor
-	log     *zap.Logger
+	cfg  Config
+	rt   wazero.Runtime
+	pool chan *wasmSupervisor
+	log  *zap.Logger
 }
 
 var _ dispatcher.Dispatcher = (*Dispatcher)(nil)
@@ -43,6 +43,11 @@ func (d *Dispatcher) Start(ctx context.Context) error {
 		return fmt.Errorf("wasm: ModulePath must be set (FUNCTION_COMMAND)")
 	}
 
+	// Pick up sandbox overrides from FUNCTION_WASM_* env vars, then apply
+	// sensible defaults for any fields still at their zero values.
+	d.cfg.applyEnv()
+	d.cfg.applyDefaults()
+
 	maxInstances := d.cfg.MaxInstances
 	if maxInstances <= 0 {
 		maxInstances = runtime.NumCPU()
@@ -51,6 +56,8 @@ func (d *Dispatcher) Start(ctx context.Context) error {
 	d.log.Info("starting wasm dispatcher",
 		zap.String("module", d.cfg.ModulePath),
 		zap.Int("max_instances", maxInstances),
+		zap.Uint32("max_memory_pages", d.cfg.MaxMemoryPages),
+		zap.Duration("timeout", d.cfg.Timeout),
 	)
 
 	// Read the .wasm bytes from disk.
@@ -59,8 +66,14 @@ func (d *Dispatcher) Start(ctx context.Context) error {
 		return fmt.Errorf("wasm: read module file %q: %w", d.cfg.ModulePath, err)
 	}
 
+	// Build the runtime config with memory limit.
+	rtCfg := wazero.NewRuntimeConfig()
+	if d.cfg.MaxMemoryPages > 0 {
+		rtCfg = rtCfg.WithMemoryLimitPages(d.cfg.MaxMemoryPages)
+	}
+
 	// Create a single wazero runtime shared by all instances.
-	rt := wazero.NewRuntime(ctx)
+	rt := wazero.NewRuntimeWithConfig(ctx, rtCfg)
 	d.rt = rt
 
 	// Instantiate WASI host functions. Most evaluation functions will need at
@@ -78,11 +91,34 @@ func (d *Dispatcher) Start(ctx context.Context) error {
 		return fmt.Errorf("wasm: compile module: %w", err)
 	}
 
+	// Build a locked-down ModuleConfig: no filesystem, no env vars, no
+	// stdin/stdout/stderr, no args. Only allow nanosleep and wall/mono clocks
+	// which the Go runtime needs.
+	modCfg := wazero.NewModuleConfig().
+		WithName("").
+		WithSysNanosleep().
+		WithSysWalltime().
+		WithSysNanotime()
+
+	// Filesystem: mount allowed paths read-only; no access by default.
+	fsCfg := wazero.NewFSConfig()
+	for _, p := range d.cfg.AllowedPaths {
+		fsCfg = fsCfg.WithReadOnlyDirMount(p, p)
+	}
+	modCfg = modCfg.WithFSConfig(fsCfg)
+
+	// Env vars: expose only explicitly whitelisted variables.
+	for _, key := range d.cfg.AllowedEnv {
+		if val, ok := os.LookupEnv(key); ok {
+			modCfg = modCfg.WithEnv(key, val)
+		}
+	}
+
 	// Build the pool.
 	d.pool = make(chan *wasmSupervisor, maxInstances)
 
 	for i := 0; i < maxInstances; i++ {
-		sv := newWasmSupervisor(rt, compiled, d.cfg.Timeout, d.log)
+		sv := newWasmSupervisor(rt, compiled, modCfg, d.cfg.Timeout, d.log)
 
 		if err := sv.Start(ctx); err != nil {
 			// Clean up already-started supervisors.

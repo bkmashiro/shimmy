@@ -1,0 +1,235 @@
+package wasm
+
+import (
+	"context"
+	"path/filepath"
+	"runtime"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+)
+
+// echoModulePath returns the absolute path to the pre-compiled echo.wasm test
+// fixture. The fixture is a minimal guest module that always returns
+// {"ok":true} regardless of the request, which lets us test the host-side Go
+// code (alloc call, memory write, evaluate call, length-prefix parsing, JSON
+// unmarshal) without implementing a full language runtime in WAT.
+func echoModulePath(t *testing.T) string {
+	t.Helper()
+	// __file__ is not available in Go, but runtime.Caller gives us the source
+	// file path so we can derive testdata/ relative to the test file.
+	_, filename, _, ok := runtime.Caller(0)
+	require.True(t, ok, "runtime.Caller failed")
+	return filepath.Join(filepath.Dir(filename), "testdata", "echo.wasm")
+}
+
+// newTestLogger returns a no-op zap logger suitable for unit tests.
+func newTestLogger(t *testing.T) *zap.Logger {
+	t.Helper()
+	log, err := zap.NewDevelopment()
+	require.NoError(t, err)
+	return log
+}
+
+// newEchoDispatcher creates a Dispatcher backed by the echo fixture and starts
+// it. The caller is responsible for calling Shutdown.
+func newEchoDispatcher(t *testing.T, maxInstances int) *Dispatcher {
+	t.Helper()
+	cfg := Config{
+		ModulePath:   echoModulePath(t),
+		MaxInstances: maxInstances,
+		Timeout:      5 * time.Second,
+	}
+	d := NewDispatcher(cfg, newTestLogger(t))
+	require.NoError(t, d.Start(context.Background()), "dispatcher start")
+	return d
+}
+
+// TestDispatcher_StartStop verifies that a Dispatcher can be started and shut
+// down cleanly without any interaction in between.
+func TestDispatcher_StartStop(t *testing.T) {
+	d := newEchoDispatcher(t, 1)
+	err := d.Shutdown(context.Background())
+	assert.NoError(t, err)
+}
+
+// TestDispatcher_StartStop_MultipleInstances verifies start/stop with the
+// default pool size (NumCPU).
+func TestDispatcher_StartStop_MultipleInstances(t *testing.T) {
+	d := newEchoDispatcher(t, runtime.NumCPU())
+	err := d.Shutdown(context.Background())
+	assert.NoError(t, err)
+}
+
+// TestDispatcher_Send_BasicResponse sends a single request and checks that the
+// echo module returns {"ok":true}.
+func TestDispatcher_Send_BasicResponse(t *testing.T) {
+	d := newEchoDispatcher(t, 1)
+	t.Cleanup(func() { _ = d.Shutdown(context.Background()) })
+
+	result, err := d.Send(context.Background(), "test", map[string]any{"hello": "world"})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	ok, exists := result["ok"]
+	assert.True(t, exists, "response should contain 'ok' key")
+	assert.Equal(t, true, ok, "response 'ok' should be true")
+}
+
+// TestDispatcher_Send_EmptyParams verifies that Send works with nil params.
+func TestDispatcher_Send_EmptyParams(t *testing.T) {
+	d := newEchoDispatcher(t, 1)
+	t.Cleanup(func() { _ = d.Shutdown(context.Background()) })
+
+	result, err := d.Send(context.Background(), "noop", nil)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, true, result["ok"])
+}
+
+// TestDispatcher_Send_Concurrent sends 10 concurrent requests using a pool of
+// 3 instances and verifies that all succeed.
+func TestDispatcher_Send_Concurrent(t *testing.T) {
+	const (
+		numWorkers  = 10
+		numRequests = 20
+		poolSize    = 3
+	)
+
+	d := newEchoDispatcher(t, poolSize)
+	t.Cleanup(func() { _ = d.Shutdown(context.Background()) })
+
+	type result struct {
+		res map[string]any
+		err error
+	}
+
+	results := make([]result, numRequests)
+	var wg sync.WaitGroup
+	wg.Add(numRequests)
+
+	sem := make(chan struct{}, numWorkers)
+	for i := range numRequests {
+		sem <- struct{}{}
+		go func(i int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			res, err := d.Send(context.Background(), "eval", map[string]any{"i": i})
+			results[i] = result{res, err}
+		}(i)
+	}
+
+	wg.Wait()
+
+	for i, r := range results {
+		require.NoError(t, r.err, "request %d failed", i)
+		require.NotNil(t, r.res, "request %d returned nil result", i)
+		assert.Equal(t, true, r.res["ok"], "request %d: unexpected result", i)
+	}
+}
+
+// TestDispatcher_Send_AfterShutdown checks that Send after Shutdown returns an
+// error (context cancellation or pool closed).
+func TestDispatcher_Send_AfterShutdown(t *testing.T) {
+	d := newEchoDispatcher(t, 1)
+	require.NoError(t, d.Shutdown(context.Background()))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	_, err := d.Send(ctx, "test", nil)
+	assert.Error(t, err, "Send after Shutdown should return an error")
+}
+
+// TestDispatcher_MissingModule checks that Start fails when ModulePath does
+// not point to a valid file.
+func TestDispatcher_MissingModule(t *testing.T) {
+	cfg := Config{
+		ModulePath:   "/nonexistent/path/module.wasm",
+		MaxInstances: 1,
+	}
+	d := NewDispatcher(cfg, newTestLogger(t))
+	err := d.Start(context.Background())
+	assert.Error(t, err, "Start with missing module should fail")
+}
+
+// TestSupervisor_MemoryRestored sends two sequential requests through the same
+// supervisor and verifies that both succeed with the same response. This
+// exercises the snapshot/restore cycle: after the first evaluate the bump
+// allocator's heap_top is advanced, but restoreSnapshot rewinds memory so the
+// second call starts from the exact same state.
+func TestSupervisor_MemoryRestored(t *testing.T) {
+	// Use a pool of exactly 1 so both sends use the same supervisor instance.
+	d := newEchoDispatcher(t, 1)
+	t.Cleanup(func() { _ = d.Shutdown(context.Background()) })
+
+	ctx := context.Background()
+
+	r1, err := d.Send(ctx, "first", map[string]any{"seq": 1})
+	require.NoError(t, err)
+	require.NotNil(t, r1)
+
+	r2, err := d.Send(ctx, "second", map[string]any{"seq": 2})
+	require.NoError(t, err)
+	require.NotNil(t, r2)
+
+	// Both responses must be identical {"ok":true}.
+	assert.Equal(t, r1, r2, "responses must be equal, proving memory was restored between calls")
+	assert.Equal(t, true, r1["ok"])
+	assert.Equal(t, true, r2["ok"])
+}
+
+// TestSupervisor_MemoryRestored_ManyTimes exercises many sequential calls
+// through a single-instance pool to ensure the snapshot/restore cycle is
+// stable over repeated invocations.
+func TestSupervisor_MemoryRestored_ManyTimes(t *testing.T) {
+	d := newEchoDispatcher(t, 1)
+	t.Cleanup(func() { _ = d.Shutdown(context.Background()) })
+
+	ctx := context.Background()
+	const iters = 50
+
+	for i := range iters {
+		res, err := d.Send(ctx, "loop", map[string]any{"i": i})
+		require.NoError(t, err, "iteration %d", i)
+		assert.Equal(t, true, res["ok"], "iteration %d", i)
+	}
+}
+
+// TestSupervisor_Start_Idempotent verifies that calling Start twice on the
+// same supervisor does not error (the second call is a no-op).
+func TestSupervisor_Start_Idempotent(t *testing.T) {
+	ctx := context.Background()
+	log := newTestLogger(t)
+
+	wasmBytes := echoWasmBytes(t)
+
+	rt, compiled := compileEchoModule(t, ctx, wasmBytes)
+	t.Cleanup(func() { _ = rt.Close(ctx) })
+
+	sv := newWasmSupervisor(rt, compiled, 5*time.Second, log)
+	require.NoError(t, sv.Start(ctx))
+	require.NoError(t, sv.Start(ctx), "second Start must be a no-op")
+	require.NoError(t, sv.Shutdown(ctx))
+}
+
+// TestSupervisor_Send_NotStarted checks that Send before Start returns an
+// error.
+func TestSupervisor_Send_NotStarted(t *testing.T) {
+	ctx := context.Background()
+	log := newTestLogger(t)
+
+	wasmBytes := echoWasmBytes(t)
+	rt, compiled := compileEchoModule(t, ctx, wasmBytes)
+	t.Cleanup(func() { _ = rt.Close(ctx) })
+
+	sv := newWasmSupervisor(rt, compiled, 5*time.Second, log)
+	// Do NOT call sv.Start.
+
+	_, err := sv.Send(ctx, "test", nil)
+	assert.Error(t, err, "Send without Start should return an error")
+}

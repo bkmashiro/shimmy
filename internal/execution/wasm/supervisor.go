@@ -58,7 +58,8 @@ func (s *wasmSupervisor) Start(ctx context.Context) error {
 
 	s.log.Debug("instantiating wasm module")
 
-	mod, err := s.runtime.InstantiateModule(ctx, s.compiled, wazero.NewModuleConfig().WithName(""))
+	mod, err := s.runtime.InstantiateModule(ctx, s.compiled,
+		wazero.NewModuleConfig().WithName("").WithStartFunctions("_initialize", "_start"))
 	if err != nil {
 		return fmt.Errorf("wasm: instantiate module: %w", err)
 	}

@@ -20,6 +20,17 @@
 ### Eval Function Examples
 - `examples/eval-go/` — Go eval function (GOOS=wasip1 -buildmode=c-shared), reactor mode
 - `examples/eval-python/eval.py` — Python eval function (numeric comparison)
+- `examples/eval-pyodide/` — Pyodide/Node.js runner for scipy/pandas eval functions;
+  uses existing `rpc` dispatcher + subprocess mode (`FUNCTION_INTERFACE=rpc`,
+  `FUNCTION_COMMAND=node runner.js eval.py`); state isolation via `exec(source, {})`
+  fresh namespace per request; no memory snapshot required
+
+### CI — userfaultfd Probe
+- `.github/workflows/uffd-probe.yml` — runs on Ubuntu VM (not container) to test whether
+  `userfaultfd(2)` fd creation and `UFFDIO_REGISTER_MODE_WP` are available
+- `internal/execution/wasm/uffd_probe_test.go` — Go test with two probes:
+  fd creation (`TestUserfaultfdProbe_FdOnly`) and full WP registration
+  (`TestUserfaultfdProbe`)
 
 ### Python Execution Paths
 - `python.go` — PythonRunner: per-request instantiation (~160ms, compile amortised)
@@ -68,7 +79,8 @@ restore on large modules.
 - [ ] Fix echo.wasm fixture (allocator state in linear memory, not global)
 - [ ] userfaultfd dirty-page restore benchmark (needs real-size WASM module)
 - [ ] numpy integration test (mount wasi-wheels output into Python sandbox)
-- [ ] Pyodide/Node.js fallback path (scipy route) — subprocess mode, existing shimmy
+- [x] Pyodide/Node.js fallback path (scipy route) — subprocess mode, existing shimmy
+      (state isolation via fresh namespace `exec(source, {})` per request; no memory snapshot)
 - [ ] Open PR feat/wasm-backend → main
 
 ## Architecture Notes

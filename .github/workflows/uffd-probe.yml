@@ -1,0 +1,59 @@
+name: userfaultfd Probe
+
+on:
+  push:
+    branches:
+      - "feat/wasm-backend"
+      - "main"
+    paths:
+      - "internal/execution/wasm/uffd_probe_test.go"
+      - ".github/workflows/uffd-probe.yml"
+  pull_request:
+    paths:
+      - "internal/execution/wasm/uffd_probe_test.go"
+      - ".github/workflows/uffd-probe.yml"
+  workflow_dispatch:
+
+# Run directly on the Ubuntu VM (not inside a container) so that userfaultfd
+# is available.  Docker's default seccomp profile blocks the userfaultfd(2)
+# syscall, which would cause the test to skip or fail.
+jobs:
+  uffd-probe:
+    name: userfaultfd availability probe
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ./go.mod
+
+      - name: Install Dependencies
+        run: go mod download
+
+      - name: Probe — userfaultfd fd creation (minimal)
+        run: |
+          go test ./internal/execution/wasm/... \
+            -run TestUserfaultfdProbe_FdOnly \
+            -v -count=1
+
+      - name: Probe — full userfaultfd + UFFDIO_REGISTER_MODE_WP
+        run: |
+          go test ./internal/execution/wasm/... \
+            -run TestUserfaultfdProbe \
+            -v -count=1
+        # The test logs "OK" or "FAIL" for WP support and never hard-fails on
+        # UFFDIO_REGISTER_MODE_WP absence (some kernel versions lack it).
+        # A non-zero exit code indicates a real problem (e.g. fd creation
+        # failed on a VM kernel, which should not happen).
+
+      - name: Report kernel info
+        if: always()
+        run: |
+          uname -r
+          cat /proc/sys/vm/unprivileged_userfaultfd 2>/dev/null || echo "unprivileged_userfaultfd: not present"

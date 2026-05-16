@@ -194,6 +194,24 @@ PORT=8080 \
 - Per-request timeout via context cancellation. If the guest does not return within `FUNCTION_TIMEOUT`, the context is cancelled and wazero interrupts execution.
 - Clean state guaranteed after every request. Linear memory is restored from a snapshot before the next request, so no state from a previous request is visible to the next caller (see section 8).
 
+### Purity requirement
+
+The snapshot/restore guarantee is sound **only for pure (stateless) evaluation functions** — functions whose output depends solely on the inputs of the current request and not on any state accumulated from previous requests.
+
+Under the WASI sandbox enforced by this backend, the only mutable state a guest module can retain across requests is its own **linear memory** (heap, globals, stack). All other side-effect channels are blocked:
+
+| Channel | Status | Reason |
+|---------|--------|--------|
+| Filesystem writes | ❌ blocked | No writable mounts by default |
+| Network I/O | ❌ blocked | No socket imports provided |
+| Environment variables | read-only | Only explicitly whitelisted keys visible |
+| Host process state | ❌ blocked | No shared memory, no signals |
+| WASM linear memory | ✅ restored | Full memcpy restore after every request |
+
+Because linear memory is the sole remaining state carrier and it is explicitly restored after each request, a well-behaved eval function that only reads its inputs and writes its response has exactly the same observable behaviour as a fresh cold-start invocation.
+
+**Temporary filesystem access:** If an eval function needs to write temporary files (e.g. for intermediate computation), mount a per-request scratch directory via `FUNCTION_WASM_ALLOWED_PATHS` pointing to a fresh `tmpfs` path, and clean it up after each request at the host level. The guest writing to that path is a controlled, bounded side effect that does not persist across requests provided the host cleans up the directory contents.
+
 ## 8. Memory snapshot / warm-start
 
 After a module instance is instantiated and its WASI start functions (`_initialize`, `_start`) have returned, `wasmSupervisor.Start` captures the entire linear memory as a `[]byte` snapshot:

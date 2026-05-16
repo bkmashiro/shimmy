@@ -150,8 +150,13 @@ func BenchmarkSnapshotRestore_FullMemcpy(b *testing.B) {
 
 	sv.mu.Lock()
 	memSize := sv.mod.Memory().Size()
-	snapCopy := make([]byte, len(sv.snapshot))
-	copy(snapCopy, sv.snapshot)
+	// Read the current linear memory to build a local snapshot copy for the
+	// benchmark — sv.snapshot was removed when the SnapshotStrategy interface
+	// was introduced; the benchmark drives mem.Write directly.
+	rawMem, ok2 := sv.mod.Memory().Read(0, memSize)
+	require.True(b, ok2, "read linear memory for bench snapshot")
+	snapCopy := make([]byte, len(rawMem))
+	copy(snapCopy, rawMem)
 	sv.mu.Unlock()
 
 	b.SetBytes(int64(memSize))
@@ -286,4 +291,94 @@ func BenchmarkSnapshotRestore_Userfaultfd(b *testing.B) {
 			b.Fatalf("mprotect PROT_READ|PROT_WRITE failed: %v", errno)
 		}
 	}
+}
+
+// --------------------------------------------------------------------------
+// Realistic-size snapshot/restore benchmarks
+// --------------------------------------------------------------------------
+
+// BenchmarkSnapshotRestore_FullMemcpy_3MB benchmarks FullMemcpyStrategy at a
+// realistic module size (3 MB ≈ a compiled Go WASM module).  The echo.wasm
+// fixture is only 64 KB; this benchmark creates an in-memory WASM module that
+// allocates ~3 MB of linear memory so the restore cost reflects real-world
+// Go-based eval functions.
+//
+// The WAT module simply declares 48 pages (48 × 64 KB = 3 MB) of linear
+// memory and exports a memory view.  We use wazero to instantiate it and then
+// drive FullMemcpyStrategy.Restore directly.
+func BenchmarkSnapshotRestore_FullMemcpy_3MB(b *testing.B) {
+	const targetMB = 3
+	const wasm64KBPages = targetMB * 1024 / 64 // 48 pages → 3 MB
+
+	// Minimal binary-encoded WASM module:
+	//   (module (memory (export "mem") <pages>))
+	// Encoded in the WASM binary format (magic + version + memory section).
+	wasmBin := buildMinimalMemoryModule(b, wasm64KBPages)
+
+	ctx := context.Background()
+	rt := wazero.NewRuntime(ctx)
+	b.Cleanup(func() { _ = rt.Close(ctx) })
+
+	compiled, err := rt.CompileModule(ctx, wasmBin)
+	require.NoError(b, err, "compile minimal 3MB module")
+	b.Cleanup(func() { _ = compiled.Close(ctx) })
+
+	modCfg := wazero.NewModuleConfig().WithName("")
+	mod, err := rt.InstantiateModule(ctx, compiled, modCfg)
+	require.NoError(b, err, "instantiate minimal 3MB module")
+	b.Cleanup(func() { _ = mod.Close(ctx) })
+
+	mem := mod.Memory()
+	require.NotNil(b, mem, "module must have linear memory")
+
+	strategy := NewFullMemcpyStrategy()
+	require.NoError(b, strategy.Take(mem), "take snapshot of 3MB memory")
+
+	b.SetBytes(int64(mem.Size()))
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		if err := strategy.Restore(mem); err != nil {
+			b.Fatalf("Restore failed: %v", err)
+		}
+	}
+}
+
+// buildMinimalMemoryModule constructs a valid WASM binary that declares
+// `pages` pages of linear memory and nothing else. This lets us benchmark
+// snapshot/restore at arbitrary memory sizes without a real module.
+//
+// Binary layout (WASM spec §5):
+//   \0asm (magic) + version (1) + memory section
+func buildMinimalMemoryModule(b *testing.B, pages int) []byte {
+	b.Helper()
+
+	// LEB128-encode a uint32.
+	leb128 := func(v uint32) []byte {
+		var buf []byte
+		for {
+			b := byte(v & 0x7f)
+			v >>= 7
+			if v != 0 {
+				b |= 0x80
+			}
+			buf = append(buf, b)
+			if v == 0 {
+				break
+			}
+		}
+		return buf
+	}
+
+	// Memory section payload: count=1, limits type=0x00 (min only), min=pages
+	memPayload := append([]byte{0x01, 0x00}, leb128(uint32(pages))...)
+
+	// Section: id=5 (memory), size=len(payload), payload
+	memSec := append([]byte{0x05}, append(leb128(uint32(len(memPayload))), memPayload...)...)
+
+	// Full module: magic + version + memory section
+	module := []byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00}
+	module = append(module, memSec...)
+	return module
 }

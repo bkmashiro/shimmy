@@ -25,9 +25,10 @@ type wasmSupervisor struct {
 	mod     api.Module
 	adapter *wasmAdapter
 
-	// snapshot is a copy of the guest's linear memory taken immediately after
-	// _initialize/_start has returned.
-	snapshot []byte
+	// strategy implements the snapshot/restore mechanism. The default is
+	// FullMemcpyStrategy; on Linux with userfaultfd available a probe strategy
+	// is used instead.
+	strategy SnapshotStrategy
 
 	timeout time.Duration
 	log     *zap.Logger
@@ -44,6 +45,7 @@ func newWasmSupervisor(
 		runtime:  rt,
 		compiled: compiled,
 		modCfg:   modCfg,
+		strategy: NewSnapshotStrategy(),
 		timeout:  timeout,
 		log:      log.Named("supervisor_wasm"),
 	}
@@ -79,7 +81,14 @@ func (s *wasmSupervisor) Start(ctx context.Context) error {
 		return fmt.Errorf("wasm: snapshot memory: %w", err)
 	}
 
-	s.log.Debug("wasm module ready", zap.Int("snapshot_bytes", len(s.snapshot)))
+	memSize := uint32(0)
+	if m := s.mod.Memory(); m != nil {
+		memSize = m.Size()
+	}
+	s.log.Debug("wasm module ready",
+		zap.Uint32("snapshot_bytes", memSize),
+		zap.String("strategy", fmt.Sprintf("%T", s.strategy)),
+	)
 
 	return nil
 }
@@ -126,55 +135,33 @@ func (s *wasmSupervisor) Shutdown(ctx context.Context) error {
 
 	s.mod = nil
 	s.adapter = nil
-	s.snapshot = nil
+
+	if err := s.strategy.Close(); err != nil {
+		s.log.Warn("failed to close snapshot strategy", zap.Error(err))
+	}
 
 	return nil
 }
 
-// takeSnapshot copies all of the guest's linear memory into s.snapshot.
+// takeSnapshot captures the guest's linear memory via the active strategy.
 // Must be called with s.mu held.
 func (s *wasmSupervisor) takeSnapshot() error {
 	mem := s.mod.Memory()
 	if mem == nil {
-		// No linear memory — nothing to snapshot.
-		s.snapshot = nil
 		return nil
 	}
-
-	size := mem.Size()
-	if size == 0 {
-		s.snapshot = nil
-		return nil
-	}
-
-	buf, ok := mem.Read(0, size)
-	if !ok {
-		return fmt.Errorf("wasm: could not read %d bytes of linear memory", size)
-	}
-
-	// Make an owned copy — mem.Read may return a slice backed by the wazero
-	// memory buffer which could change under us.
-	s.snapshot = make([]byte, len(buf))
-	copy(s.snapshot, buf)
-
-	return nil
+	return s.strategy.Take(mem)
 }
 
-// restoreSnapshot writes the snapshot back into guest linear memory.
-// Must be called with s.mu held.
+// restoreSnapshot restores the guest's linear memory from the last snapshot
+// via the active strategy. Must be called with s.mu held.
 func (s *wasmSupervisor) restoreSnapshot() error {
-	if s.snapshot == nil || s.mod == nil {
+	if s.mod == nil {
 		return nil
 	}
-
 	mem := s.mod.Memory()
 	if mem == nil {
 		return nil
 	}
-
-	if !mem.Write(0, s.snapshot) {
-		return fmt.Errorf("wasm: failed to restore %d snapshot bytes", len(s.snapshot))
-	}
-
-	return nil
+	return s.strategy.Restore(mem)
 }

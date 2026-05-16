@@ -32,6 +32,35 @@
   fd creation (`TestUserfaultfdProbe_FdOnly`) and full WP registration
   (`TestUserfaultfdProbe`)
 
+### SnapshotStrategy interface + uffd probe strategy
+- `internal/execution/wasm/snapshot.go` — `SnapshotStrategy` interface +
+  `FullMemcpyStrategy` (current baseline, always available)
+- `internal/execution/wasm/snapshot_uffd_linux.go` — `UffdProbeStrategy`:
+  opens uffd fd, performs UFFDIO_API handshake, mmaps a test region, registers
+  it with `UFFDIO_REGISTER_MODE_WP`, arms write-protection. Falls back to
+  `FullMemcpyStrategy` for actual wasm memory restore (wazero limitation — see
+  below). `NewSnapshotStrategy()` picks uffd or full-memcpy at runtime.
+- `internal/execution/wasm/snapshot_stub.go` — non-Linux stub returning
+  `FullMemcpyStrategy`
+- `internal/execution/wasm/snapshot_uffd_linux_test.go` — three tests:
+  `TestUffdStrategy_FallbackOnUnavailable` (passes in Docker, confirms graceful
+  fallback), `TestUffdStrategy_EndToEnd` (full uffd WP round-trip on own mmap
+  region — skipped in Docker, runs on Ubuntu VM/CI), `TestUffdProbeStrategy_NewAndClose`
+- `wasmSupervisor` refactored to use `SnapshotStrategy` interface; `snapshot []byte`
+  field removed; `takeSnapshot`/`restoreSnapshot` delegate to strategy
+
+**Wazero limitation for full dirty-page restore:** `api.Memory` does not expose
+the raw pointer/mmap address of its linear-memory backing. To wire uffd
+tracking to the actual WASM memory (rather than a shadow region), one of these
+is needed:
+- wazero `experimental` API exposing the backing mmap address (not upstream as
+  of v1.x)
+- A custom wazero memory allocator that uses our own mmap and passes the
+  address to `UffdProbeStrategy`
+- Using `unsafe.SliceData` on the `[]byte` from `api.Memory.Read` (works today
+  but is unsupported — the slice may be moved by GC if the backing is a Go
+  allocation)
+
 ### Python Execution Paths
 - `python.go` — PythonRunner: per-request instantiation (~160ms, compile amortised)
 - `python_resident.go` — ResidentPythonRunner: goroutine + io.Pipe (~1.8ms after init)
@@ -50,6 +79,7 @@
 | WASM pool=1 (Go reactor) | ~9,700 ns (3× faster) |
 | WASM pool=N (Go reactor) | ~5,000 ns |
 | Snapshot restore (memcpy, 64KB) | ~753 ns (<8% of dispatch) |
+| Snapshot restore (memcpy, 3MB) | ~54 µs (realistic Go WASM size) |
 | Python per-request instantiation | ~160 ms |
 | Python resident (goroutine) | ~1.8 ms (88× faster) |
 
@@ -68,16 +98,20 @@ restore on large modules.
   stack is thousands of frames deep, causing goroutine stack overflow on rewind
   in wazero. Goroutine + io.Pipe is the practical alternative.
 
-- userfaultfd dirty-page restore not yet implemented. Relevant for large modules
-  (CPython-WASI 26MB). `userfaultfd` fd creation confirmed available on Lambda
-  (probe result). `UFFDIO_REGISTER_MODE_WP` not yet tested. Currently blocked
-  by container seccomp in dev environment.
+- userfaultfd full dirty-page restore not yet implemented for WASM linear memory.
+  `SnapshotStrategy` interface + `UffdProbeStrategy` scaffold is in place; uffd
+  fd creation and `UFFDIO_REGISTER_MODE_WP` confirmed on Ubuntu CI. Blocked by
+  wazero not exposing the raw linear-memory address — see wazero limitation note
+  under "SnapshotStrategy interface" in Completed section.
 
 ## Pending Work
 
 - [ ] Update interim report with benchmark data and architecture
 - [ ] Fix echo.wasm fixture (allocator state in linear memory, not global)
-- [ ] userfaultfd dirty-page restore benchmark (needs real-size WASM module)
+- [x] userfaultfd dirty-page restore benchmark — `BenchmarkSnapshotRestore_FullMemcpy_3MB`
+      measures restore cost at 3MB (54µs on this machine)
+- [ ] userfaultfd full dirty-page restore (wires uffd to actual WASM linear memory —
+      blocked by wazero limitation, see Completed section for details)
 - [ ] numpy integration test (mount wasi-wheels output into Python sandbox)
 - [x] Pyodide/Node.js fallback path (scipy route) — subprocess mode, existing shimmy
       (state isolation via fresh namespace `exec(source, {})` per request; no memory snapshot)

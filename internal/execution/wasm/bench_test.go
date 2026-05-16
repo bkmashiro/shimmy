@@ -7,8 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sync"
-	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -47,25 +45,11 @@ func benchEchoWasmBytes(b *testing.B) []byte {
 // --------------------------------------------------------------------------
 // Dispatcher benchmarks
 //
-// The echo.wasm fixture stores its bump-allocator pointer in a WASM global
-// (not in linear memory).  restoreSnapshot() only snapshots/restores linear
-// memory, so the global heap_top keeps advancing across iterations.  The
-// module OOMs after ~1200 calls with a minimal 38-byte request payload.
-//
-// To work around this in benchmarks we recreate the dispatcher every
-// resetEvery iterations, keeping the global state fresh while still
-// measuring steady-state dispatch latency (setup cost is amortised).
-//
-// In production this is not an issue: real WASM modules store allocator state
-// inside linear memory and it is correctly restored by the snapshot.
+// The echo.wasm fixture stores its bump-allocator pointer in linear memory
+// (offset 0, 4-byte LE i32).  restoreSnapshot() snapshots/restores linear
+// memory, so the heap pointer is correctly reset after every request.
+// No dispatcher recreation is needed during benchmarks.
 // --------------------------------------------------------------------------
-
-const (
-	// resetEvery is how many Send() calls we run before tearing down and
-	// rebuilding the dispatcher.  With a 38-byte request the echo module can
-	// handle ~1200 calls before OOM; we stay well below that.
-	resetEvery = 500
-)
 
 // BenchmarkDispatcher_Send_Pool1 measures the per-request round-trip cost
 // through a WASM dispatcher with exactly one module instance (no pool
@@ -75,37 +59,21 @@ func BenchmarkDispatcher_Send_Pool1(b *testing.B) {
 	ctx := context.Background()
 	modPath := benchEchoModulePath(b)
 
-	// Minimal payload — keep the request small so the bump-allocator in the
-	// echo fixture lasts longer between resets.
 	data := map[string]any{"i": 1}
 
-	newDispatcher := func() *Dispatcher {
-		cfg := Config{
-			ModulePath:     modPath,
-			MaxInstances:   1,
-			Timeout:        5 * time.Second,
-			MaxMemoryPages: 256,
-		}
-		d := NewDispatcher(cfg, zap.NewNop())
-		if err := d.Start(ctx); err != nil {
-			b.Fatalf("dispatcher start: %v", err)
-		}
-		return d
+	cfg := Config{
+		ModulePath:     modPath,
+		MaxInstances:   1,
+		Timeout:        5 * time.Second,
+		MaxMemoryPages: 256,
 	}
-
-	d := newDispatcher()
+	d := NewDispatcher(cfg, zap.NewNop())
+	if err := d.Start(ctx); err != nil {
+		b.Fatalf("dispatcher start: %v", err)
+	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		// Recreate the dispatcher periodically to reset WASM globals in the
-		// echo fixture (real modules don't need this).
-		if i > 0 && i%resetEvery == 0 {
-			b.StopTimer()
-			_ = d.Shutdown(ctx)
-			d = newDispatcher()
-			b.StartTimer()
-		}
-
 		_, err := d.Send(ctx, "eval", data)
 		if err != nil {
 			b.Fatalf("Send failed at iteration %d: %v", i, err)
@@ -118,73 +86,30 @@ func BenchmarkDispatcher_Send_Pool1(b *testing.B) {
 // BenchmarkDispatcher_Send_PoolN measures Send throughput with NumCPU module
 // instances running in parallel.  Exercises pool acquisition, concurrent WASM
 // execution, and snapshot restore under concurrency.
-//
-// Because the echo.wasm fixture stores its bump-allocator in a WASM global
-// (not restored by the memcpy snapshot), each instance can handle only ~500
-// calls before exhausting its 64 KB linear memory.  We work around this by
-// using a shared atomic counter and a mutex-guarded dispatcher swap: when any
-// goroutine detects that the call count is approaching the limit it acquires a
-// lock, tears down the old dispatcher, and builds a fresh one.  Measurement
-// is paused during the reset so setup cost is not charged.
 func BenchmarkDispatcher_Send_PoolN(b *testing.B) {
 	ctx := context.Background()
 	n := runtime.NumCPU()
 	modPath := benchEchoModulePath(b)
 	data := map[string]any{"i": 1}
 
-	makeDispatcher := func() *Dispatcher {
-		cfg := Config{
-			ModulePath:     modPath,
-			MaxInstances:   n,
-			Timeout:        5 * time.Second,
-			MaxMemoryPages: 256,
-		}
-		d := NewDispatcher(cfg, zap.NewNop())
-		if err := d.Start(ctx); err != nil {
-			b.Fatalf("dispatcher start: %v", err)
-		}
-		return d
+	cfg := Config{
+		ModulePath:     modPath,
+		MaxInstances:   n,
+		Timeout:        5 * time.Second,
+		MaxMemoryPages: 256,
 	}
-
-	var (
-		mu      sync.RWMutex
-		d       = makeDispatcher()
-		callCnt atomic.Int64
-	)
-
-	b.Cleanup(func() {
-		mu.Lock()
-		defer mu.Unlock()
-		_ = d.Shutdown(ctx)
-	})
-
-	// perInstanceLimit: how many calls each instance can safely handle.
-	// echo.wasm: 53 bytes/call, 65532 bytes usable → ~1236 calls total across
-	// all N instances.  We reset at half that to give plenty of headroom.
-	perInstanceLimit := int64(500)
+	d := NewDispatcher(cfg, zap.NewNop())
+	if err := d.Start(ctx); err != nil {
+		b.Fatalf("dispatcher start: %v", err)
+	}
+	b.Cleanup(func() { _ = d.Shutdown(ctx) })
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			// Check if we're nearing the per-instance limit.
-			cnt := callCnt.Add(1)
-			if cnt%perInstanceLimit == 0 {
-				// Only one goroutine does the reset; others wait.
-				b.StopTimer()
-				mu.Lock()
-				_ = d.Shutdown(ctx)
-				d = makeDispatcher()
-				callCnt.Store(0)
-				mu.Unlock()
-				b.StartTimer()
-			}
-
-			mu.RLock()
 			_, err := d.Send(ctx, "eval", data)
-			mu.RUnlock()
-
 			if err != nil {
-				b.Logf("Send error (transient during reset): %v", err)
+				b.Errorf("Send error: %v", err)
 			}
 		}
 	})

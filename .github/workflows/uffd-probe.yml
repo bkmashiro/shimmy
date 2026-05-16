@@ -55,6 +55,20 @@ jobs:
         # A non-zero exit code indicates a real problem (e.g. fd creation
         # failed on a VM kernel, which should not happen).
 
+      - name: Benchmark — snapshot restore (full memcpy vs uffd, 64KB + 3MB)
+        run: |
+          go test ./internal/execution/wasm/... \
+            -bench=BenchmarkSnapshotRestore \
+            -benchtime=3s -count=1 -run=^$ \
+            -v 2>&1 | tee bench-results.txt
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: bench-results.txt
+
       - name: Report kernel info
         if: always()
         run: |

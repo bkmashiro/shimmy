@@ -6,11 +6,11 @@ on:
       - "feat/wasm-backend"
       - "main"
     paths:
-      - "internal/execution/wasm/uffd_probe_test.go"
+      - "internal/execution/wasm/**"
       - ".github/workflows/uffd-probe.yml"
   pull_request:
     paths:
-      - "internal/execution/wasm/uffd_probe_test.go"
+      - "internal/execution/wasm/**"
       - ".github/workflows/uffd-probe.yml"
   workflow_dispatch:
 

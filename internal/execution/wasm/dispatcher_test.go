@@ -212,7 +212,7 @@ func TestSupervisor_Start_Idempotent(t *testing.T) {
 	rt, compiled := compileEchoModule(t, ctx, wasmBytes)
 	t.Cleanup(func() { _ = rt.Close(ctx) })
 
-	sv := newWasmSupervisor(rt, compiled, wazero.NewModuleConfig().WithName(""), 5*time.Second, log)
+	sv := newWasmSupervisor(rt, compiled, wazero.NewModuleConfig().WithName(""), 5*time.Second, false, log)
 	require.NoError(t, sv.Start(ctx))
 	require.NoError(t, sv.Start(ctx), "second Start must be a no-op")
 	require.NoError(t, sv.Shutdown(ctx))
@@ -228,7 +228,7 @@ func TestSupervisor_Send_NotStarted(t *testing.T) {
 	rt, compiled := compileEchoModule(t, ctx, wasmBytes)
 	t.Cleanup(func() { _ = rt.Close(ctx) })
 
-	sv := newWasmSupervisor(rt, compiled, wazero.NewModuleConfig().WithName(""), 5*time.Second, log)
+	sv := newWasmSupervisor(rt, compiled, wazero.NewModuleConfig().WithName(""), 5*time.Second, false, log)
 	// Do NOT call sv.Start.
 
 	_, err := sv.Send(ctx, "test", nil)

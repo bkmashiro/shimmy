@@ -3,12 +3,15 @@
 package wasm
 
 import (
+	"context"
 	"syscall"
 	"testing"
+	"time"
 	"unsafe"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tetratelabs/wazero"
 )
 
 // ---------------------------------------------------------------------------
@@ -183,6 +186,137 @@ func TestUffdStrategy_EndToEnd(t *testing.T) {
 
 	t.Logf("uffd end-to-end: OK (pageSize=%d, numPages=%d, dirtyRestored=%d)",
 		pageSize, numPages, len(dirtyPages))
+}
+
+// ---------------------------------------------------------------------------
+// TestUffdProbeStrategy_NewAndClose
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// TestUffdStrategy_DirtyPageTracking
+// ---------------------------------------------------------------------------
+
+// TestUffdStrategy_DirtyPageTracking exercises UffdStrategy against a real
+// wazero module (the echo.wasm fixture). It verifies:
+//   - Take + Restore with uffd tracks and restores only modified pages.
+//   - The module produces consistent output after multiple restore cycles,
+//     proving dirty-page tracking correctly identifies and restores written pages.
+//
+// This test is skipped in environments where uffd is unavailable (Docker
+// with default seccomp).
+func TestUffdStrategy_DirtyPageTracking(t *testing.T) {
+	if !UffdAvailable() {
+		t.Skip("userfaultfd not available in this environment (seccomp or insufficient privileges)")
+	}
+
+	ctx := context.Background()
+
+	wasmBytes := echoWasmBytes(t)
+	rt, compiled := compileEchoModule(t, ctx, wasmBytes)
+	t.Cleanup(func() { _ = rt.Close(ctx) })
+
+	modCfg := wazero.NewModuleConfig().
+		WithName("").
+		WithSysNanosleep().
+		WithSysWalltime().
+		WithSysNanotime()
+
+	mod, err := rt.InstantiateModule(ctx, compiled,
+		modCfg.WithStartFunctions("_initialize", "_start"))
+	require.NoError(t, err, "instantiate echo module")
+	t.Cleanup(func() { _ = mod.Close(ctx) })
+
+	mem := mod.Memory()
+	require.NotNil(t, mem, "echo module must have linear memory")
+
+	// Create UffdStrategy for the WASM linear memory.
+	strategy, err := NewUffdStrategy(mem)
+	if err != nil {
+		t.Skipf("NewUffdStrategy failed (expected if WP unavailable): %v", err)
+	}
+	t.Cleanup(func() { require.NoError(t, strategy.Close()) })
+
+	// Take an initial snapshot.
+	require.NoError(t, strategy.Take(mem), "Take snapshot")
+
+	// Record what the memory looks like before any writes.
+	beforeBuf, ok := mem.Read(0, mem.Size())
+	require.True(t, ok)
+	before := make([]byte, len(beforeBuf))
+	copy(before, beforeBuf)
+
+	// Write to a couple of pages to simulate guest activity.
+	// Write known bytes to the first two 4KB pages.
+	pageSize := strategy.pageSize
+	require.True(t, mem.Write(0, make([]byte, pageSize*2)), "write to pages 0+1")
+
+	// Verify the write happened (memory differs from snapshot).
+	afterBuf, ok := mem.Read(0, mem.Size())
+	require.True(t, ok)
+	require.NotEqual(t, before[:pageSize*2], afterBuf[:pageSize*2],
+		"memory should differ from snapshot after write")
+
+	// Restore — only dirty pages should be rewritten.
+	require.NoError(t, strategy.Restore(mem), "Restore snapshot")
+
+	// Memory should now match the pre-write state.
+	restoredBuf, ok := mem.Read(0, mem.Size())
+	require.True(t, ok)
+	require.Equal(t, before, []byte(restoredBuf),
+		"after Restore, memory must match pre-write state")
+
+	// A second Restore with no writes should be a no-op (zero dirty pages).
+	require.NoError(t, strategy.Restore(mem), "second Restore (no dirty pages) should be no-op")
+
+	restoredBuf2, ok := mem.Read(0, mem.Size())
+	require.True(t, ok)
+	require.Equal(t, before, []byte(restoredBuf2),
+		"after no-op Restore, memory must still match pre-write state")
+
+	t.Logf("UffdStrategy dirty-page tracking: OK (memSize=%d, pageSize=%d)",
+		mem.Size(), pageSize)
+}
+
+// TestUffdStrategy_SupervisorIntegration verifies that a wasmSupervisor with
+// UseUffd=true produces the same correct output over multiple sends as the
+// FullMemcpy strategy (TestSupervisor_MemoryRestored equivalent).
+func TestUffdStrategy_SupervisorIntegration(t *testing.T) {
+	if !UffdAvailable() {
+		t.Skip("userfaultfd not available in this environment (seccomp or insufficient privileges)")
+	}
+
+	ctx := context.Background()
+	wasmBytes := echoWasmBytes(t)
+	rt, compiled := compileEchoModule(t, ctx, wasmBytes)
+	t.Cleanup(func() { _ = rt.Close(ctx) })
+
+	modCfg := wazero.NewModuleConfig().
+		WithName("").
+		WithSysNanosleep().
+		WithSysWalltime().
+		WithSysNanotime()
+
+	// useUffd=true
+	sv := newWasmSupervisor(rt, compiled, modCfg, 5*time.Second, true, newTestLogger(t))
+	require.NoError(t, sv.Start(ctx))
+	t.Cleanup(func() { _ = sv.Shutdown(ctx) })
+
+	// Confirm uffd strategy was selected (not memcpy fallback).
+	sv.mu.Lock()
+	_, isUffd := sv.strategy.(*UffdStrategy)
+	sv.mu.Unlock()
+	if !isUffd {
+		t.Skip("UffdStrategy not selected (uffd+WP may be unavailable) — skipping integration test")
+	}
+
+	// Send multiple requests and verify consistent responses.
+	for i := range 5 {
+		res, err := sv.Send(ctx, "eval", map[string]any{"i": i})
+		require.NoError(t, err, "iteration %d", i)
+		require.Equal(t, true, res["ok"], "iteration %d", i)
+	}
+
+	t.Log("UffdStrategy supervisor integration: OK")
 }
 
 // ---------------------------------------------------------------------------

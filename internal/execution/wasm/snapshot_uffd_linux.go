@@ -4,6 +4,7 @@ package wasm
 
 import (
 	"fmt"
+	"sync"
 	"syscall"
 	"unsafe"
 
@@ -266,6 +267,330 @@ func (u *UffdProbeStrategy) Close() error {
 		return errs[0]
 	}
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// UffdStrategy — real dirty-page tracking on WASM linear memory
+// ---------------------------------------------------------------------------
+
+// uffdMsg mirrors the kernel struct uffd_msg (linux/userfaultfd.h).
+// We only need the pagefault variant.
+type uffdMsg struct {
+	event   uint8
+	_       [7]uint8 // reserved
+	address uint64
+	// The union has more fields but we only read event + pagefault.address.
+	_pad [16]uint8
+}
+
+const (
+	uffdEventPagefault = 0x12 // UFFD_EVENT_PAGEFAULT
+	uffdPagfaultFlagWP = 1 << 9 // UFFD_PAGEFAULT_FLAG_WP
+)
+
+// UffdStrategy is a full dirty-page tracking SnapshotStrategy backed by Linux
+// userfaultfd write-protect mode. It registers the WASM linear memory region
+// directly with uffd and tracks which pages were written between Take and
+// Restore. On Restore it copies back only the dirty pages, amortising restore
+// cost for large modules where only a small fraction of pages are written per
+// request.
+//
+// The raw pointer into WASM linear memory is obtained via mem.Read(0, size)
+// which, on wazero/linux, returns a slice that directly points into the
+// mmap(MAP_ANONYMOUS) backing the linear memory. We use unsafe.SliceData to
+// extract the base address and register it with uffd.
+//
+// Memory growth is prevented by configuring WithMemoryLimitPages in the wazero
+// runtime, so the registration remains valid for the lifetime of the module.
+type UffdStrategy struct {
+	uffdFd    int
+	basePtr   unsafe.Pointer
+	memSize   uint32
+	pageSize  int
+	pageCount int
+
+	snapshot []byte // captured by Take
+	mu       sync.Mutex
+	dirty    []bool // dirty[i] = true if page i was written since last Take
+
+	closeOnce sync.Once
+	stopCh    chan struct{} // closed to stop faultLoop
+	doneCh    chan struct{} // closed when faultLoop exits
+}
+
+// NewUffdStrategy creates a UffdStrategy for the given WASM module memory.
+// It obtains the raw backing pointer from mem.Read, registers the region with
+// uffd in WP mode, arms write-protection, and starts a background fault-
+// handler goroutine.
+func NewUffdStrategy(mem api.Memory) (*UffdStrategy, error) {
+	if mem == nil {
+		return nil, fmt.Errorf("uffd: nil api.Memory")
+	}
+
+	size := mem.Size()
+	if size == 0 {
+		return nil, fmt.Errorf("uffd: zero-size linear memory")
+	}
+
+	// Obtain the raw backing pointer. On wazero/linux this slice is backed
+	// directly by the mmap region for linear memory. unsafe.SliceData gives us
+	// the address of the first element without making a copy.
+	buf, ok := mem.Read(0, size)
+	if !ok {
+		return nil, fmt.Errorf("uffd: could not read linear memory (size=%d)", size)
+	}
+	basePtr := unsafe.Pointer(unsafe.SliceData(buf))
+
+	pageSize := syscall.Getpagesize()
+	pageCount := int((uint64(size) + uint64(pageSize) - 1) / uint64(pageSize))
+
+	// Open uffd fd.
+	fd, _, errno := syscall.RawSyscall(
+		uffdSyscallNr,
+		uffdOCloexecStrategy|uffdONonblockStrategy,
+		0, 0,
+	)
+	if errno != 0 {
+		return nil, fmt.Errorf("uffd: userfaultfd syscall: %w", errno)
+	}
+
+	cleanup := true
+	defer func() {
+		if cleanup {
+			syscall.Close(int(fd)) //nolint:errcheck
+		}
+	}()
+
+	// UFFDIO_API handshake — request WP feature.
+	apiStruct := uffdioAPIStructStrategy{
+		api:      uffdStrategyAPI,
+		features: uffdStrategyFeatureWP, // request WP support
+	}
+	if err := ioctlUffd(fd, ioctlUffdioAPIStrategy, uintptr(unsafe.Pointer(&apiStruct))); err != 0 {
+		return nil, fmt.Errorf("uffd: UFFDIO_API handshake: %w", err)
+	}
+	if apiStruct.features&uffdStrategyFeatureWP == 0 {
+		return nil, fmt.Errorf("uffd: kernel does not support UFFD_FEATURE_PAGEFAULT_FLAG_WP (features=0x%x)", apiStruct.features)
+	}
+
+	// UFFDIO_REGISTER the WASM linear memory with WP mode.
+	reg := uffdioRegisterStrategy{
+		uffdioRangeStrategy: uffdioRangeStrategy{
+			start: uint64(uintptr(basePtr)),
+			len:   uint64(size),
+		},
+		mode: uffdStrategyRegisterMWP,
+	}
+	if err := ioctlUffd(fd, ioctlUffdioRegisterStrategy, uintptr(unsafe.Pointer(&reg))); err != 0 {
+		return nil, fmt.Errorf("uffd: UFFDIO_REGISTER_MODE_WP on wasm memory: %w", err)
+	}
+
+	// Arm write-protection on the entire region.
+	wp := uffdioWPStrategy{
+		uffdioRangeStrategy: uffdioRangeStrategy{
+			start: uint64(uintptr(basePtr)),
+			len:   uint64(size),
+		},
+		mode: uffdioWPModeWP,
+	}
+	if err := ioctlUffd(fd, ioctlUffdioWPStrategy, uintptr(unsafe.Pointer(&wp))); err != 0 {
+		return nil, fmt.Errorf("uffd: UFFDIO_WRITEPROTECT arm on wasm memory: %w", err)
+	}
+
+	s := &UffdStrategy{
+		uffdFd:    int(fd),
+		basePtr:   basePtr,
+		memSize:   size,
+		pageSize:  pageSize,
+		pageCount: pageCount,
+		snapshot:  make([]byte, size),
+		dirty:     make([]bool, pageCount),
+		stopCh:    make(chan struct{}),
+		doneCh:    make(chan struct{}),
+	}
+
+	cleanup = false // fd ownership transferred to s
+
+	go s.faultLoop()
+
+	return s, nil
+}
+
+// faultLoop runs in a dedicated goroutine. It blocks reading uffd_msg structs
+// from the uffd fd. For each write-protect fault it:
+//  1. Marks the faulting page as dirty.
+//  2. Disarms WP for that page so the faulting thread can proceed.
+//
+// The loop exits when the fd is closed (read returns an error).
+func (s *UffdStrategy) faultLoop() {
+	defer close(s.doneCh)
+
+	var msg uffdMsg
+	msgSize := unsafe.Sizeof(msg)
+	msgBuf := (*[unsafe.Sizeof(uffdMsg{})]byte)(unsafe.Pointer(&msg))
+
+	for {
+		// Block-read one uffd_msg. The fd is O_NONBLOCK so we use a blocking
+		// read via syscall.Read which calls the read(2) syscall directly.
+		// When the fd is closed, Read returns an error and we exit.
+		n, err := syscall.Read(s.uffdFd, msgBuf[:msgSize])
+		if err != nil || n == 0 {
+			// fd closed or error — exit cleanly.
+			return
+		}
+		if uint(n) < uint(msgSize) {
+			// Short read — shouldn't happen on uffd but be defensive.
+			continue
+		}
+
+		if msg.event != uffdEventPagefault {
+			// Not a pagefault event — skip (e.g. fork/remap events).
+			continue
+		}
+
+		faultAddr := uintptr(msg.address)
+		base := uintptr(s.basePtr)
+
+		if faultAddr < base || faultAddr >= base+uintptr(s.memSize) {
+			// Fault outside our region — shouldn't happen, skip.
+			continue
+		}
+
+		pageIdx := int((faultAddr - base) / uintptr(s.pageSize))
+		// Align faultAddr down to page boundary.
+		pageBase := base + uintptr(pageIdx)*uintptr(s.pageSize)
+
+		// Mark page dirty.
+		s.mu.Lock()
+		if pageIdx < len(s.dirty) {
+			s.dirty[pageIdx] = true
+		}
+		s.mu.Unlock()
+
+		// Disarm WP for this page so the faulting thread can proceed.
+		wp := uffdioWPStrategy{
+			uffdioRangeStrategy: uffdioRangeStrategy{
+				start: uint64(pageBase),
+				len:   uint64(s.pageSize),
+			},
+			mode: 0, // clear WP
+		}
+		ioctlUffd(uintptr(s.uffdFd), ioctlUffdioWPStrategy, uintptr(unsafe.Pointer(&wp))) //nolint:errcheck
+	}
+}
+
+// Take implements SnapshotStrategy. It copies the current WASM linear memory
+// into the internal snapshot buffer, re-arms write-protection on the entire
+// region, and clears the dirty page bitset.
+func (s *UffdStrategy) Take(mem api.Memory) error {
+	if mem == nil {
+		return nil
+	}
+
+	// Reads don't trigger WP faults — we can read directly without disarming.
+	buf := unsafe.Slice((*byte)(s.basePtr), s.memSize)
+
+	s.mu.Lock()
+	copy(s.snapshot, buf)
+	for i := range s.dirty {
+		s.dirty[i] = false
+	}
+	s.mu.Unlock()
+
+	// Re-arm WP on the entire region (disarm may have been done for dirty pages
+	// during a previous Restore that didn't re-arm, or after initial setup).
+	wp := uffdioWPStrategy{
+		uffdioRangeStrategy: uffdioRangeStrategy{
+			start: uint64(uintptr(s.basePtr)),
+			len:   uint64(s.memSize),
+		},
+		mode: uffdioWPModeWP,
+	}
+	if err := ioctlUffd(uintptr(s.uffdFd), ioctlUffdioWPStrategy, uintptr(unsafe.Pointer(&wp))); err != 0 {
+		return fmt.Errorf("uffd: Take: re-arm WP: %w", err)
+	}
+
+	return nil
+}
+
+// Restore implements SnapshotStrategy. It writes snapshot data back to only
+// the pages that were dirtied since the last Take, then re-arms WP on those
+// pages and clears the dirty bitset.
+func (s *UffdStrategy) Restore(mem api.Memory) error {
+	if mem == nil || s.snapshot == nil {
+		return nil
+	}
+
+	s.mu.Lock()
+	// Collect dirty page indices under the lock, then release.
+	var dirtyPages []int
+	for i, d := range s.dirty {
+		if d {
+			dirtyPages = append(dirtyPages, i)
+			s.dirty[i] = false
+		}
+	}
+	s.mu.Unlock()
+
+	if len(dirtyPages) == 0 {
+		return nil
+	}
+
+	pageSize := s.pageSize
+
+	for _, pg := range dirtyPages {
+		off := uint32(pg * pageSize)
+		end := off + uint32(pageSize)
+		if end > s.memSize {
+			end = s.memSize
+		}
+
+		// Restore page from snapshot using mem.Write (goes through wazero bounds check).
+		if !mem.Write(off, s.snapshot[off:end]) {
+			return fmt.Errorf("uffd: Restore: mem.Write failed at offset %d", off)
+		}
+
+		// Re-arm WP on this page.
+		wp := uffdioWPStrategy{
+			uffdioRangeStrategy: uffdioRangeStrategy{
+				start: uint64(uintptr(s.basePtr)) + uint64(off),
+				len:   uint64(end - off),
+			},
+			mode: uffdioWPModeWP,
+		}
+		if err := ioctlUffd(uintptr(s.uffdFd), ioctlUffdioWPStrategy, uintptr(unsafe.Pointer(&wp))); err != 0 {
+			return fmt.Errorf("uffd: Restore: re-arm WP for page %d: %w", pg, err)
+		}
+	}
+
+	return nil
+}
+
+// Close implements SnapshotStrategy. It disarms write-protection, stops the
+// fault-handler goroutine by closing the uffd fd, and waits for it to exit.
+func (s *UffdStrategy) Close() error {
+	var retErr error
+	s.closeOnce.Do(func() {
+		// Disarm WP on the entire region so the memory is usable after close.
+		wp := uffdioWPStrategy{
+			uffdioRangeStrategy: uffdioRangeStrategy{
+				start: uint64(uintptr(s.basePtr)),
+				len:   uint64(s.memSize),
+			},
+			mode: 0,
+		}
+		ioctlUffd(uintptr(s.uffdFd), ioctlUffdioWPStrategy, uintptr(unsafe.Pointer(&wp))) //nolint:errcheck
+
+		// Closing the fd causes faultLoop's Read to return an error, stopping it.
+		if err := syscall.Close(s.uffdFd); err != nil {
+			retErr = fmt.Errorf("uffd: close fd: %w", err)
+		}
+		s.uffdFd = -1
+
+		// Wait for faultLoop to exit.
+		<-s.doneCh
+	})
+	return retErr
 }
 
 // UffdAvailable reports whether the userfaultfd syscall is permitted in this

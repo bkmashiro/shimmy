@@ -32,34 +32,44 @@
   fd creation (`TestUserfaultfdProbe_FdOnly`) and full WP registration
   (`TestUserfaultfdProbe`)
 
-### SnapshotStrategy interface + uffd probe strategy
+### SnapshotStrategy interface + uffd dirty-page strategy (experimental, behind `FUNCTION_WASM_USE_UFFD=true`)
 - `internal/execution/wasm/snapshot.go` — `SnapshotStrategy` interface +
   `FullMemcpyStrategy` (current baseline, always available)
-- `internal/execution/wasm/snapshot_uffd_linux.go` — `UffdProbeStrategy`:
-  opens uffd fd, performs UFFDIO_API handshake, mmaps a test region, registers
-  it with `UFFDIO_REGISTER_MODE_WP`, arms write-protection. Falls back to
-  `FullMemcpyStrategy` for actual wasm memory restore (wazero limitation — see
-  below). `NewSnapshotStrategy()` picks uffd or full-memcpy at runtime.
-- `internal/execution/wasm/snapshot_stub.go` — non-Linux stub returning
+- `internal/execution/wasm/snapshot_uffd_linux.go` — `UffdProbeStrategy`
+  (probe/scaffold) + **`UffdStrategy`** (full dirty-page tracking, experimental):
+  - `NewUffdStrategy(mem api.Memory)` extracts the raw backing pointer via
+    `unsafe.SliceData(mem.Read(0, size))`, registers the WASM linear memory with
+    `UFFDIO_REGISTER_MODE_WP`, arms write-protection, and starts a background
+    `faultLoop` goroutine that reads `uffd_msg` structs, records dirty pages,
+    and unblocks faulting threads by disarming WP per-page.
+  - `Take`: full memcpy into snapshot buffer + re-arm WP + clear dirty bitset
+  - `Restore`: copy back only dirty pages + re-arm WP per dirty page
+  - `Close`: disarm WP, close uffd fd (stops `faultLoop`), wait for goroutine exit
+- `internal/execution/wasm/supervisor_linux.go` — `selectStrategy()`: attempts
+  `UffdStrategy` when `useUffd=true`; falls back to `FullMemcpyStrategy` on error
+- `internal/execution/wasm/supervisor_stub.go` — non-Linux stub always returns
   `FullMemcpyStrategy`
-- `internal/execution/wasm/snapshot_uffd_linux_test.go` — three tests:
-  `TestUffdStrategy_FallbackOnUnavailable` (passes in Docker, confirms graceful
-  fallback), `TestUffdStrategy_EndToEnd` (full uffd WP round-trip on own mmap
-  region — skipped in Docker, runs on Ubuntu VM/CI), `TestUffdProbeStrategy_NewAndClose`
-- `wasmSupervisor` refactored to use `SnapshotStrategy` interface; `snapshot []byte`
-  field removed; `takeSnapshot`/`restoreSnapshot` delegate to strategy
+- `internal/execution/wasm/snapshot_stub.go` — non-Linux stub returning
+  `FullMemcpyStrategy` for `NewSnapshotStrategy()`
+- `internal/execution/wasm/config.go` — `UseUffd bool` field; env var
+  `FUNCTION_WASM_USE_UFFD=true` enables it
+- `wasmSupervisor` updated: `useUffd bool` field; strategy selected in `Start()`
+  after module instantiation (when `api.Memory` is available)
+- `internal/execution/wasm/snapshot_uffd_linux_test.go` — five tests:
+  `TestUffdStrategy_FallbackOnUnavailable`, `TestUffdStrategy_EndToEnd`,
+  `TestUffdProbeStrategy_NewAndClose`, `TestUffdStrategy_DirtyPageTracking`
+  (verifies only written pages are restored via real wazero module),
+  `TestUffdStrategy_SupervisorIntegration` (full supervisor round-trip with
+  `UseUffd=true`); uffd tests skip in Docker/seccomp
+- `bench_test.go` — `BenchmarkSnapshotRestore_Uffd_3MB`: measures dirty-page
+  restore at 3MB with ~10% dirty pages; skipped if uffd unavailable
 
-**Wazero limitation for full dirty-page restore:** `api.Memory` does not expose
-the raw pointer/mmap address of its linear-memory backing. To wire uffd
-tracking to the actual WASM memory (rather than a shadow region), one of these
-is needed:
-- wazero `experimental` API exposing the backing mmap address (not upstream as
-  of v1.x)
-- A custom wazero memory allocator that uses our own mmap and passes the
-  address to `UffdProbeStrategy`
-- Using `unsafe.SliceData` on the `[]byte` from `api.Memory.Read` (works today
-  but is unsupported — the slice may be moved by GC if the backing is a Go
-  allocation)
+**Implementation note:** `mem.Read(0, size)` on wazero/linux returns a slice
+backed directly by the `mmap(MAP_ANONYMOUS)` region for WASM linear memory.
+`unsafe.SliceData` extracts the base address without copying. Since
+`WithMemoryLimitPages` prevents memory growth, the registration stays valid
+for the module lifetime. This uses an unofficial path (not part of wazero's
+public API) but works in practice on current wazero versions.
 
 ### Python Execution Paths
 - `python.go` — PythonRunner: per-request instantiation (~160ms, compile amortised)
@@ -98,11 +108,10 @@ restore on large modules.
   stack is thousands of frames deep, causing goroutine stack overflow on rewind
   in wazero. Goroutine + io.Pipe is the practical alternative.
 
-- userfaultfd full dirty-page restore not yet implemented for WASM linear memory.
-  `SnapshotStrategy` interface + `UffdProbeStrategy` scaffold is in place; uffd
-  fd creation and `UFFDIO_REGISTER_MODE_WP` confirmed on Ubuntu CI. Blocked by
-  wazero not exposing the raw linear-memory address — see wazero limitation note
-  under "SnapshotStrategy interface" in Completed section.
+- `UffdStrategy` (dirty-page restore) is behind `FUNCTION_WASM_USE_UFFD=true`
+  and uses an unofficial wazero internal (raw slice pointer from `mem.Read`).
+  Works on current wazero/linux but could break if wazero changes its memory
+  allocation strategy. Not tested in Docker (seccomp blocks uffd).
 
 ## Pending Work
 
@@ -110,8 +119,8 @@ restore on large modules.
 - [ ] Fix echo.wasm fixture (allocator state in linear memory, not global)
 - [x] userfaultfd dirty-page restore benchmark — `BenchmarkSnapshotRestore_FullMemcpy_3MB`
       measures restore cost at 3MB (54µs on this machine)
-- [ ] userfaultfd full dirty-page restore (wires uffd to actual WASM linear memory —
-      blocked by wazero limitation, see Completed section for details)
+- [x] userfaultfd full dirty-page restore — `UffdStrategy` implemented (experimental,
+      `FUNCTION_WASM_USE_UFFD=true`); uses `unsafe.SliceData` on wazero linear memory
 - [ ] numpy integration test (mount wasi-wheels output into Python sandbox)
 - [x] Pyodide/Node.js fallback path (scipy route) — subprocess mode, existing shimmy
       (state isolation via fresh namespace `exec(source, {})` per request; no memory snapshot)

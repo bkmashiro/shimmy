@@ -26,9 +26,13 @@ type wasmSupervisor struct {
 	adapter *wasmAdapter
 
 	// strategy implements the snapshot/restore mechanism. The default is
-	// FullMemcpyStrategy; on Linux with userfaultfd available a probe strategy
-	// is used instead.
+	// FullMemcpyStrategy; on Linux with userfaultfd available and useUffd=true,
+	// UffdStrategy is used for dirty-page tracking.
 	strategy SnapshotStrategy
+
+	// useUffd controls whether to attempt UffdStrategy on Start.
+	// When true and uffd is unavailable, falls back to FullMemcpyStrategy.
+	useUffd bool
 
 	timeout time.Duration
 	log     *zap.Logger
@@ -39,13 +43,14 @@ func newWasmSupervisor(
 	compiled wazero.CompiledModule,
 	modCfg wazero.ModuleConfig,
 	timeout time.Duration,
+	useUffd bool,
 	log *zap.Logger,
 ) *wasmSupervisor {
 	return &wasmSupervisor{
 		runtime:  rt,
 		compiled: compiled,
 		modCfg:   modCfg,
-		strategy: NewSnapshotStrategy(),
+		useUffd:  useUffd,
 		timeout:  timeout,
 		log:      log.Named("supervisor_wasm"),
 	}
@@ -74,8 +79,12 @@ func (s *wasmSupervisor) Start(ctx context.Context) error {
 	s.mod = mod
 	s.adapter = newWasmAdapter(mod, s.log)
 
+	// Select snapshot strategy now that memory is available.
+	s.strategy = s.selectStrategy(mod.Memory())
+
 	// Snapshot linear memory so we can restore it before each request.
 	if err := s.takeSnapshot(); err != nil {
+		_ = s.strategy.Close()
 		_ = mod.Close(ctx)
 		s.mod = nil
 		return fmt.Errorf("wasm: snapshot memory: %w", err)

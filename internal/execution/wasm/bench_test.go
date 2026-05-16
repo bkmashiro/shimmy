@@ -144,7 +144,7 @@ func BenchmarkSnapshotRestore_FullMemcpy(b *testing.B) {
 		WithSysWalltime().
 		WithSysNanotime()
 
-	sv := newWasmSupervisor(rt, compiled, modCfg, 5*time.Second, zap.NewNop())
+	sv := newWasmSupervisor(rt, compiled, modCfg, 5*time.Second, false, zap.NewNop())
 	require.NoError(b, sv.Start(ctx))
 	b.Cleanup(func() { _ = sv.Shutdown(ctx) })
 
@@ -339,6 +339,97 @@ func BenchmarkSnapshotRestore_FullMemcpy_3MB(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
+		if err := strategy.Restore(mem); err != nil {
+			b.Fatalf("Restore failed: %v", err)
+		}
+	}
+}
+
+// BenchmarkSnapshotRestore_Uffd_3MB benchmarks UffdStrategy at a realistic
+// module size (3 MB). Only dirty pages (~10% simulated) are restored.
+// The benchmark is skipped if uffd+WP is unavailable (Docker seccomp).
+//
+// Compare with BenchmarkSnapshotRestore_FullMemcpy_3MB to see the advantage
+// of dirty-page tracking: only ~10% of pages are written back per iteration.
+func BenchmarkSnapshotRestore_Uffd_3MB(b *testing.B) {
+	if !userfaultfdAvailable() {
+		b.Skip("userfaultfd syscall not available (seccomp or insufficient privileges)")
+	}
+
+	const targetMB = 3
+	const wasm64KBPages = targetMB * 1024 / 64 // 48 pages → 3 MB
+
+	wasmBin := buildMinimalMemoryModule(b, wasm64KBPages)
+
+	ctx := context.Background()
+	rt := wazero.NewRuntime(ctx)
+	b.Cleanup(func() { _ = rt.Close(ctx) })
+
+	compiled, err := rt.CompileModule(ctx, wasmBin)
+	require.NoError(b, err, "compile minimal 3MB module")
+	b.Cleanup(func() { _ = compiled.Close(ctx) })
+
+	modCfg := wazero.NewModuleConfig().WithName("")
+	mod, err := rt.InstantiateModule(ctx, compiled, modCfg)
+	require.NoError(b, err, "instantiate minimal 3MB module")
+	b.Cleanup(func() { _ = mod.Close(ctx) })
+
+	mem := mod.Memory()
+	require.NotNil(b, mem, "module must have linear memory")
+
+	strategy, err := NewUffdStrategy(mem)
+	if err != nil {
+		b.Skipf("NewUffdStrategy failed (uffd+WP unavailable): %v", err)
+	}
+	b.Cleanup(func() { _ = strategy.Close() })
+
+	require.NoError(b, strategy.Take(mem), "take initial snapshot")
+
+	memSize := int(mem.Size())
+	pageSize := strategy.pageSize
+	numPages := memSize / pageSize
+
+	// Pre-select ~10% of pages to simulate as dirty each iteration.
+	dirtyPages := make([]int, 0, numPages/10+1)
+	for p := 0; p < numPages; p += 10 {
+		dirtyPages = append(dirtyPages, p)
+	}
+
+	b.SetBytes(int64(memSize))
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		// Simulate writes on dirty pages: disarm WP, write, faultLoop re-arms.
+		// For benchmark isolation we directly mark pages dirty and do the write.
+		strategy.mu.Lock()
+		for _, pg := range dirtyPages {
+			if pg < len(strategy.dirty) {
+				strategy.dirty[pg] = true
+			}
+		}
+		strategy.mu.Unlock()
+
+		// Disarm WP for dirty pages so we can write without faults.
+		for _, pg := range dirtyPages {
+			off := uint32(pg * pageSize)
+			end := off + uint32(pageSize)
+			if end > uint32(memSize) {
+				end = uint32(memSize)
+			}
+			wp := uffdioWPStrategy{
+				uffdioRangeStrategy: uffdioRangeStrategy{
+					start: uint64(uintptr(strategy.basePtr)) + uint64(off),
+					len:   uint64(end - off),
+				},
+				mode: 0, // disarm
+			}
+			ioctlUffd(uintptr(strategy.uffdFd), ioctlUffdioWPStrategy, uintptr(unsafe.Pointer(&wp))) //nolint:errcheck
+			// Write zeros to the page to simulate guest activity.
+			mem.Write(off, make([]byte, end-off)) //nolint:errcheck
+		}
+
+		// Restore — only dirty pages.
 		if err := strategy.Restore(mem); err != nil {
 			b.Fatalf("Restore failed: %v", err)
 		}

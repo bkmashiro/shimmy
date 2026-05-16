@@ -41,6 +41,15 @@ type Config struct {
 	// AllowedEnv is a list of env var names the module may read.
 	// Empty means no env vars exposed.
 	AllowedEnv []string `conf:"wasm_allowed_env"`
+
+	// UseUffd enables userfaultfd write-protect dirty-page tracking for memory
+	// snapshot/restore. When true, only pages written by the guest since the
+	// last snapshot are restored, reducing restore cost for large modules.
+	// Requires Linux kernel with UFFD_FEATURE_PAGEFAULT_FLAG_WP support and a
+	// permissive seccomp profile (not available under Docker's default profile).
+	// Falls back to FullMemcpyStrategy automatically if uffd is unavailable.
+	// Populated from FUNCTION_WASM_USE_UFFD=true.
+	UseUffd bool `conf:"use_uffd"`
 }
 
 // applyDefaults fills in zero-value fields with sensible defaults.
@@ -67,6 +76,9 @@ func (c *Config) applyEnv() {
 	}
 	if v := os.Getenv("FUNCTION_WASM_ALLOWED_ENV"); v != "" {
 		c.AllowedEnv = splitNonEmpty(v, ",")
+	}
+	if v := os.Getenv("FUNCTION_WASM_USE_UFFD"); v == "true" || v == "1" {
+		c.UseUffd = true
 	}
 }
 

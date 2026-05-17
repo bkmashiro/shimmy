@@ -1,0 +1,208 @@
+name: End-to-End Tests
+
+on:
+  push:
+    paths:
+      - "**.go"
+      - "examples/**"
+      - ".github/workflows/e2e.yml"
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  e2e-wasm-go:
+    name: E2E / Go WASM reactor
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ./go.mod
+
+      - name: Install Dependencies
+        run: go mod download
+
+      - name: Build shimmy
+        run: go build -o /tmp/shimmy .
+
+      - name: Start shimmy (WASM backend)
+        env:
+          FUNCTION_INTERFACE: wasm
+          FUNCTION_WASM_MODULE: ${{ github.workspace }}/examples/eval-go/eval.wasm
+          LOG_LEVEL: info
+        run: /tmp/shimmy serve --port 18080 &
+
+      - name: Wait for server
+        run: |
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost:18080/health > /dev/null 2>&1; then
+              echo "Server ready after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+          curl -sf http://localhost:18080/health || (echo "Server did not start" && exit 1)
+
+      - name: Health check
+        run: |
+          RESP=$(curl -sf http://localhost:18080/health)
+          echo "Response: $RESP"
+          echo "$RESP" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          assert d.get('status') == 'ok', f'expected status=ok, got {d}'
+          print('PASS: health check')
+          "
+
+      - name: Eval — correct answer
+        run: |
+          RESP=$(curl -sf -X POST http://localhost:18080/ \
+            -H 'Content-Type: application/json' \
+            -d '{"response":"hello","answer":"hello"}')
+          echo "Response: $RESP"
+          echo "$RESP" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          result = d.get('result', d)
+          assert result.get('is_correct') == True, f'expected is_correct=true, got {result}'
+          print('PASS: correct answer returns is_correct=true')
+          "
+
+      - name: Eval — incorrect answer
+        run: |
+          RESP=$(curl -sf -X POST http://localhost:18080/ \
+            -H 'Content-Type: application/json' \
+            -d '{"response":"hello","answer":"world"}')
+          echo "Response: $RESP"
+          echo "$RESP" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          result = d.get('result', d)
+          assert result.get('is_correct') == False, f'expected is_correct=false, got {result}'
+          print('PASS: incorrect answer returns is_correct=false')
+          "
+
+      - name: Preview method
+        run: |
+          RESP=$(curl -sf -X POST http://localhost:18080/ \
+            -H 'Content-Type: application/json' \
+            -H 'Command: preview' \
+            -d '{"response":"hello","answer":"world"}')
+          echo "Response: $RESP"
+          echo "$RESP" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          result = d.get('result', d)
+          # preview should return a result (not an error)
+          assert 'error' not in d or d.get('result') is not None, f'preview returned error: {d}'
+          print('PASS: preview method dispatched without error')
+          "
+
+      - name: Healthcheck method
+        run: |
+          RESP=$(curl -sf -X POST http://localhost:18080/ \
+            -H 'Content-Type: application/json' \
+            -H 'Command: healthcheck' \
+            -d '{"response":"x","answer":"x"}')
+          echo "Response: $RESP"
+          echo "$RESP" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          result = d.get('result', d)
+          assert result.get('status') == 'ok', f'expected healthcheck status=ok, got {result}'
+          print('PASS: healthcheck returns status=ok')
+          "
+
+  e2e-python-wasm:
+    name: E2E / CPython-WASI resident
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ./go.mod
+
+      - name: Install Dependencies
+        run: go mod download
+
+      - name: Build shimmy
+        run: go build -o /tmp/shimmy .
+
+      - name: Start shimmy (python-wasm backend)
+        env:
+          FUNCTION_INTERFACE: python-wasm
+          FUNCTION_WASM_MODULE: ${{ github.workspace }}/internal/execution/wasm/testdata/python.wasm
+          FUNCTION_WASM_PYTHON_SCRIPT: ${{ github.workspace }}/examples/eval-python/eval.py
+          LOG_LEVEL: info
+        run: /tmp/shimmy serve --port 18081 &
+
+      - name: Wait for server (Python startup ~8s)
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:18081/health > /dev/null 2>&1; then
+              echo "Server ready after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+          curl -sf http://localhost:18081/health || (echo "Server did not start within 60s" && exit 1)
+
+      - name: Health check
+        run: |
+          RESP=$(curl -sf http://localhost:18081/health)
+          echo "Response: $RESP"
+          echo "$RESP" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          assert d.get('status') == 'ok', f'expected status=ok, got {d}'
+          print('PASS: health check')
+          "
+
+      - name: Eval — correct answer
+        run: |
+          RESP=$(curl -sf -X POST http://localhost:18081/ \
+            -H 'Content-Type: application/json' \
+            -d '{"response":"1.0","answer":"1.0"}')
+          echo "Response: $RESP"
+          echo "$RESP" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          result = d.get('result', d)
+          assert result.get('is_correct') == True, f'expected is_correct=true, got {result}'
+          print('PASS: correct answer')
+          "
+
+      - name: Eval — incorrect answer
+        run: |
+          RESP=$(curl -sf -X POST http://localhost:18081/ \
+            -H 'Content-Type: application/json' \
+            -d '{"response":"1.5","answer":"1.0"}')
+          echo "Response: $RESP"
+          echo "$RESP" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          result = d.get('result', d)
+          assert result.get('is_correct') == False, f'expected is_correct=false, got {result}'
+          print('PASS: incorrect answer')
+          "
+
+      - name: Preview method
+        run: |
+          RESP=$(curl -sf -X POST http://localhost:18081/ \
+            -H 'Content-Type: application/json' \
+            -H 'Command: preview' \
+            -d '{"response":"1.5","answer":"1.0"}')
+          echo "Response: $RESP"
+          echo "$RESP" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          result = d.get('result', d)
+          assert 'preview' in result, f'expected preview field in result, got {result}'
+          print('PASS: preview returns preview field')
+          "

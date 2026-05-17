@@ -39,14 +39,15 @@ func NewDispatcher(cfg Config, log *zap.Logger) *Dispatcher {
 // Start reads and compiles the .wasm file, sets up WASI host functions, and
 // pre-warms the supervisor pool.
 func (d *Dispatcher) Start(ctx context.Context) error {
-	if d.cfg.ModulePath == "" {
-		return fmt.Errorf("wasm: ModulePath must be set (FUNCTION_COMMAND)")
-	}
-
-	// Pick up sandbox overrides from FUNCTION_WASM_* env vars, then apply
+	// Pick up sandbox overrides from FUNCTION_WASM_* env vars (including
+	// FUNCTION_WASM_MODULE as an alternative to FUNCTION_COMMAND), then apply
 	// sensible defaults for any fields still at their zero values.
 	d.cfg.applyEnv()
 	d.cfg.applyDefaults()
+
+	if d.cfg.ModulePath == "" {
+		return fmt.Errorf("wasm: ModulePath must be set (FUNCTION_COMMAND or FUNCTION_WASM_MODULE)")
+	}
 
 	maxInstances := d.cfg.MaxInstances
 	if maxInstances <= 0 {

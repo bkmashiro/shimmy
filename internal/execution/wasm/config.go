@@ -71,6 +71,10 @@ func (c *Config) applyDefaults() {
 // This allows operators to configure sandbox limits without threading them
 // through the full koanf config chain.
 func (c *Config) applyEnv() {
+	// FUNCTION_WASM_MODULE overrides FUNCTION_COMMAND as the .wasm file path.
+	if v := os.Getenv("FUNCTION_WASM_MODULE"); v != "" {
+		c.ModulePath = v
+	}
 	if v := os.Getenv("FUNCTION_WASM_MAX_MEMORY_PAGES"); v != "" {
 		if n, err := strconv.ParseUint(v, 10, 32); err == nil {
 			c.MaxMemoryPages = uint32(n)

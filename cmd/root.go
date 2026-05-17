@@ -58,7 +58,8 @@ functions on arbitrary, serverless platforms.`
 				Usage:    "the command to invoke to start the worker process.",
 				Category: "function",
 				EnvVars:  []string{"FUNCTION_COMMAND"},
-				Required: true,
+				// Not required for wasm / python-wasm interfaces which manage
+				// the worker process internally via wazero.
 			},
 			&cli.StringFlag{
 				Name:     "cwd",

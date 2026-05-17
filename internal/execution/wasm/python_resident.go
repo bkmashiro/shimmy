@@ -18,28 +18,45 @@ package wasm
 // WASI fd_read/fd_write host functions are Go functions that can block, we
 // run the WASM module in a dedicated goroutine and communicate via channels.
 //
+// # Memory Snapshot / Restore
+//
+// After Python signals __READY__ (just before blocking in readline() at the
+// top of the server loop for the first time), the host takes a snapshot of
+// WASM linear memory. After every request, when Python has written __DONE__
+// and is about to block in readline() again, the host restores the snapshot.
+//
+// Why this is safe: the WASM goroutine is blocked inside Go's os.File.Read()
+// (called by wazero's fd_read host function). At that moment:
+//
+//   - The goroutine's Go stack holds wazero's interpreter state (instruction
+//     pointer, value stack) as Go local variables — these are NOT affected by
+//     our memory write.
+//   - The iov buffer address (where wazero will write the next stdin bytes)
+//     was captured into wazero's Go stack frame before the goroutine blocked,
+//     so our memory restore does not change it.
+//   - The CPython C-stack depth at each readline() block is identical (same
+//     call path through the server loop every time), so the restored C stack
+//     is consistent with the goroutine's saved interpreter state.
+//
+// The net effect: the next request executes against the pristine post-init
+// CPython heap — sys.modules, global variables, and all other interpreter
+// state are reset between requests.
+//
 // # Performance
 //
 // Initialization cost: ~7-8 s (Python startup + server loop import)
-// Per-request cost: ~10-50 ms (Python script execution only, no startup)
+// Per-request cost: ~10-50 ms (script execution) + ~3-5 ms (memory restore)
 //
-// This is a 5-15x speedup over PythonRunner (~163 ms per request), primarily
-// because Python initialization (importing sys, json, cpython internals) is
-// done once.
+// # Wire format
 //
-// # Script format
+// Request (one JSON line on stdin):
 //
-// The server loop expects one JSON request per line on stdin:
+//	{"script": "<python_source>", "method": "eval|preview", "input": {...}}
 //
-//	{"script": "<python_source>", "input": {...}}
+// Response (two lines on stdout):
 //
-// And writes one JSON response per line on stdout:
-//
-//	{"is_correct": true, "feedback": "..."}
-//
-// OR an error response:
-//
-//	{"error": "..."}
+//	{"is_correct": true, ...}\n
+//	__DONE__\n
 
 import (
 	"bufio"
@@ -49,28 +66,33 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tetratelabs/wazero"
+	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 	"github.com/tetratelabs/wazero/sys"
 	"go.uber.org/zap"
 )
 
-// residentServerScript is the Python server loop that runs inside the WASM module.
-// It reads one JSON request per line, executes the script, and writes the result.
+// residentServerScript is the Python server loop that runs inside the WASM
+// module. Protocol:
 //
-// Wire format (request):
+//  1. On startup: writes "__READY__\n" to stdout, then blocks in readline().
+//     The host takes a memory snapshot at this point.
 //
-//	{"script": "<python_source>", "method": "eval|preview|healthcheck", "input": {...}}
-//
-// method defaults to "eval" if absent.
-// For "eval"  — calls evaluation_function(response, answer, params)
-// For "preview" — calls preview_function(response, answer, params) if defined,
-//
-//	otherwise falls back to evaluation_function
+//  2. Per request: reads one JSON line, executes the script, writes the JSON
+//     result followed by "__DONE__\n". The host restores the memory snapshot
+//     after seeing __DONE__.
 const residentServerScript = `import sys, json
+
+# Signal that CPython is initialised and the server loop is about to start.
+# The host takes a memory snapshot after receiving this line.
+sys.stdout.write("__READY__\n")
+sys.stdout.flush()
 
 while True:
     try:
@@ -86,7 +108,7 @@ while True:
     try:
         req = json.loads(line)
     except Exception as e:
-        sys.stdout.write(json.dumps({"error": f"json parse error: {e}"}) + "\n")
+        sys.stdout.write(json.dumps({"error": f"json parse error: {e}"}) + "\n__DONE__\n")
         sys.stdout.flush()
         continue
     script_src = req.get("script", "")
@@ -109,7 +131,7 @@ while True:
                 result = fn(input_data.get("response"), input_data.get("answer"), input_data.get("params", {}))
     except Exception as e:
         result = {"error": str(e)}
-    sys.stdout.write(json.dumps(result) + "\n")
+    sys.stdout.write(json.dumps(result) + "\n__DONE__\n")
     sys.stdout.flush()
 `
 
@@ -128,14 +150,26 @@ type ResidentPythonRunner struct {
 	initialized bool
 	closed      bool
 
-	// Communication pipes
-	stdinWriter  io.WriteCloser  // host writes requests here → Python reads stdin
-	stdoutReader io.ReadCloser   // host reads responses here ← Python writes stdout
-	stdoutScanner *bufio.Scanner // line-by-line reader
+	// WASM runtime — kept alive for the duration so we can access the module
+	// from outside the WASM goroutine. Closed by Shutdown (not by the goroutine).
+	rt      wazero.Runtime
+	modName string // unique name for rt.Module() lookup
 
-	// Background WASM goroutine
-	runErr  chan error // receives WASM exit error (or nil on clean exit)
-	cancel  context.CancelFunc
+	// Snapshot state — set during Init after __READY__, used by SendRequest.
+	wasmMod          api.Module // live module reference (for memory access)
+	memSnapshot      []byte     // copy of linear memory at __READY__ time
+	snapStackPointer uint64     // value of __stack_pointer global at snapshot time
+
+	// Communication pipes
+	stdinWriter   io.WriteCloser  // host writes requests here → Python reads stdin
+	stdoutReader  io.ReadCloser   // host reads responses here ← Python writes stdout
+	stdoutScanner *bufio.Scanner  // line-by-line reader
+
+	// Background WASM goroutine error tracking.
+	// runErr is set atomically when the WASM goroutine exits; exitCh is closed.
+	runErrVal atomic.Pointer[error]
+	exitCh    chan struct{}
+	cancel    context.CancelFunc
 }
 
 // NewResidentPythonRunner creates a ResidentPythonRunner.
@@ -146,15 +180,15 @@ func NewResidentPythonRunner(wasmPath string, cfg Config, log *zap.Logger) *Resi
 		wasmPath: wasmPath,
 		cfg:      cfg,
 		log:      log.Named("resident_python"),
+		exitCh:   make(chan struct{}),
 	}
 }
 
-// Init compiles python.wasm, instantiates the server-loop module, and waits
-// for Python to finish initializing (indicated by the server loop being ready
-// to accept requests).
+// Init compiles python.wasm, instantiates the server-loop module, waits for
+// Python to signal __READY__, then takes a linear-memory snapshot.
 //
 // This is the expensive step (~7-8 s). After Init returns, SendRequest calls
-// are fast (<50 ms each).
+// are fast and each begins from a clean interpreter state.
 func (r *ResidentPythonRunner) Init(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -174,57 +208,54 @@ func (r *ResidentPythonRunner) Init(ctx context.Context) error {
 	}
 
 	// Create stdin/stdout pipes.
-	// stdinR → Python stdin (WASM reads from this)
-	// stdinW → host writes requests to this
-	stdinR, stdinW := io.Pipe()
-	// stdoutR → host reads responses from this
-	// stdoutW → Python stdout (WASM writes to this)
-	stdoutR, stdoutW := io.Pipe()
+	stdinR, stdinW := io.Pipe()   // Python reads from stdinR; host writes to stdinW
+	stdoutR, stdoutW := io.Pipe() // Python writes to stdoutW; host reads from stdoutR
 
 	r.stdinWriter = stdinW
 	r.stdoutReader = stdoutR
 	r.stdoutScanner = bufio.NewScanner(stdoutR)
 
-	// Create runtime.
+	// Create runtime — stored in struct so Shutdown can close it.
 	rtCfg := wazero.NewRuntimeConfig()
 	if r.cfg.MaxMemoryPages > 0 {
 		rtCfg = rtCfg.WithMemoryLimitPages(r.cfg.MaxMemoryPages)
 	}
-
-	rt := wazero.NewRuntimeWithConfig(ctx, rtCfg)
+	r.rt = wazero.NewRuntimeWithConfig(ctx, rtCfg)
 
 	// Compile module.
 	r.log.Info("compiling python.wasm (this takes ~1-2 s)")
-	compiled, err := rt.CompileModule(ctx, wasmBytes)
+	compiled, err := r.rt.CompileModule(ctx, wasmBytes)
 	if err != nil {
-		_ = rt.Close(ctx)
+		_ = r.rt.Close(ctx)
+		r.rt = nil
 		return fmt.Errorf("resident python: compile: %w", err)
 	}
 
 	// Install WASI.
-	if _, err := wasi_snapshot_preview1.Instantiate(ctx, rt); err != nil {
+	if _, err := wasi_snapshot_preview1.Instantiate(ctx, r.rt); err != nil {
 		_ = compiled.Close(ctx)
-		_ = rt.Close(ctx)
+		_ = r.rt.Close(ctx)
+		r.rt = nil
 		return fmt.Errorf("resident python: instantiate wasi: %w", err)
 	}
 
-	// Build stderr capture for debugging.
-	var stderrBuf bytes.Buffer
+	// Give the module a unique name so we can retrieve it via rt.Module().
+	r.modName = fmt.Sprintf("python-resident-%d", time.Now().UnixNano())
 
+	var stderrBuf bytes.Buffer
 	mc := wazero.NewModuleConfig().
 		WithArgs("python3", "-c", residentServerScript).
+		WithName(r.modName).
 		WithStdin(stdinR).
 		WithStdout(stdoutW).
 		WithStderr(&stderrBuf).
 		WithSysNanosleep().
 		WithSysWalltime().
-		WithSysNanotime().
-		WithName("")
+		WithSysNanotime()
 
 	// Run the WASM module in a background goroutine.
 	runCtx, cancel := context.WithCancel(context.Background())
 	r.cancel = cancel
-	r.runErr = make(chan error, 1)
 
 	r.log.Info("starting Python server loop (background goroutine)")
 	go func() {
@@ -232,107 +263,73 @@ func (r *ResidentPythonRunner) Init(ctx context.Context) error {
 			_ = stdoutW.Close()
 			_ = stdinR.Close()
 			_ = compiled.Close(context.Background())
-			_ = rt.Close(context.Background())
+			// Note: r.rt is NOT closed here; Shutdown() is responsible.
+			close(r.exitCh)
 		}()
 
-		_, runErr := rt.InstantiateModule(runCtx, compiled, mc)
+		_, runErr := r.rt.InstantiateModule(runCtx, compiled, mc)
 		if runErr != nil {
 			if exitErr, ok := runErr.(*sys.ExitError); ok && exitErr.ExitCode() == 0 {
-				r.runErr <- nil
 				return
 			}
 			r.log.Error("python WASM exited with error",
 				zap.Error(runErr),
 				zap.String("stderr", stderrBuf.String()),
 			)
-			r.runErr <- runErr
-			return
+			r.runErrVal.Store(&runErr)
 		}
-		r.runErr <- nil
 	}()
 
-	// Wait for Python to be ready. Python prints nothing during startup, so
-	// we just wait a moment to let initialization complete. We use a "ping"
-	// mechanism: send a dummy request and wait for a response.
-	r.log.Info("waiting for Python to initialize...")
+	// Wait for Python to emit __READY__ (indicates server loop is about to
+	// block in readline() for the first time).
+	r.log.Info("waiting for Python to signal __READY__ (~7-8 s)...")
 
-	// Try sending a no-op request to check readiness.
 	readyCtx, readyCancel := context.WithTimeout(ctx, 120*time.Second)
 	defer readyCancel()
 
-	pingScript := `def evaluation_function(response, answer, params=None): return {"is_correct": True, "feedback": "ready"}`
-	pingReq, _ := json.Marshal(map[string]any{
-		"script": pingScript,
-		"method": "eval",
-		"input":  map[string]string{"response": "x", "answer": "x"},
-	})
-	pingLine := string(pingReq) + "\n"
-
-	// Write ping with a write deadline.
-	writeDone := make(chan error, 1)
-	go func() {
-		_, err := io.WriteString(stdinW, pingLine)
-		writeDone <- err
-	}()
-
-	select {
-	case werr := <-writeDone:
-		if werr != nil {
-			_ = r.cleanup()
-			return fmt.Errorf("resident python: write ping: %w", werr)
-		}
-	case <-readyCtx.Done():
+	readyLine, err := r.scanLineWithContext(readyCtx)
+	if err != nil {
 		_ = r.cleanup()
-		return fmt.Errorf("resident python: timeout waiting to send ping: %w", readyCtx.Err())
-	case runErr := <-r.runErr:
+		return fmt.Errorf("resident python: waiting for __READY__: %w", err)
+	}
+	if readyLine != "__READY__" {
 		_ = r.cleanup()
-		return fmt.Errorf("resident python: WASM exited during init: %v", runErr)
+		return fmt.Errorf("resident python: expected __READY__, got %q", readyLine)
+	}
+	r.log.Info("Python signalled __READY__")
+
+	// At this point Python has written __READY__ and is executing the next
+	// statement (sys.stdin.readline()). Give the WASM goroutine time to enter
+	// os.File.Read() before we take the snapshot.
+	runtime.Gosched()
+	time.Sleep(10 * time.Millisecond)
+
+	// Retrieve the live module from the runtime.
+	r.wasmMod = r.rt.Module(r.modName)
+	if r.wasmMod == nil {
+		_ = r.cleanup()
+		return fmt.Errorf("resident python: module %q not found in runtime after __READY__", r.modName)
 	}
 
-	// Read ping response with a deadline.
-	respDone := make(chan string, 1)
-	respErr := make(chan error, 1)
-	go func() {
-		if r.stdoutScanner.Scan() {
-			respDone <- r.stdoutScanner.Text()
-		} else {
-			if err := r.stdoutScanner.Err(); err != nil {
-				respErr <- err
-			} else {
-				respErr <- io.EOF
-			}
-		}
-	}()
-
-	select {
-	case line := <-respDone:
-		r.log.Info("Python ready", zap.String("ping_response", line))
-	case err := <-respErr:
+	// Take the initial memory snapshot.
+	if err := r.takeSnapshot(); err != nil {
 		_ = r.cleanup()
-		return fmt.Errorf("resident python: ping response error: %w", err)
-	case <-readyCtx.Done():
-		_ = r.cleanup()
-		return fmt.Errorf("resident python: timeout waiting for ping response: %w", readyCtx.Err())
-	case runErr := <-r.runErr:
-		_ = r.cleanup()
-		return fmt.Errorf("resident python: WASM exited during ping: %v", runErr)
+		return fmt.Errorf("resident python: initial snapshot: %w", err)
 	}
+
+	memMB := float64(len(r.memSnapshot)) / (1024 * 1024)
+	r.log.Info("memory snapshot taken",
+		zap.Float64("snapshot_mb", memMB),
+	)
 
 	r.initialized = true
 	r.log.Info("ResidentPythonRunner initialized successfully")
 	return nil
 }
 
-// SendRequest sends a script + input to the resident Python interpreter and
-// returns the parsed JSON result.
-//
-// The request is:
-//
-//	{"script": "<python_source>", "input": <inputJSON>}
-//
-// The response is parsed as a map.
-// SendRequest sends a script + method + input to the resident Python interpreter.
-// method should be "eval" or "preview"; defaults to "eval" inside the server loop.
+// SendRequest sends a script + method + input to the resident Python
+// interpreter. After receiving the response, it restores the memory snapshot
+// so the next request begins from a clean state.
 func (r *ResidentPythonRunner) SendRequest(ctx context.Context, script, method, inputJSON string) (map[string]any, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -341,13 +338,11 @@ func (r *ResidentPythonRunner) SendRequest(ctx context.Context, script, method, 
 		return nil, fmt.Errorf("resident python: not initialized — call Init first")
 	}
 
-	// Apply per-request timeout.
 	reqTimeout := r.cfg.Timeout
 	if reqTimeout == 0 {
 		reqTimeout = 30 * time.Second
 	}
 
-	// Build request JSON.
 	if method == "" {
 		method = "eval"
 	}
@@ -371,63 +366,162 @@ func (r *ResidentPythonRunner) SendRequest(ctx context.Context, script, method, 
 		writeDone <- err
 	}()
 
+	writeCtx, writeCancel := context.WithTimeout(ctx, reqTimeout)
+	defer writeCancel()
+
 	select {
 	case werr := <-writeDone:
 		if werr != nil {
 			return nil, fmt.Errorf("resident python: write request: %w", werr)
 		}
-	case <-ctx.Done():
+	case <-writeCtx.Done():
 		return nil, fmt.Errorf("resident python: context cancelled during write: %w", ctx.Err())
-	case runErr := <-r.runErr:
-		return nil, fmt.Errorf("resident python: WASM exited during request: %v", runErr)
+	case <-r.exitCh:
+		return nil, r.wrapRunErr("WASM exited during request write")
 	}
 
-	// Read one response line from Python's stdout.
+	// Read the JSON response line.
 	r.log.Debug("SendRequest: waiting for response")
-	respDone := make(chan string, 1)
-	respErr := make(chan error, 1)
+	respCtx, respCancel := context.WithTimeout(ctx, reqTimeout)
+	defer respCancel()
+
+	jsonLine, err := r.scanLineWithContext(respCtx)
+	if err != nil {
+		return nil, fmt.Errorf("resident python: read response: %w", err)
+	}
+	r.log.Debug("SendRequest: got response", zap.String("line", jsonLine))
+
+	// Read the __DONE__ sentinel.
+	doneCtx, doneCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer doneCancel()
+
+	doneLine, err := r.scanLineWithContext(doneCtx)
+	if err != nil {
+		return nil, fmt.Errorf("resident python: read __DONE__: %w", err)
+	}
+	if doneLine != "__DONE__" {
+		return nil, fmt.Errorf("resident python: expected __DONE__, got %q", doneLine)
+	}
+
+	// Python has written __DONE__ and is calling readline() again.
+	// Give it time to enter os.File.Read() before we restore memory.
+	runtime.Gosched()
+	time.Sleep(2 * time.Millisecond)
+
+	// Restore memory snapshot — resets CPython heap to post-init state.
+	if err := r.restoreSnapshot(); err != nil {
+		r.log.Error("failed to restore memory snapshot", zap.Error(err))
+		// Non-fatal for this request but runner state is now dirty.
+	}
+
+	// Parse and return result.
+	result, err := parseJSONResponse(jsonLine)
+	if err != nil {
+		return nil, fmt.Errorf("resident python: parse response: %w; raw: %.200s", err, jsonLine)
+	}
+	if errMsg, ok := result["error"].(string); ok {
+		return nil, fmt.Errorf("resident python script error: %s", errMsg)
+	}
+	return result, nil
+}
+
+// takeSnapshot captures WASM linear memory into r.memSnapshot.
+// Also saves mutable exported globals (e.g. __stack_pointer).
+// Must be called with r.mu held.
+func (r *ResidentPythonRunner) takeSnapshot() error {
+	mem := r.wasmMod.Memory()
+	if mem == nil {
+		return nil
+	}
+	size := mem.Size()
+	if size == 0 {
+		return nil
+	}
+	buf, ok := mem.Read(0, size)
+	if !ok {
+		return fmt.Errorf("snapshot: could not read %d bytes of linear memory", size)
+	}
+	r.memSnapshot = make([]byte, len(buf))
+	copy(r.memSnapshot, buf)
+
+	// Save __stack_pointer so restoreSnapshot can reset it explicitly.
+	if sp := r.wasmMod.ExportedGlobal("__stack_pointer"); sp != nil {
+		r.snapStackPointer = sp.Get()
+	}
+	return nil
+}
+
+// restoreSnapshot writes r.memSnapshot back into WASM linear memory.
+// Must be called with r.mu held and only when the WASM goroutine is blocked
+// in os.File.Read() (i.e., Python is waiting in readline()).
+func (r *ResidentPythonRunner) restoreSnapshot() error {
+	if r.memSnapshot == nil || r.wasmMod == nil {
+		return nil
+	}
+	mem := r.wasmMod.Memory()
+	if mem == nil {
+		return nil
+	}
+	if !mem.Write(0, r.memSnapshot) {
+		return fmt.Errorf("snapshot: failed to restore %d bytes of linear memory", len(r.memSnapshot))
+	}
+
+	// Restore __stack_pointer if it is a mutable exported global.
+	// The stack pointer must be at its snapshot value for the CPython C stack
+	// to be consistent with the restored heap.
+	if sp := r.wasmMod.ExportedGlobal("__stack_pointer"); sp != nil {
+		if mg, ok := sp.(api.MutableGlobal); ok {
+			// Re-read the snapshot value from the saved memory.
+			// (We snapshot globals implicitly: at __READY__ time Python's
+			// C stack is at the same depth as after each __DONE__, so the
+			// __stack_pointer value should be identical — but we restore it
+			// explicitly for correctness.)
+			mg.Set(r.snapStackPointer)
+		}
+	}
+	return nil
+}
+
+// scanLineWithContext reads one line from stdoutScanner, aborting if the
+// context expires or the WASM goroutine exits.
+func (r *ResidentPythonRunner) scanLineWithContext(ctx context.Context) (string, error) {
+	type scanResult struct {
+		line string
+		err  error
+	}
+	ch := make(chan scanResult, 1)
 	go func() {
 		if r.stdoutScanner.Scan() {
-			respDone <- r.stdoutScanner.Text()
+			ch <- scanResult{line: r.stdoutScanner.Text()}
 		} else {
-			if err := r.stdoutScanner.Err(); err != nil {
-				respErr <- err
-			} else {
-				respErr <- io.EOF
+			err := r.stdoutScanner.Err()
+			if err == nil {
+				err = io.EOF
 			}
+			ch <- scanResult{err: err}
 		}
 	}()
 
-	deadline := time.After(reqTimeout)
 	select {
-	case line := <-respDone:
-		r.log.Debug("SendRequest: got response", zap.String("line", line))
-		result, err := parseJSONResponse(line)
-		if err != nil {
-			return nil, fmt.Errorf("resident python: parse response: %w; raw: %.200s", err, line)
-		}
-		// Check for Python-level errors.
-		if errMsg, ok := result["error"].(string); ok {
-			return nil, fmt.Errorf("resident python script error: %s", errMsg)
-		}
-		return result, nil
-
-	case err := <-respErr:
-		return nil, fmt.Errorf("resident python: read response: %w", err)
-
-	case <-deadline:
-		return nil, fmt.Errorf("resident python: request timed out after %v", reqTimeout)
-
+	case res := <-ch:
+		return res.line, res.err
 	case <-ctx.Done():
-		return nil, fmt.Errorf("resident python: context cancelled: %w", ctx.Err())
-
-	case runErr := <-r.runErr:
-		return nil, fmt.Errorf("resident python: WASM exited during request: %v", runErr)
+		return "", fmt.Errorf("context: %w", ctx.Err())
+	case <-r.exitCh:
+		return "", r.wrapRunErr("WASM goroutine exited")
 	}
 }
 
+// wrapRunErr constructs an error from the stored WASM exit error (if any).
+func (r *ResidentPythonRunner) wrapRunErr(msg string) error {
+	if p := r.runErrVal.Load(); p != nil && *p != nil {
+		return fmt.Errorf("resident python: %s: %w", msg, *p)
+	}
+	return fmt.Errorf("resident python: %s", msg)
+}
+
 // cleanup closes all pipes and cancels the background goroutine.
-// Must be called with mu held.
+// Must be called with r.mu held.
 func (r *ResidentPythonRunner) cleanup() error {
 	if r.cancel != nil {
 		r.cancel()
@@ -446,7 +540,7 @@ func (r *ResidentPythonRunner) cleanup() error {
 	return nil
 }
 
-// Shutdown closes the stdin pipe (causing Python to see EOF and exit cleanly),
+// Shutdown closes stdin (causing Python to see EOF and exit cleanly),
 // waits for the WASM goroutine to finish, then closes the runtime.
 func (r *ResidentPythonRunner) Shutdown(ctx context.Context) error {
 	r.mu.Lock()
@@ -458,33 +552,37 @@ func (r *ResidentPythonRunner) Shutdown(ctx context.Context) error {
 		return nil
 	}
 
-	// Close stdin → Python sees EOF → server loop exits → proc_exit.
+	// Close stdin → Python sees EOF → server loop exits.
 	if r.stdinWriter != nil {
 		_ = r.stdinWriter.Close()
 		r.stdinWriter = nil
 	}
 
-	// Cancel context to unblock any blocked WASM operations.
 	if r.cancel != nil {
 		r.cancel()
 		r.cancel = nil
 	}
 
-	// Wait for WASM goroutine to finish.
-	if r.runErr != nil {
-		select {
-		case <-r.runErr:
-		case <-ctx.Done():
-			r.log.Warn("timeout waiting for WASM goroutine to finish")
-		case <-time.After(10 * time.Second):
-			r.log.Warn("timeout waiting for WASM goroutine to finish")
-		}
-		r.runErr = nil
+	// Wait for WASM goroutine to exit.
+	select {
+	case <-r.exitCh:
+	case <-ctx.Done():
+		r.log.Warn("timeout waiting for WASM goroutine to finish")
+	case <-time.After(10 * time.Second):
+		r.log.Warn("timeout waiting for WASM goroutine to finish")
 	}
 
 	if r.stdoutReader != nil {
 		_ = r.stdoutReader.Close()
 		r.stdoutReader = nil
+	}
+
+	// Close the runtime now that the module has exited.
+	if r.rt != nil {
+		if err := r.rt.Close(ctx); err != nil {
+			r.log.Warn("error closing wazero runtime", zap.Error(err))
+		}
+		r.rt = nil
 	}
 
 	r.initialized = false

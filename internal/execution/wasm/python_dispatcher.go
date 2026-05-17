@@ -148,7 +148,7 @@ func (d *PythonDispatcher) Send(ctx context.Context, method string, params map[s
 		return nil, fmt.Errorf("python-wasm: marshal params: %w", err)
 	}
 
-	result, err := runner.SendRequest(ctx, d.script, string(inputJSON))
+	result, err := runner.SendRequest(ctx, d.script, method, string(inputJSON))
 	if err != nil {
 		return nil, fmt.Errorf("python-wasm: send request: %w", err)
 	}

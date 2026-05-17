@@ -109,7 +109,7 @@ func TestResidentPythonRunner_Basic(t *testing.T) {
 			reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
 
-			result, err := runner.SendRequest(reqCtx, script, tc.input)
+			result, err := runner.SendRequest(reqCtx, script, "eval", tc.input)
 			require.NoError(t, err, "SendRequest #%d should not fail", i+1)
 			require.NotNil(t, result)
 
@@ -147,7 +147,7 @@ def evaluation_function(response, answer, params=None):
 `
 
 	for i := 1; i <= 3; i++ {
-		result, err := runner.SendRequest(ctx, counterScript, `{"response": "x", "answer": "x"}`)
+		result, err := runner.SendRequest(ctx, counterScript, "eval", `{"response": "x", "answer": "x"}`)
 		require.NoError(t, err, "SendRequest #%d", i)
 		t.Logf("result[%d]: %v", i, result)
 
@@ -206,7 +206,7 @@ func BenchmarkResidentPythonRunner_SendRequest(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		reqCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		_, err := runner.SendRequest(reqCtx, script, input)
+		_, err := runner.SendRequest(reqCtx, script, "eval", input)
 		cancel()
 		if err != nil {
 			b.Fatalf("SendRequest failed at iteration %d: %v", i, err)

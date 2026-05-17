@@ -142,7 +142,29 @@ function writeMessage(obj) {
  * @returns {object}        Result object to return to shimmy
  */
 function dispatchEval(source, method, params) {
-  // Build a wrapper that defines evaluationFunction from source, then calls it.
+  // Execute the user's source in a fresh scope.  For "preview" requests we
+  // prefer previewFunction() if the user defined it; otherwise we fall back to
+  // evaluationFunction() — mirroring the Python runner's behaviour.
+  var r = params.response !== undefined ? params.response : null;
+  var a = params.answer !== undefined ? params.answer : null;
+  var p = params.params || {};
+
+  if (method === "preview") {
+    var previewWrapper = new Function(
+      "__response__",
+      "__answer__",
+      "__params__",
+      source +
+        "\n" +
+        "if (typeof previewFunction === 'function') {" +
+        "  return previewFunction(__response__, __answer__, __params__);" +
+        "}" +
+        "return evaluationFunction(__response__, __answer__, __params__);"
+    );
+    return previewWrapper(r, a, p);
+  }
+
+  // Default: call evaluationFunction.
   var wrapper = new Function(
     "__response__",
     "__answer__",
@@ -151,14 +173,7 @@ function dispatchEval(source, method, params) {
       "\n" +
       "return evaluationFunction(__response__, __answer__, __params__);"
   );
-
-  var result = wrapper(
-    params.response !== undefined ? params.response : null,
-    params.answer !== undefined ? params.answer : null,
-    params.params || {}
-  );
-
-  return result;
+  return wrapper(r, a, p);
 }
 
 // ---------------------------------------------------------------------------

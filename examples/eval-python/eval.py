@@ -1,24 +1,73 @@
-import sys
-import json
+"""
+Example Python evaluation function for Shimmy-WASM (CPython-WASI resident backend).
+
+Contract
+--------
+evaluation_function(response, answer, params) -> dict
+    Called for "eval" requests.
+    Must return a dict with at least:
+        is_correct  bool
+        feedback    str
+
+preview_function(response, answer, params) -> dict  [optional]
+    Called for "preview" requests.
+    If not defined, the runner falls back to evaluation_function.
+    Should return a preview/hint without revealing the full solution.
+
+Both functions are called with a fresh exec() namespace per request,
+so global-variable mutations do not leak between requests.
+"""
 
 
 def evaluation_function(response, answer, params=None):
-    """Simple numeric comparison eval function."""
+    """Numeric equality check with configurable absolute tolerance."""
+    params = params or {}
+    tolerance = float(params.get("tolerance", 1e-9))
+
     try:
-        is_correct = abs(float(response) - float(answer)) < 1e-9
-        return {
-            "is_correct": is_correct,
-            "feedback": f"{'Correct' if is_correct else 'Incorrect'}: got {response}, expected {answer}"
-        }
+        r = float(response)
+        a = float(answer)
     except (TypeError, ValueError) as e:
-        return {"is_correct": False, "feedback": f"Error: {e}"}
+        return {
+            "is_correct": False,
+            "feedback": f"Could not parse values as numbers: {e}",
+        }
+
+    abs_err = abs(r - a)
+    is_correct = abs_err <= tolerance
+
+    if is_correct:
+        return {
+            "is_correct": True,
+            "feedback": f"Correct! {r} matches {a} within tolerance {tolerance}.",
+            "absolute_error": abs_err,
+        }
+    else:
+        return {
+            "is_correct": False,
+            "feedback": (
+                f"Incorrect. Got {r}, expected {a}. "
+                f"Absolute error: {abs_err:.6e} (tolerance: {tolerance:.6e})."
+            ),
+            "absolute_error": abs_err,
+        }
 
 
-if __name__ == "__main__":
-    request = json.loads(sys.stdin.read())
-    result = evaluation_function(
-        request.get("response"),
-        request.get("answer"),
-        request.get("params", {})
-    )
-    print(json.dumps({"is_correct": result["is_correct"], "feedback": result["feedback"]}))
+def preview_function(response, answer, params=None):
+    """Return a hint without revealing whether the answer is correct."""
+    params = params or {}
+    tolerance = float(params.get("tolerance", 1e-9))
+
+    try:
+        r = float(response)
+    except (TypeError, ValueError):
+        return {
+            "preview": f"Could not parse response '{response}' as a number.",
+        }
+
+    return {
+        "preview": (
+            f"Your answer is {r}. "
+            f"The checker uses absolute tolerance {tolerance:.2e}."
+        ),
+    }

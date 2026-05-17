@@ -60,6 +60,16 @@ import (
 
 // residentServerScript is the Python server loop that runs inside the WASM module.
 // It reads one JSON request per line, executes the script, and writes the result.
+//
+// Wire format (request):
+//
+//	{"script": "<python_source>", "method": "eval|preview|healthcheck", "input": {...}}
+//
+// method defaults to "eval" if absent.
+// For "eval"  — calls evaluation_function(response, answer, params)
+// For "preview" — calls preview_function(response, answer, params) if defined,
+//
+//	otherwise falls back to evaluation_function
 const residentServerScript = `import sys, json
 
 while True:
@@ -81,14 +91,22 @@ while True:
         continue
     script_src = req.get("script", "")
     input_data = req.get("input", {})
+    method = req.get("method", "eval")
     try:
         ns = {}
         exec(compile(script_src, "<eval>", "exec"), ns)
-        fn = ns.get("evaluation_function")
-        if fn is None:
-            result = {"error": "no evaluation_function defined in script"}
+        if method == "preview":
+            fn = ns.get("preview_function") or ns.get("evaluation_function")
+            if fn is None:
+                result = {"error": "no preview_function or evaluation_function defined in script"}
+            else:
+                result = fn(input_data.get("response"), input_data.get("answer"), input_data.get("params", {}))
         else:
-            result = fn(input_data.get("response"), input_data.get("answer"), input_data.get("params", {}))
+            fn = ns.get("evaluation_function")
+            if fn is None:
+                result = {"error": "no evaluation_function defined in script"}
+            else:
+                result = fn(input_data.get("response"), input_data.get("answer"), input_data.get("params", {}))
     except Exception as e:
         result = {"error": str(e)}
     sys.stdout.write(json.dumps(result) + "\n")
@@ -245,6 +263,7 @@ func (r *ResidentPythonRunner) Init(ctx context.Context) error {
 	pingScript := `def evaluation_function(response, answer, params=None): return {"is_correct": True, "feedback": "ready"}`
 	pingReq, _ := json.Marshal(map[string]any{
 		"script": pingScript,
+		"method": "eval",
 		"input":  map[string]string{"response": "x", "answer": "x"},
 	})
 	pingLine := string(pingReq) + "\n"
@@ -312,7 +331,9 @@ func (r *ResidentPythonRunner) Init(ctx context.Context) error {
 //	{"script": "<python_source>", "input": <inputJSON>}
 //
 // The response is parsed as a map.
-func (r *ResidentPythonRunner) SendRequest(ctx context.Context, script, inputJSON string) (map[string]any, error) {
+// SendRequest sends a script + method + input to the resident Python interpreter.
+// method should be "eval" or "preview"; defaults to "eval" inside the server loop.
+func (r *ResidentPythonRunner) SendRequest(ctx context.Context, script, method, inputJSON string) (map[string]any, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -327,8 +348,12 @@ func (r *ResidentPythonRunner) SendRequest(ctx context.Context, script, inputJSO
 	}
 
 	// Build request JSON.
+	if method == "" {
+		method = "eval"
+	}
 	reqObj := map[string]any{
 		"script": script,
+		"method": method,
 		"input":  json.RawMessage(inputJSON),
 	}
 	reqBytes, err := json.Marshal(reqObj)

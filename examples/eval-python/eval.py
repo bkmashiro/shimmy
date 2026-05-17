@@ -30,7 +30,7 @@ def evaluation_function(response, answer, params=None):
     except (TypeError, ValueError) as e:
         return {
             "is_correct": False,
-            "feedback": f"Could not parse values as numbers: {e}",
+            "feedback": f"Error: Could not parse values as numbers: {e}",
         }
 
     abs_err = abs(r - a)

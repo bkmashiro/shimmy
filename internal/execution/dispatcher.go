@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"go.uber.org/zap"
@@ -63,6 +64,37 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 			return nil, err
 		}
 		return d, nil
+
+	case supervisor.PyodideIO:
+		// Pyodide uses the rpc dispatcher with stdio transport.
+		// Build a supervisor config that runs:
+		//   node <runner_path> <script_path>
+		// where runner_path defaults to runner.js (in cwd)
+		// and script_path comes from FUNCTION_PYODIDE_SCRIPT.
+		runnerPath := os.Getenv("FUNCTION_PYODIDE_RUNNER")
+		if runnerPath == "" {
+			runnerPath = "runner.js" // assume cwd contains runner.js
+		}
+		scriptPath := os.Getenv("FUNCTION_PYODIDE_SCRIPT")
+		if scriptPath == "" {
+			return nil, fmt.Errorf("pyodide: FUNCTION_PYODIDE_SCRIPT must be set")
+		}
+
+		pyodideSupervisorCfg := params.Config.Supervisor
+		pyodideSupervisorCfg.IO.Interface = supervisor.RpcIO
+		pyodideSupervisorCfg.IO.Rpc.Transport = supervisor.StdioTransport
+		pyodideSupervisorCfg.StartParams.Cmd = "node"
+		pyodideSupervisorCfg.StartParams.Args = []string{runnerPath, scriptPath}
+
+		return dispatcher.NewDedicatedDispatcher(
+			dispatcher.DedicatedDispatcherParams{
+				Config: dispatcher.DedicatedDispatcherConfig{
+					Supervisor: pyodideSupervisorCfg,
+				},
+				Context: params.Context,
+				Log:     params.Log,
+			},
+		)
 
 	case supervisor.RpcIO:
 		return dispatcher.NewDedicatedDispatcher(

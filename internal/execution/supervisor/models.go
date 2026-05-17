@@ -23,6 +23,12 @@ const (
 	// PythonWasmIO describes execution of Python scripts via CPython compiled to
 	// WASM (python.wasm) running inside wazero with a persistent server loop.
 	PythonWasmIO IOInterface = "python-wasm"
+
+	// PyodideIO describes execution of Python eval functions via Pyodide
+	// (CPython compiled to Emscripten WASM) running inside Node.js.
+	// The runner speaks LSP-framed JSON-RPC 2.0 over stdio.
+	// Use FUNCTION_PYODIDE_SCRIPT to specify the Python eval script path.
+	PyodideIO IOInterface = "pyodide"
 )
 
 // IOTransport describes the transport mechanism used to communicate with

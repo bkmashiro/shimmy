@@ -115,15 +115,51 @@ func evaluate(reqPtr int32, reqLen int32) int32 {
 		return int32(uintptr(unsafe.Pointer(&respBuf[0])))
 	}
 
-	// Simple echo eval: always mark as correct, echo back params as feedback.
-	// Response must match the response-eval.json schema:
-	//   {"command": "eval", "result": {"is_correct": bool, ...}}
-	resp := map[string]any{
-		"command": req.Method,
-		"result": map[string]any{
-			"is_correct": true,
-			"feedback":   req.Params,
-		},
+	var resp map[string]any
+
+	switch req.Method {
+	case "eval":
+		response, _ := req.Params["response"].(string)
+		answer, _ := req.Params["answer"].(string)
+		isCorrect := response == answer
+		feedback := "Correct!"
+		if !isCorrect {
+			feedback = "Incorrect."
+		}
+		resp = map[string]any{
+			"command": "eval",
+			"result": map[string]any{
+				"is_correct": isCorrect,
+				"feedback":   feedback,
+			},
+		}
+
+	case "preview":
+		response, _ := req.Params["response"].(string)
+		resp = map[string]any{
+			"command": "preview",
+			"result": map[string]any{
+				"preview": map[string]any{
+					"type":    "text",
+					"content": response,
+				},
+			},
+		}
+
+	case "healthcheck":
+		resp = map[string]any{
+			"command": "healthcheck",
+			"result": map[string]any{
+				"status": "ok",
+			},
+		}
+
+	default:
+		resp = map[string]any{
+			"error": map[string]any{
+				"message": "unknown method: " + req.Method,
+			},
+		}
 	}
 
 	writeResp(resp)

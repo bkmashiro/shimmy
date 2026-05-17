@@ -5,6 +5,7 @@ on:
     paths:
       - "**.go"
       - "examples/**"
+      - "runtime/schema/**"
       - ".github/workflows/e2e.yml"
   pull_request:
   workflow_dispatch:

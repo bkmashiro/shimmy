@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	"os"
 
 	"go.uber.org/zap"
 
@@ -47,6 +48,20 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 			return nil, err
 		}
 
+		return d, nil
+
+	case supervisor.PythonWasmIO:
+		cfg := wasm.Config{
+			ModulePath:       params.Config.Supervisor.StartParams.Cmd,
+			MaxInstances:     params.Config.MaxWorkers,
+			Timeout:          params.Config.Supervisor.SendParams.Timeout,
+			PythonScriptPath: os.Getenv("FUNCTION_WASM_PYTHON_SCRIPT"),
+		}
+
+		d := wasm.NewPythonDispatcher(cfg, params.Log)
+		if err := d.Start(params.Context); err != nil {
+			return nil, err
+		}
 		return d, nil
 
 	case supervisor.RpcIO:

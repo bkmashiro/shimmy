@@ -19,6 +19,10 @@ const (
 
 	// WasmIO describes execution of WebAssembly modules via wazero
 	WasmIO IOInterface = "wasm"
+
+	// PythonWasmIO describes execution of Python scripts via CPython compiled to
+	// WASM (python.wasm) running inside wazero with a persistent server loop.
+	PythonWasmIO IOInterface = "python-wasm"
 )
 
 // IOTransport describes the transport mechanism used to communicate with

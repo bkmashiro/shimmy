@@ -50,6 +50,11 @@ type Config struct {
 	// Falls back to FullMemcpyStrategy automatically if uffd is unavailable.
 	// Populated from FUNCTION_WASM_USE_UFFD=true.
 	UseUffd bool `conf:"use_uffd"`
+
+	// PythonScriptPath is the path to the Python eval script (eval.py).
+	// Only used when FUNCTION_INTERFACE=python-wasm.
+	// The script must define evaluation_function(response, answer, params=None).
+	PythonScriptPath string `conf:"wasm_python_script"`
 }
 
 // applyDefaults fills in zero-value fields with sensible defaults.
@@ -79,6 +84,9 @@ func (c *Config) applyEnv() {
 	}
 	if v := os.Getenv("FUNCTION_WASM_USE_UFFD"); v == "true" || v == "1" {
 		c.UseUffd = true
+	}
+	if v := os.Getenv("FUNCTION_WASM_PYTHON_SCRIPT"); v != "" {
+		c.PythonScriptPath = v
 	}
 }
 

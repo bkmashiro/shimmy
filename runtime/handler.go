@@ -139,11 +139,13 @@ func (h *RuntimeHandler) handle(ctx context.Context, req Request) ([]byte, error
 	}
 
 	var respBody map[string]any
-	err = json.Unmarshal(resData, &respBody)
-	result, ok := respBody["result"].(map[string]interface{})
-	if !ok {
+	if err = json.Unmarshal(resData, &respBody); err != nil {
 		log.Error("failed to unmarshal response data", zap.Error(err))
 		return nil, err
+	}
+	result, ok := respBody["result"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("response missing or invalid result field")
 	}
 
 	if command == "eval" {
@@ -163,13 +165,13 @@ func (h *RuntimeHandler) handle(ctx context.Context, req Request) ([]byte, error
 func ProcessEval(reqBody map[string]any, result map[string]any, req Request, command Command,
 	h *RuntimeHandler, ctx context.Context) {
 
-	params, ok := reqBody["params"].(map[string]interface{})
-	cases, ok := params["cases"].([]interface{})
+	params, hasParams := reqBody["params"].(map[string]interface{})
+	cases, hasCases := params["cases"].([]interface{})
 
 	if result["is_correct"] == false {
 
-		if ok && len(cases) > 0 {
-			match, warnings := GetCaseFeedback(params, params["cases"].([]interface{}), req, command, h, ctx)
+		if hasParams && hasCases && len(cases) > 0 {
+			match, warnings := GetCaseFeedback(params, cases, req, command, h, ctx)
 
 			if warnings != nil {
 				result["warnings"] = warnings
@@ -243,12 +245,15 @@ func GetCaseFeedback(params map[string]any, cases []interface{}, req Request, co
 	}
 
 	matchID := matches[0]
-	match := cases[matchID].(map[string]interface{})
+	match, ok := cases[matchID].(map[string]interface{})
+	if !ok {
+		return nil, warnings
+	}
 	match["id"] = matchID
 
 	matchParams, ok := match["params"].(map[string]any)
 	if ok && matchParams["override_eval_feedback"] == true {
-		matchFeedback := match["feedback"].(string)
+		matchFeedback, _ := match["feedback"].(string)
 		evalFeedback := feedback[0]
 		match["feedback"] = matchFeedback + "<br />" + evalFeedback
 	}
@@ -275,7 +280,15 @@ func FindFirstMatchingCase(params map[string]any, cases []interface{}, req Reque
 	var warnings []CaseWarning
 
 	for index, c := range cases {
-		result := EvaluateCase(params, c.(map[string]interface{}), index, req, command, h, ctx)
+		caseMap, ok := c.(map[string]interface{})
+		if !ok {
+			warnings = append(warnings, CaseWarning{
+				Case:    index,
+				Message: "case entry is not an object",
+			})
+			continue
+		}
+		result := EvaluateCase(params, caseMap, index, req, command, h, ctx)
 
 		if result.Warning != nil {
 			warnings = append(warnings, *result.Warning)
@@ -368,7 +381,15 @@ func EvaluateCase(params map[string]any, caseData map[string]any, index int, req
 	}
 
 	var respBody map[string]any
-	err = json.Unmarshal(resData, &respBody)
+	if err = json.Unmarshal(resData, &respBody); err != nil {
+		log.Error("failed to unmarshal response data", zap.Error(err))
+		return CaseResult{
+			Warning: &CaseWarning{
+				Case:    index,
+				Message: "failed to unmarshal response data",
+			},
+		}
+	}
 	result, ok := respBody["result"].(map[string]interface{})
 	if !ok {
 		log.Error("failed to unmarshal response data", zap.Error(err))

@@ -147,7 +147,15 @@ func (d *PythonDispatcher) Send(ctx context.Context, method string, params map[s
 	}
 
 	defer func() {
-		d.pool <- runner
+		if runner.IsHealthy() {
+			d.pool <- runner
+		} else {
+			// Runner's state is unreliable (snapshot restore failed).
+			// Shut it down and let the pool shrink rather than spreading
+			// corrupted state to future requests.
+			d.log.Error("dropping unhealthy python runner from pool")
+			go func() { _ = runner.Shutdown(context.Background()) }()
+		}
 	}()
 
 	// Marshal params as the inputJSON argument.

@@ -161,9 +161,17 @@ type ResidentPythonRunner struct {
 	snapStackPointer uint64     // value of __stack_pointer global at snapshot time
 
 	// Communication pipes
-	stdinWriter   io.WriteCloser  // host writes requests here → Python reads stdin
-	stdoutReader  io.ReadCloser   // host reads responses here ← Python writes stdout
-	stdoutScanner *bufio.Scanner  // line-by-line reader
+	stdinWriter  io.WriteCloser // host writes requests here → Python reads stdin
+	stdoutReader io.ReadCloser  // host reads responses here ← Python writes stdout
+
+	// linesCh is fed by a single background reader goroutine that owns
+	// stdoutScanner. Using one goroutine eliminates the race/leak that occurs
+	// when per-call goroutines outlive a cancelled context.
+	linesCh chan string
+
+	// healthy is false after a snapshot restore failure. An unhealthy runner
+	// must not be returned to the pool.
+	healthy atomic.Bool
 
 	// Background WASM goroutine error tracking.
 	// runErr is set atomically when the WASM goroutine exits; exitCh is closed.
@@ -213,7 +221,17 @@ func (r *ResidentPythonRunner) Init(ctx context.Context) error {
 
 	r.stdinWriter = stdinW
 	r.stdoutReader = stdoutR
-	r.stdoutScanner = bufio.NewScanner(stdoutR)
+	r.linesCh = make(chan string, 8)
+
+	// Background reader goroutine: owns the Scanner for stdoutR's lifetime.
+	// Exits when the pipe closes (Python exits or Shutdown closes stdoutReader).
+	scanner := bufio.NewScanner(stdoutR)
+	go func() {
+		for scanner.Scan() {
+			r.linesCh <- scanner.Text()
+		}
+		close(r.linesCh)
+	}()
 
 	// Create runtime — stored in struct so Shutdown can close it.
 	rtCfg := wazero.NewRuntimeConfig()
@@ -323,8 +341,15 @@ func (r *ResidentPythonRunner) Init(ctx context.Context) error {
 	)
 
 	r.initialized = true
+	r.healthy.Store(true)
 	r.log.Info("ResidentPythonRunner initialized successfully")
 	return nil
+}
+
+// IsHealthy returns false if a snapshot restore failure has made the runner's
+// state unreliable. An unhealthy runner should be shut down and not reused.
+func (r *ResidentPythonRunner) IsHealthy() bool {
+	return r.healthy.Load()
 }
 
 // SendRequest sends a script + method + input to the resident Python
@@ -410,8 +435,8 @@ func (r *ResidentPythonRunner) SendRequest(ctx context.Context, script, method, 
 
 	// Restore memory snapshot — resets CPython heap to post-init state.
 	if err := r.restoreSnapshot(); err != nil {
-		r.log.Error("failed to restore memory snapshot", zap.Error(err))
-		// Non-fatal for this request but runner state is now dirty.
+		r.log.Error("failed to restore memory snapshot — marking runner unhealthy", zap.Error(err))
+		r.healthy.Store(false)
 	}
 
 	// Parse and return result.
@@ -482,32 +507,28 @@ func (r *ResidentPythonRunner) restoreSnapshot() error {
 	return nil
 }
 
-// scanLineWithContext reads one line from stdoutScanner, aborting if the
-// context expires or the WASM goroutine exits.
+// scanLineWithContext reads one line delivered by the background reader
+// goroutine, aborting if the context expires or the WASM goroutine exits.
+// No goroutines are spawned per call — the reader goroutine runs for the
+// entire lifetime of the runner.
 func (r *ResidentPythonRunner) scanLineWithContext(ctx context.Context) (string, error) {
-	type scanResult struct {
-		line string
-		err  error
-	}
-	ch := make(chan scanResult, 1)
-	go func() {
-		if r.stdoutScanner.Scan() {
-			ch <- scanResult{line: r.stdoutScanner.Text()}
-		} else {
-			err := r.stdoutScanner.Err()
-			if err == nil {
-				err = io.EOF
-			}
-			ch <- scanResult{err: err}
-		}
-	}()
-
 	select {
-	case res := <-ch:
-		return res.line, res.err
+	case line, ok := <-r.linesCh:
+		if !ok {
+			return "", io.EOF
+		}
+		return line, nil
 	case <-ctx.Done():
 		return "", fmt.Errorf("context: %w", ctx.Err())
 	case <-r.exitCh:
+		// Drain any buffered line that arrived before exit.
+		select {
+		case line, ok := <-r.linesCh:
+			if ok {
+				return line, nil
+			}
+		default:
+		}
 		return "", r.wrapRunErr("WASM goroutine exited")
 	}
 }

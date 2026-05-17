@@ -18,34 +18,18 @@ package wasm
 // WASI fd_read/fd_write host functions are Go functions that can block, we
 // run the WASM module in a dedicated goroutine and communicate via channels.
 //
-// # Memory Snapshot / Restore
+// # Isolation
 //
-// After Python signals __READY__ (just before blocking in readline() at the
-// top of the server loop for the first time), the host takes a snapshot of
-// WASM linear memory. After every request, when Python has written __DONE__
-// and is about to block in readline() again, the host restores the snapshot.
-//
-// Why this is safe: the WASM goroutine is blocked inside Go's os.File.Read()
-// (called by wazero's fd_read host function). At that moment:
-//
-//   - The goroutine's Go stack holds wazero's interpreter state (instruction
-//     pointer, value stack) as Go local variables — these are NOT affected by
-//     our memory write.
-//   - The iov buffer address (where wazero will write the next stdin bytes)
-//     was captured into wazero's Go stack frame before the goroutine blocked,
-//     so our memory restore does not change it.
-//   - The CPython C-stack depth at each readline() block is identical (same
-//     call path through the server loop every time), so the restored C stack
-//     is consistent with the goroutine's saved interpreter state.
-//
-// The net effect: the next request executes against the pristine post-init
-// CPython heap — sys.modules, global variables, and all other interpreter
-// state are reset between requests.
+// Each request is executed inside exec(compile(script, "<eval>", "exec"), ns={})
+// with a fresh empty namespace. This provides Python-level isolation: globals,
+// local variables, and module-level side-effects from one request do not bleed
+// into the next. The CPython interpreter and its imported standard library
+// modules remain alive across requests (giving fast per-request execution).
 //
 // # Performance
 //
 // Initialization cost: ~7-8 s (Python startup + server loop import)
-// Per-request cost: ~10-50 ms (script execution) + ~3-5 ms (memory restore)
+// Per-request cost: ~10-50 ms (script exec in fresh namespace)
 //
 // # Wire format
 //
@@ -66,13 +50,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/tetratelabs/wazero"
-	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 	"github.com/tetratelabs/wazero/sys"
 	"go.uber.org/zap"
@@ -81,16 +63,15 @@ import (
 // residentServerScript is the Python server loop that runs inside the WASM
 // module. Protocol:
 //
-//  1. On startup: writes "__READY__\n" to stdout, then blocks in readline().
-//     The host takes a memory snapshot at this point.
+//  1. On startup: writes "__READY__\n" to stdout, signals that the interpreter
+//     is initialised and the server loop is about to start.
 //
-//  2. Per request: reads one JSON line, executes the script, writes the JSON
-//     result followed by "__DONE__\n". The host restores the memory snapshot
-//     after seeing __DONE__.
+//  2. Per request: reads one JSON line, executes the user script in a fresh
+//     namespace (exec with ns={}), writes the JSON result followed by
+//     "__DONE__\n".
 const residentServerScript = `import sys, json
 
 # Signal that CPython is initialised and the server loop is about to start.
-# The host takes a memory snapshot after receiving this line.
 sys.stdout.write("__READY__\n")
 sys.stdout.flush()
 
@@ -150,16 +131,6 @@ type ResidentPythonRunner struct {
 	initialized bool
 	closed      bool
 
-	// WASM runtime — kept alive for the duration so we can access the module
-	// from outside the WASM goroutine. Closed by Shutdown (not by the goroutine).
-	rt      wazero.Runtime
-	modName string // unique name for rt.Module() lookup
-
-	// Snapshot state — set during Init after __READY__, used by SendRequest.
-	wasmMod          api.Module // live module reference (for memory access)
-	memSnapshot      []byte     // copy of linear memory at __READY__ time
-	snapStackPointer uint64     // value of __stack_pointer global at snapshot time
-
 	// Communication pipes
 	stdinWriter  io.WriteCloser // host writes requests here → Python reads stdin
 	stdoutReader io.ReadCloser  // host reads responses here ← Python writes stdout
@@ -169,12 +140,12 @@ type ResidentPythonRunner struct {
 	// when per-call goroutines outlive a cancelled context.
 	linesCh chan string
 
-	// healthy is false after a snapshot restore failure. An unhealthy runner
-	// must not be returned to the pool.
+	// healthy is false if the runner has entered an unrecoverable error state.
+	// An unhealthy runner must not be returned to the pool.
 	healthy atomic.Bool
 
 	// Background WASM goroutine error tracking.
-	// runErr is set atomically when the WASM goroutine exits; exitCh is closed.
+	// runErrVal is set atomically when the WASM goroutine exits; exitCh is closed.
 	runErrVal atomic.Pointer[error]
 	exitCh    chan struct{}
 	cancel    context.CancelFunc
@@ -192,11 +163,11 @@ func NewResidentPythonRunner(wasmPath string, cfg Config, log *zap.Logger) *Resi
 	}
 }
 
-// Init compiles python.wasm, instantiates the server-loop module, waits for
-// Python to signal __READY__, then takes a linear-memory snapshot.
+// Init compiles python.wasm, instantiates the server-loop module, and waits
+// for Python to signal __READY__.
 //
 // This is the expensive step (~7-8 s). After Init returns, SendRequest calls
-// are fast and each begins from a clean interpreter state.
+// are fast — each executes in a fresh Python namespace (exec with ns={}).
 func (r *ResidentPythonRunner) Init(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -233,37 +204,32 @@ func (r *ResidentPythonRunner) Init(ctx context.Context) error {
 		close(r.linesCh)
 	}()
 
-	// Create runtime — stored in struct so Shutdown can close it.
+	// Create runtime — local variable; the WASM goroutine closes it on exit.
 	rtCfg := wazero.NewRuntimeConfig()
 	if r.cfg.MaxMemoryPages > 0 {
 		rtCfg = rtCfg.WithMemoryLimitPages(r.cfg.MaxMemoryPages)
 	}
-	r.rt = wazero.NewRuntimeWithConfig(ctx, rtCfg)
+	rt := wazero.NewRuntimeWithConfig(ctx, rtCfg)
 
 	// Compile module.
 	r.log.Info("compiling python.wasm (this takes ~1-2 s)")
-	compiled, err := r.rt.CompileModule(ctx, wasmBytes)
+	compiled, err := rt.CompileModule(ctx, wasmBytes)
 	if err != nil {
-		_ = r.rt.Close(ctx)
-		r.rt = nil
+		_ = rt.Close(ctx)
 		return fmt.Errorf("resident python: compile: %w", err)
 	}
 
 	// Install WASI.
-	if _, err := wasi_snapshot_preview1.Instantiate(ctx, r.rt); err != nil {
+	if _, err := wasi_snapshot_preview1.Instantiate(ctx, rt); err != nil {
 		_ = compiled.Close(ctx)
-		_ = r.rt.Close(ctx)
-		r.rt = nil
+		_ = rt.Close(ctx)
 		return fmt.Errorf("resident python: instantiate wasi: %w", err)
 	}
-
-	// Give the module a unique name so we can retrieve it via rt.Module().
-	r.modName = fmt.Sprintf("python-resident-%d", time.Now().UnixNano())
 
 	var stderrBuf bytes.Buffer
 	mc := wazero.NewModuleConfig().
 		WithArgs("python3", "-c", residentServerScript).
-		WithName(r.modName).
+		WithName("").
 		WithStdin(stdinR).
 		WithStdout(stdoutW).
 		WithStderr(&stderrBuf).
@@ -281,11 +247,11 @@ func (r *ResidentPythonRunner) Init(ctx context.Context) error {
 			_ = stdoutW.Close()
 			_ = stdinR.Close()
 			_ = compiled.Close(context.Background())
-			// Note: r.rt is NOT closed here; Shutdown() is responsible.
+			_ = rt.Close(context.Background())
 			close(r.exitCh)
 		}()
 
-		_, runErr := r.rt.InstantiateModule(runCtx, compiled, mc)
+		_, runErr := rt.InstantiateModule(runCtx, compiled, mc)
 		if runErr != nil {
 			if exitErr, ok := runErr.(*sys.ExitError); ok && exitErr.ExitCode() == 0 {
 				return
@@ -316,45 +282,21 @@ func (r *ResidentPythonRunner) Init(ctx context.Context) error {
 	}
 	r.log.Info("Python signalled __READY__")
 
-	// At this point Python has written __READY__ and is executing the next
-	// statement (sys.stdin.readline()). Give the WASM goroutine time to enter
-	// os.File.Read() before we take the snapshot.
-	runtime.Gosched()
-	time.Sleep(10 * time.Millisecond)
-
-	// Retrieve the live module from the runtime.
-	r.wasmMod = r.rt.Module(r.modName)
-	if r.wasmMod == nil {
-		_ = r.cleanup()
-		return fmt.Errorf("resident python: module %q not found in runtime after __READY__", r.modName)
-	}
-
-	// Take the initial memory snapshot.
-	if err := r.takeSnapshot(); err != nil {
-		_ = r.cleanup()
-		return fmt.Errorf("resident python: initial snapshot: %w", err)
-	}
-
-	memMB := float64(len(r.memSnapshot)) / (1024 * 1024)
-	r.log.Info("memory snapshot taken",
-		zap.Float64("snapshot_mb", memMB),
-	)
-
 	r.initialized = true
 	r.healthy.Store(true)
 	r.log.Info("ResidentPythonRunner initialized successfully")
 	return nil
 }
 
-// IsHealthy returns false if a snapshot restore failure has made the runner's
-// state unreliable. An unhealthy runner should be shut down and not reused.
+// IsHealthy returns false if the runner has entered an unrecoverable error
+// state. An unhealthy runner should be shut down and not reused.
 func (r *ResidentPythonRunner) IsHealthy() bool {
 	return r.healthy.Load()
 }
 
 // SendRequest sends a script + method + input to the resident Python
-// interpreter. After receiving the response, it restores the memory snapshot
-// so the next request begins from a clean state.
+// interpreter. The script is executed in a fresh namespace (exec with ns={})
+// so globals do not bleed between requests.
 func (r *ResidentPythonRunner) SendRequest(ctx context.Context, script, method, inputJSON string) (map[string]any, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -428,17 +370,6 @@ func (r *ResidentPythonRunner) SendRequest(ctx context.Context, script, method, 
 		return nil, fmt.Errorf("resident python: expected __DONE__, got %q", doneLine)
 	}
 
-	// Python has written __DONE__ and is calling readline() again.
-	// Give it time to enter os.File.Read() before we restore memory.
-	runtime.Gosched()
-	time.Sleep(2 * time.Millisecond)
-
-	// Restore memory snapshot — resets CPython heap to post-init state.
-	if err := r.restoreSnapshot(); err != nil {
-		r.log.Error("failed to restore memory snapshot — marking runner unhealthy", zap.Error(err))
-		r.healthy.Store(false)
-	}
-
 	// Parse and return result.
 	result, err := parseJSONResponse(jsonLine)
 	if err != nil {
@@ -448,63 +379,6 @@ func (r *ResidentPythonRunner) SendRequest(ctx context.Context, script, method, 
 		return nil, fmt.Errorf("resident python script error: %s", errMsg)
 	}
 	return result, nil
-}
-
-// takeSnapshot captures WASM linear memory into r.memSnapshot.
-// Also saves mutable exported globals (e.g. __stack_pointer).
-// Must be called with r.mu held.
-func (r *ResidentPythonRunner) takeSnapshot() error {
-	mem := r.wasmMod.Memory()
-	if mem == nil {
-		return nil
-	}
-	size := mem.Size()
-	if size == 0 {
-		return nil
-	}
-	buf, ok := mem.Read(0, size)
-	if !ok {
-		return fmt.Errorf("snapshot: could not read %d bytes of linear memory", size)
-	}
-	r.memSnapshot = make([]byte, len(buf))
-	copy(r.memSnapshot, buf)
-
-	// Save __stack_pointer so restoreSnapshot can reset it explicitly.
-	if sp := r.wasmMod.ExportedGlobal("__stack_pointer"); sp != nil {
-		r.snapStackPointer = sp.Get()
-	}
-	return nil
-}
-
-// restoreSnapshot writes r.memSnapshot back into WASM linear memory.
-// Must be called with r.mu held and only when the WASM goroutine is blocked
-// in os.File.Read() (i.e., Python is waiting in readline()).
-func (r *ResidentPythonRunner) restoreSnapshot() error {
-	if r.memSnapshot == nil || r.wasmMod == nil {
-		return nil
-	}
-	mem := r.wasmMod.Memory()
-	if mem == nil {
-		return nil
-	}
-	if !mem.Write(0, r.memSnapshot) {
-		return fmt.Errorf("snapshot: failed to restore %d bytes of linear memory", len(r.memSnapshot))
-	}
-
-	// Restore __stack_pointer if it is a mutable exported global.
-	// The stack pointer must be at its snapshot value for the CPython C stack
-	// to be consistent with the restored heap.
-	if sp := r.wasmMod.ExportedGlobal("__stack_pointer"); sp != nil {
-		if mg, ok := sp.(api.MutableGlobal); ok {
-			// Re-read the snapshot value from the saved memory.
-			// (We snapshot globals implicitly: at __READY__ time Python's
-			// C stack is at the same depth as after each __DONE__, so the
-			// __stack_pointer value should be identical — but we restore it
-			// explicitly for correctness.)
-			mg.Set(r.snapStackPointer)
-		}
-	}
-	return nil
 }
 
 // scanLineWithContext reads one line delivered by the background reader
@@ -584,7 +458,7 @@ func (r *ResidentPythonRunner) Shutdown(ctx context.Context) error {
 		r.cancel = nil
 	}
 
-	// Wait for WASM goroutine to exit.
+	// Wait for WASM goroutine to exit (it will close rt when done).
 	select {
 	case <-r.exitCh:
 	case <-ctx.Done():
@@ -596,14 +470,6 @@ func (r *ResidentPythonRunner) Shutdown(ctx context.Context) error {
 	if r.stdoutReader != nil {
 		_ = r.stdoutReader.Close()
 		r.stdoutReader = nil
-	}
-
-	// Close the runtime now that the module has exited.
-	if r.rt != nil {
-		if err := r.rt.Close(ctx); err != nil {
-			r.log.Warn("error closing wazero runtime", zap.Error(err))
-		}
-		r.rt = nil
 	}
 
 	r.initialized = false

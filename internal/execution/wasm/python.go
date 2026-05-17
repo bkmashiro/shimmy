@@ -32,6 +32,31 @@ import (
 	"go.uber.org/zap"
 )
 
+// runScriptBootstrapper is appended to every user script by RunScript.
+// It reads a JSON object from stdin and calls evaluation_function (or
+// preview_function when _method=="preview"), writing the result as JSON
+// to stdout.
+//
+// All names are prefixed with "_" to avoid colliding with names in the
+// user script's global namespace.
+const runScriptBootstrapper = `
+import sys as _sys, json as _json
+_input = _json.loads(_sys.stdin.read())
+_method = _input.get("_method", "eval")
+if _method == "preview":
+    _fn = globals().get("preview_function") or globals().get("evaluation_function")
+else:
+    _fn = globals().get("evaluation_function")
+if _fn is None:
+    _sys.stdout.write(_json.dumps({"error": "no evaluation_function defined in script"}) + "\n")
+else:
+    try:
+        _result = _fn(_input.get("response"), _input.get("answer"), _input.get("params"))
+        _sys.stdout.write(_json.dumps(_result) + "\n")
+    except Exception as _e:
+        _sys.stdout.write(_json.dumps({"error": str(_e)}) + "\n")
+`
+
 // PythonRunner compiles python.wasm once and runs scripts per-request.
 type PythonRunner struct {
 	wasmPath string
@@ -118,10 +143,14 @@ func (r *PythonRunner) RunScript(ctx context.Context, script string, inputJSON s
 
 	var stdoutBuf, stderrBuf bytes.Buffer
 
+	// Append the bootstrapper so the script reads from stdin and calls
+	// evaluation_function, writing JSON to stdout.
+	fullScript := script + runScriptBootstrapper
+
 	// Command-mode WASM: argv[0]=program name, then flags.
 	// No filesystem, no env vars — pure stdio sandboxing.
 	mc := wazero.NewModuleConfig().
-		WithArgs("python3", "-c", script).
+		WithArgs("python3", "-c", fullScript).
 		WithStdin(strings.NewReader(inputJSON)).
 		WithStdout(&stdoutBuf).
 		WithStderr(&stderrBuf).

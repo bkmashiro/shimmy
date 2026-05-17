@@ -36,6 +36,11 @@ func NewPythonDispatcher(cfg Config, log *zap.Logger) *PythonDispatcher {
 
 // Start reads the eval script, then initializes all pool runners in parallel.
 func (d *PythonDispatcher) Start(ctx context.Context) error {
+	// Pick up sandbox overrides from FUNCTION_WASM_* env vars, then apply
+	// sensible defaults for any fields still at their zero values.
+	d.cfg.applyEnv()
+	d.cfg.applyDefaults()
+
 	if d.cfg.PythonScriptPath == "" {
 		return fmt.Errorf("python-wasm: PythonScriptPath must be set (FUNCTION_WASM_PYTHON_SCRIPT)")
 	}

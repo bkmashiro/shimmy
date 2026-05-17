@@ -242,3 +242,97 @@ The `.wasm` file is compiled once at startup into a single `wazero.CompiledModul
 Each pool slot holds an independent `api.Module` instantiated from the shared `CompiledModule`. Module instances do not share linear memory or mutable state; they only share the read-only compiled code. This means N requests can execute in parallel on N instances without any locking between them — the only synchronisation is the pool channel used to acquire and release supervisors.
 
 Pool size is fixed at startup to `FUNCTION_MAX_PROCS` (defaulting to `runtime.NumCPU()`). If all instances are busy, incoming requests block on the pool channel until a slot becomes available, honouring the caller's context deadline. There is no dynamic scaling; the pool size is chosen to match the available CPU parallelism.
+
+## 10. Writing an eval function (JavaScript / javy)
+
+JavaScript eval functions run via [javy](https://github.com/bytecodealliance/javy) — Bytecode Alliance's QuickJS-to-WASM toolchain. javy compiles JavaScript to `wasm32-wasi`, embedding QuickJS as the runtime. The resulting WASM module runs under wazero with the same sandbox restrictions (no filesystem, no network, hard memory cap, per-request timeout).
+
+### Interface
+
+JavaScript eval functions use the **`rpc` dispatcher** (subprocess mode) rather than the WASM dispatcher ABI (`alloc`/`evaluate`). The runner speaks LSP-framed JSON-RPC 2.0 over stdin/stdout — the same protocol shimmy uses for all subprocess workers.
+
+```
+FUNCTION_INTERFACE=rpc
+FUNCTION_RPC_TRANSPORT=stdio
+FUNCTION_COMMAND="wazero run runner.wasm"
+```
+
+### Architecture
+
+```
+eval.js (user eval function)
+    ↓  build-runner.sh embeds source into runner.js
+runner.js (LSP-framed JSON-RPC loop)
+    ↓  javy build -J javy-stream-io=y
+runner.wasm  (QuickJS embedded, wasm32-wasi)
+    ↓  wazero run (one subprocess per pool slot)
+shimmy rpc dispatcher
+```
+
+One `wazero run runner.wasm` subprocess is spawned per pool slot. The subprocess stays alive and handles requests sequentially through its stdin/stdout pipe. shimmy manages the pool and routes requests.
+
+### State isolation
+
+Each request calls `evaluationFunction()` inside a fresh `Function()` scope:
+
+```js
+var wrapper = new Function(
+    "__response__", "__answer__", "__params__",
+    EVAL_SOURCE + "\nreturn evaluationFunction(__response__, __answer__, __params__);"
+);
+```
+
+This gives per-request isolation analogous to Python's `exec(source, {})`: any variable mutations inside the user's code are scoped to that call and cannot leak between requests.
+
+### Eval function contract
+
+```js
+// eval.js — must define evaluationFunction
+function evaluationFunction(response, answer, params) {
+    // response: string | number
+    // answer:   string | number
+    // params:   object (optional extra parameters)
+
+    return {
+        is_correct: true,           // required bool
+        feedback:   "Correct!",     // required string
+        // any additional fields returned verbatim to the HTTP caller
+    };
+}
+```
+
+### Build command
+
+```bash
+# 1. Install javy (arm64-linux shown; pick the right binary for your platform)
+curl -sL https://github.com/bytecodealliance/javy/releases/latest/download/javy-arm-linux-v8.1.1.gz \
+    | gunzip > /usr/local/bin/javy && chmod +x /usr/local/bin/javy
+
+# 2. Build: embed eval.js into runner.js and compile with javy
+cd examples/eval-js
+JAVY=/usr/local/bin/javy ./build-runner.sh eval.js runner.wasm
+```
+
+The build script JSON-encodes the eval source, patches `runner.js`, and compiles with `javy build -J javy-stream-io=y`.
+
+### Running
+
+```bash
+FUNCTION_INTERFACE=rpc \
+FUNCTION_RPC_TRANSPORT=stdio \
+FUNCTION_COMMAND="wazero run $(pwd)/examples/eval-js/runner.wasm" \
+PORT=8080 \
+  ./shimmy serve
+```
+
+### Comparison with Go eval functions
+
+| Aspect | Go (`wasm` dispatcher) | JavaScript (`rpc` dispatcher) |
+|--------|----------------------|------------------------------|
+| ABI | `alloc`/`evaluate` exports | LSP-framed JSON-RPC 2.0 |
+| Isolation | Linear-memory snapshot/restore | JS `Function()` scope per request |
+| Concurrency | N independent wazero instances | N subprocess instances (one per pool slot) |
+| State | Guaranteed clean (memcpy restore) | Clean via scoped Function() |
+| Warm-start | Yes (module compiled once) | Yes (QuickJS started once per slot) |
+
+The complete example is in `examples/eval-js/`.

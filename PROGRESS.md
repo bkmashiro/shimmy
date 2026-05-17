@@ -24,6 +24,16 @@
   uses existing `rpc` dispatcher + subprocess mode (`FUNCTION_INTERFACE=rpc`,
   `FUNCTION_COMMAND=node runner.js eval.py`); state isolation via `exec(source, {})`
   fresh namespace per request; no memory snapshot required
+- `examples/eval-js/` — **JavaScript eval functions via javy/QuickJS** (new):
+  - `eval.js` — user eval function contract (`evaluationFunction(response, answer, params)`)
+  - `runner.js` — LSP-framed JSON-RPC 2.0 loop; embeds user source at build time;
+    state isolation via fresh `Function()` scope per request
+  - `build-runner.sh` — embeds eval.js into runner.js, compiles with `javy build -J javy-stream-io=y`
+  - `runner.wasm` — pre-built artifact (QuickJS wasm32-wasi, ~1.3 MB)
+  - uses existing `rpc` dispatcher + subprocess mode (`FUNCTION_INTERFACE=rpc`,
+    `FUNCTION_COMMAND="wazero run runner.wasm"`); one wazero subprocess per pool slot
+  - test: `internal/execution/wasm/dispatcher_javy_test.go` — `TestDispatcher_Send_JS`
+    spawns the wazero subprocess and verifies end-to-end JSON-RPC framing and eval results
 
 ### CI — userfaultfd Probe
 - `.github/workflows/uffd-probe.yml` — runs on Ubuntu VM (not container) to test whether
@@ -124,6 +134,9 @@ restore on large modules.
 - [ ] numpy integration test (mount wasi-wheels output into Python sandbox)
 - [x] Pyodide/Node.js fallback path (scipy route) — subprocess mode, existing shimmy
       (state isolation via fresh namespace `exec(source, {})` per request; no memory snapshot)
+- [x] JavaScript eval functions via javy/QuickJS — `examples/eval-js/`; subprocess mode
+      (`FUNCTION_INTERFACE=rpc`, `FUNCTION_COMMAND="wazero run runner.wasm"`);
+      state isolation via `Function()` scope per request; `TestDispatcher_Send_JS` passes
 - [ ] Open PR feat/wasm-backend → main
 
 ## Architecture Notes

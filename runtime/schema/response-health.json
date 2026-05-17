@@ -19,15 +19,12 @@
         },
         "errors": {
           "type": "array"
+        },
+        "status": {
+          "type": "string"
         }
       },
-      "additionalProperties": false,
-      "required": [
-        "tests_passed",
-        "successes",
-        "failures",
-        "errors"
-      ]
+      "additionalProperties": true
     },
     "error": {
       "type": "object",

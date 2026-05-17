@@ -18,15 +18,18 @@ import subprocess
 import stat
 
 
-BINARY = "/var/task/lambda-probe"
+SRC_BINARY = "/var/task/lambda-probe"
+BINARY = "/tmp/lambda-probe"
 
 
 def lambda_handler(event, context):
-    # Make sure binary is executable (zip may strip +x)
+    # /var/task is read-only; copy binary to /tmp and make it executable
+    import shutil
     try:
-        os.chmod(BINARY, os.stat(BINARY).st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+        shutil.copy2(SRC_BINARY, BINARY)
+        os.chmod(BINARY, 0o755)
     except Exception as e:
-        return {"error": f"chmod failed: {e}"}
+        return {"error": f"copy/chmod failed: {e}"}
 
     try:
         proc = subprocess.run(

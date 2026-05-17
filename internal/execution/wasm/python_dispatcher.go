@@ -132,7 +132,10 @@ func (d *PythonDispatcher) Start(ctx context.Context) error {
 // JSON-marshalled params, then return the runner to the pool.
 func (d *PythonDispatcher) Send(ctx context.Context, method string, params map[string]any) (map[string]any, error) {
 	if method == "healthcheck" {
-		return map[string]any{"status": "ok"}, nil
+		return map[string]any{
+			"command": "healthcheck",
+			"result":  map[string]any{"status": "ok"},
+		}, nil
 	}
 
 	// Acquire a runner from the pool, respecting context cancellation.
@@ -158,7 +161,13 @@ func (d *PythonDispatcher) Send(ctx context.Context, method string, params map[s
 		return nil, fmt.Errorf("python-wasm: send request: %w", err)
 	}
 
-	return result, nil
+	// Wrap the Python result in the standard shimmy envelope so that the
+	// runtime schema validation (which expects {"command":"...","result":{...}})
+	// accepts the response.
+	return map[string]any{
+		"command": method,
+		"result":  result,
+	}, nil
 }
 
 // Shutdown drains the pool and shuts down each runner.

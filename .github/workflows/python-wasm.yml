@@ -1,0 +1,68 @@
+name: Python-WASM Backend
+
+on:
+  push:
+    branches:
+      - "feat/wasm-backend"
+      - "main"
+    paths:
+      - "internal/execution/wasm/python*.go"
+      - "internal/execution/wasm/testdata/python.wasm"
+      - "examples/eval-python/**"
+      - ".github/workflows/python-wasm.yml"
+  pull_request:
+    paths:
+      - "internal/execution/wasm/python*.go"
+      - "internal/execution/wasm/testdata/python.wasm"
+      - "examples/eval-python/**"
+      - ".github/workflows/python-wasm.yml"
+  workflow_dispatch:
+
+jobs:
+  python-wasm:
+    name: CPython-WASI resident backend
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: false
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ./go.mod
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Unit tests — PythonRunner (per-request instantiation)
+        run: |
+          PYTHON_WASM=./testdata/python.wasm \
+            go test ./internal/execution/wasm/... \
+            -run TestPythonRunner \
+            -v -count=1 -timeout 120s
+
+      - name: Unit tests — ResidentPythonRunner (persistent server loop)
+        run: |
+          PYTHON_WASM=./testdata/python.wasm \
+            go test ./internal/execution/wasm/... \
+            -run TestResidentPythonRunner \
+            -v -count=1 -timeout 300s
+
+      - name: Benchmark — per-request vs resident latency
+        run: |
+          PYTHON_WASM=./testdata/python.wasm \
+            go test ./internal/execution/wasm/... \
+            -bench='BenchmarkPythonRunner_RunScript|BenchmarkResidentPythonRunner_SendRequest' \
+            -benchtime=5s -count=1 -run=^$ \
+            -v -timeout 600s 2>&1 | tee bench-python.txt
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-python
+          path: bench-python.txt

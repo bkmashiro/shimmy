@@ -122,6 +122,20 @@ static uint64_t read_dirty_word(int i) {
 }
 
 static int dirty_nwords(void) { return g_dirty_nwords; }
+
+// force_dirty_range: mark [start_page, start_page+count) as dirty and lift
+// write-protection on those pages — without going through SIGSEGV.
+// Intended for benchmarks only: lets callers pre-set dirty state without
+// triggering rapid SIGSEGV from Go goroutines (which confuses Go's runtime
+// signal-dispatch machinery when fired 64+ times in a tight loop).
+static void force_dirty_range(int start_page, int count) {
+    for (int i = 0; i < count; i++) {
+        int page_idx = start_page + i;
+        mark_dirty_page(page_idx);
+        uintptr_t page_addr = g_base + (uintptr_t)page_idx * (uintptr_t)g_page_size;
+        mprotect((void *)page_addr, (size_t)g_page_size, PROT_READ | PROT_WRITE);
+    }
+}
 */
 import "C"
 
@@ -281,6 +295,13 @@ func popcount64(x uint64) int {
 		x >>= 1
 	}
 	return n
+}
+
+// forceDirtyRange marks pages [startPage, startPage+count) as dirty and lifts
+// their write-protection via the C helper — without going through SIGSEGV.
+// Used only by benchmarks; not part of the SnapshotStrategy interface.
+func (s *MprotectStrategy) forceDirtyRange(startPage, count int) {
+	C.force_dirty_range(C.int(startPage), C.int(count))
 }
 
 // Close deactivates fault tracking, removes the SIGSEGV handler, and restores

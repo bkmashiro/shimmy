@@ -303,11 +303,23 @@ func popcount64(x uint64) int {
 	return n
 }
 
-// forceDirtyNPages pre-sets dirty state for benchmarks: makes the entire linear
-// memory region PROT_RW with one mprotect call and marks the first `count`
-// pages dirty in the bitmap — without going through the SIGSEGV path.
+// forceDirtyNPages pre-sets dirty state for benchmarks.
+//
+// Sequence:
+//  1. mprotect_set_active(0) — disable SIGSEGV handler before touching mprotect
+//     state. Leaving the handler armed while calling mprotect(RW, whole_region)
+//     creates a window where g_active=1 but memory is RW; if any goroutine or
+//     Go runtime routine interacts with the region before Restore() disables the
+//     handler, the resulting signal / scheduler interaction can hang the process.
+//  2. force_dirty_n_pages: one mprotect(RW, whole) + N bitmap bits set.
+//
+// g_active remains 0 after this call. Restore() re-enables it at the end
+// via mprotect_set_active(1), so the next forceDirtyNPages call will see
+// g_active=1 and disable it again — correct alternating state for a bench loop.
+//
 // Not part of the SnapshotStrategy interface; benchmark use only.
 func (s *MprotectStrategy) forceDirtyNPages(count int) {
+	C.mprotect_set_active(0)
 	C.force_dirty_n_pages(C.int(count))
 }
 

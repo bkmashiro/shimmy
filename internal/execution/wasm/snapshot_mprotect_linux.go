@@ -123,17 +123,23 @@ static uint64_t read_dirty_word(int i) {
 
 static int dirty_nwords(void) { return g_dirty_nwords; }
 
-// force_dirty_range: mark [start_page, start_page+count) as dirty and lift
-// write-protection on those pages — without going through SIGSEGV.
-// Intended for benchmarks only: lets callers pre-set dirty state without
-// triggering rapid SIGSEGV from Go goroutines (which confuses Go's runtime
-// signal-dispatch machinery when fired 64+ times in a tight loop).
-static void force_dirty_range(int start_page, int count) {
+// force_dirty_n_pages: for benchmarking only.
+// Simulates N pages having been written during py_exec:
+//   1. One mprotect(PROT_READ|PROT_WRITE) call covers the ENTIRE region.
+//      (N individual per-page mprotect calls fragment the kernel VMA tree,
+//       causing O(N²) VMA merge/split work in mprotect_ro — measured as
+//       a 10-minute hang for N=64 in a tight benchmark loop.)
+//   2. Sets the first N bits of the dirty bitmap via atomic OR.
+// After this call, Restore() will find N dirty pages (their content writable),
+// restore them from the snapshot, and re-protect the region — identical to the
+// state left by N real WASM write faults handled by mprotect_sigsegv.
+static void force_dirty_n_pages(int count) {
+    if (!g_base || !g_size || !g_dirty_words) return;
+    // One syscall: whole region becomes PROT_READ|PROT_WRITE.
+    mprotect((void *)(uintptr_t)g_base, (size_t)g_size, PROT_READ | PROT_WRITE);
+    // Mark first `count` pages dirty in the bitmap.
     for (int i = 0; i < count; i++) {
-        int page_idx = start_page + i;
-        mark_dirty_page(page_idx);
-        uintptr_t page_addr = g_base + (uintptr_t)page_idx * (uintptr_t)g_page_size;
-        mprotect((void *)page_addr, (size_t)g_page_size, PROT_READ | PROT_WRITE);
+        mark_dirty_page(i);
     }
 }
 */
@@ -297,11 +303,12 @@ func popcount64(x uint64) int {
 	return n
 }
 
-// forceDirtyRange marks pages [startPage, startPage+count) as dirty and lifts
-// their write-protection via the C helper — without going through SIGSEGV.
-// Used only by benchmarks; not part of the SnapshotStrategy interface.
-func (s *MprotectStrategy) forceDirtyRange(startPage, count int) {
-	C.force_dirty_range(C.int(startPage), C.int(count))
+// forceDirtyNPages pre-sets dirty state for benchmarks: makes the entire linear
+// memory region PROT_RW with one mprotect call and marks the first `count`
+// pages dirty in the bitmap — without going through the SIGSEGV path.
+// Not part of the SnapshotStrategy interface; benchmark use only.
+func (s *MprotectStrategy) forceDirtyNPages(count int) {
+	C.force_dirty_n_pages(C.int(count))
 }
 
 // Close deactivates fault tracking, removes the SIGSEGV handler, and restores

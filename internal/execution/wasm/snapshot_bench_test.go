@@ -224,11 +224,11 @@ func BenchmarkRestoreNPages(b *testing.B) {
 					// Dirty exactly nDirty pages before each Restore().
 					//
 					// Strategy-specific approach:
-					//   mprotect:   use the C force_dirty_range helper — sets
-					//               bitmap bits + lifts write-protection directly,
-					//               without triggering SIGSEGV from a Go goroutine.
-					//               (Rapid Go SIGSEGV in a loop crashes Go's runtime
-					//               signal-dispatch at ~64+ events per iteration.)
+					//   mprotect:   forceDirtyNPages — ONE mprotect(RW) on whole
+					//               region + N bitmap bits set. Avoids both rapid
+					//               Go SIGSEGV (runtime signal-dispatch crash) AND
+					//               N per-page mprotect calls (VMA fragmentation
+					//               causes O(N²) kernel merge work → 10-min hang).
 					//   soft-dirty: plain Go writes — sets kernel PTE soft-dirty
 					//               bit, same as WASM guest writes would.
 					//   memcpy/uffd: writes are irrelevant (Restore copies all
@@ -236,7 +236,7 @@ func BenchmarkRestoreNPages(b *testing.B) {
 					//               the loop body identical across strategies.
 					switch ms := r.strategy.(type) {
 					case *MprotectStrategy:
-						ms.forceDirtyRange(0, nDirty)
+						ms.forceDirtyNPages(nDirty)
 					default:
 						raw := unsafe.Slice((*byte)(basePtr), nDirty*pageSize)
 						for pg := 0; pg < nDirty; pg++ {

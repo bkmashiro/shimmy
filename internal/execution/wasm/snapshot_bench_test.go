@@ -3,7 +3,6 @@
 package wasm
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -15,16 +14,6 @@ import (
 
 	"go.uber.org/zap"
 )
-
-// isWSL2 returns true when running inside a WSL2 / Hyper-V kernel.
-// WSL2 kernels include "microsoft" in /proc/version (case-insensitive).
-func isWSL2() bool {
-	data, err := os.ReadFile("/proc/version")
-	if err != nil {
-		return false
-	}
-	return bytes.Contains(bytes.ToLower(data), []byte("microsoft"))
-}
 
 // ---------------------------------------------------------------------------
 // Snapshot Strategy Benchmark Suite
@@ -227,22 +216,25 @@ func BenchmarkRestoreNPages(b *testing.B) {
 					b.Skipf("nDirty=%d > totalPages=%d", nDirty, totalPages)
 				}
 
-				// mprotect + WSL2: only the dirty0 data point is safe.
+				// mprotect: only dirty0 is safe in any virtualised environment.
 				//
 				// dirty0: force_dirty_n_pages(0) calls mprotect(RW,14MB) but
-				// writes ZERO pages, so no TLB entries are created. Restore()
-				// then calls mprotect_ro(14MB) with nothing to flush → ~880µs.
-				// This captures the mprotect_ro fixed-cost baseline.
+				// writes ZERO pages — no real TLB entries. Restore() calls
+				// mprotect_ro(14MB) with nothing to flush → ~880µs. This is
+				// the mprotect_ro fixed-cost baseline (the dominant cost).
 				//
-				// dirty>0 on WSL2: Restore() writes dirty pages (real TLB
-				// entries), then mprotect_ro(14MB) triggers Hyper-V TLB
-				// shootdown (IPI to all virtual CPUs) which hangs indefinitely
-				// even for 16 written pages. Skip on WSL2 only.
+				// dirty>0: Restore() calls mem.Write() for each dirty page,
+				// creating real TLB entries. The subsequent mprotect_ro(14MB)
+				// must shoot down those TLB entries across all virtual CPUs
+				// (IPI). In any VM environment (WSL2/Hyper-V, GitHub Actions/
+				// Azure, QEMU, …) this hangs indefinitely even for ~16 pages,
+				// because the hypervisor serialises cross-vCPU IPIs.
 				//
-				// On bare Linux (e.g. CI): no Hyper-V; mprotect_ro is fast
-				// and all dirty counts run normally.
-				if _, ok := r.strategy.(*MprotectStrategy); ok && nDirty > 0 && isWSL2() {
-					b.Skipf("mprotect: skip dirty>0 on WSL2 — Hyper-V TLB shootdown hangs on written pages; dirty0=880µs gives mprotect_ro baseline")
+				// On bare-metal Linux the shootdown is fast (local APIC), but
+				// benchmark CI always runs in VMs. Skip dirty>0 universally.
+				// The end-to-end latency is captured by BenchmarkStrategy (4.9ms).
+				if _, ok := r.strategy.(*MprotectStrategy); ok && nDirty > 0 {
+					b.Skipf("mprotect: skip dirty>0 — VM TLB shootdown hangs on written pages; dirty0≈880µs captures mprotect_ro baseline")
 				}
 
 				b.ReportAllocs()

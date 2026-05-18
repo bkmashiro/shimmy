@@ -75,6 +75,10 @@ const residentServerScript = `import sys, json
 sys.stdout.write("__READY__\n")
 sys.stdout.flush()
 
+# Snapshot of sys.modules at startup — used to evict any modules imported by
+# user scripts after each request, preventing cross-request module state leaks.
+_base_modules = frozenset(sys.modules.keys())
+
 while True:
     try:
         line = sys.stdin.readline()
@@ -112,6 +116,13 @@ while True:
                 result = fn(input_data.get("response"), input_data.get("answer"), input_data.get("params", {}))
     except Exception as e:
         result = {"error": str(e)}
+    finally:
+        # Evict any modules imported during this request so their mutable state
+        # does not leak into the next request. Base modules (sys, json, etc.)
+        # loaded at startup are kept to avoid the cost of re-importing them.
+        for _mod in list(sys.modules.keys()):
+            if _mod not in _base_modules:
+                del sys.modules[_mod]
     sys.stdout.write(json.dumps(result) + "\n__DONE__\n")
     sys.stdout.flush()
 `

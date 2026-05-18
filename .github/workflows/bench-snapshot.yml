@@ -1,0 +1,80 @@
+name: Snapshot Strategy Benchmarks
+
+on:
+  push:
+    branches: [feat/wasm-backend, main]
+    paths:
+      - 'internal/execution/wasm/snapshot*.go'
+      - 'internal/execution/wasm/snapshot_bench_test.go'
+  pull_request:
+    paths:
+      - 'internal/execution/wasm/snapshot*.go'
+      - 'internal/execution/wasm/snapshot_bench_test.go'
+  workflow_dispatch:  # allow manual trigger
+
+jobs:
+  bench:
+    name: Benchmark (bare Linux)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install C toolchain (for CGO/mprotect)
+        run: sudo apt-get install -y gcc libc6-dev
+
+      - name: Download python-reactor.wasm
+        run: |
+          curl -fsSL \
+            "https://github.com/bkmashiro/shimmy-wasm-go/releases/download/wasm-artifacts/python-reactor.wasm" \
+            -o python-reactor.wasm
+          ls -lh python-reactor.wasm
+
+      - name: BenchmarkRestoreNPages (dirty-page curve)
+        env:
+          PYTHON_REACTOR_WASM: ${{ github.workspace }}/python-reactor.wasm
+          CGO_ENABLED: "1"
+        run: |
+          go test -bench=BenchmarkRestoreNPages \
+            -benchtime=10s -timeout=600s -benchmem \
+            ./internal/execution/wasm/ | tee bench-dirty.txt
+
+      - name: BenchmarkStrategy (per-request latency)
+        env:
+          PYTHON_REACTOR_WASM: ${{ github.workspace }}/python-reactor.wasm
+          CGO_ENABLED: "1"
+        run: |
+          go test -bench=BenchmarkStrategy \
+            -benchtime=20s -timeout=900s -benchmem \
+            ./internal/execution/wasm/ | tee bench-strategy.txt
+
+      - name: BenchmarkPool (concurrent throughput)
+        env:
+          PYTHON_REACTOR_WASM: ${{ github.workspace }}/python-reactor.wasm
+          CGO_ENABLED: "1"
+        run: |
+          go test -bench=BenchmarkPool \
+            -benchtime=15s -timeout=600s -benchmem \
+            ./internal/execution/wasm/ | tee bench-pool.txt
+
+      - name: BenchmarkTakeOnly + BenchmarkRestoreOnly
+        env:
+          PYTHON_REACTOR_WASM: ${{ github.workspace }}/python-reactor.wasm
+          CGO_ENABLED: "1"
+        run: |
+          go test -bench='BenchmarkTakeOnly|BenchmarkRestoreOnly' \
+            -benchtime=10s -timeout=300s -benchmem \
+            ./internal/execution/wasm/ | tee bench-isolate.txt
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-results-${{ github.sha }}
+          path: bench-*.txt
+          retention-days: 90

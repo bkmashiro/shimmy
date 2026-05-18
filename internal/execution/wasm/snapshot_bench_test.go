@@ -216,6 +216,15 @@ func BenchmarkRestoreNPages(b *testing.B) {
 					b.Skipf("nDirty=%d > totalPages=%d", nDirty, totalPages)
 				}
 
+				// mprotect Restore() cost is dominated by the single mprotect_ro(14MB)
+				// syscall (~950µs), not by dirty-page copying. The cost is flat for
+				// 0..256 pages (data already conclusive). Above ~512 pages, WSL2's
+				// Hyper-V TLB shootdown (IPI to all virtual CPUs for recently-written
+				// pages) causes mprotect_ro to hang indefinitely. Skip those counts.
+				if _, ok := r.strategy.(*MprotectStrategy); ok && nDirty > 256 {
+					b.Skipf("mprotect: skip dirty>256 — mprotect_ro cost is flat (WSL2 TLB shootdown hangs above threshold)")
+				}
+
 				b.ReportAllocs()
 				b.ResetTimer()
 

@@ -6,27 +6,11 @@ package wasm
 // memory region with mprotect(PROT_READ) and catching SIGSEGV faults via a C
 // signal handler installed with SA_SIGINFO.
 //
-// On each write fault:
-//  1. The C handler invokes the goDirtyPageCallback Go export.
-//  2. goDirtyPageCallback marks the page dirty and calls mprotect to restore
-//     PROT_READ|PROT_WRITE so the faulting thread can continue.
-//
-// On Restore, only dirty pages are copied back from the snapshot and the entire
-// region is re-protected for the next request.
-//
-// Cost: Take = O(N) copy + mprotect(whole region)
-//
-//	Restore = O(D) page copies + mprotect(whole region)  (D = dirty pages)
-//	Per write fault = O(1) mprotect(one page)
-//
-// Caveats:
-//   - Requires CGO (C signal handler).
-//   - Installs a global SIGSEGV handler; only one MprotectStrategy may be
-//     active at a time. A global mutex guards registration.
-//   - Chains to Go's runtime SIGSEGV handler for faults outside the registered
-//     region; the runtime handler deals with nil-pointer panics etc.
-//   - Not suitable for environments where installing SA_SIGINFO is
-//     restricted (e.g. strict seccomp profiles).
+// Signal-safety: goDirtyPageCallback is called from a C signal handler context.
+// It must not enter the Go scheduler, allocate, or take any Go mutex. All dirty-
+// page state is recorded via C-level atomic stores into a bitmap allocated with
+// malloc (so the GC never touches it). The Go runtime is only entered after the
+// signal handler returns, in Take/Restore which run on normal goroutine stacks.
 
 /*
 #cgo CFLAGS: -O2
@@ -34,64 +18,110 @@ package wasm
 #include <sys/mman.h>
 #include <stdint.h>
 #include <string.h>
+#include <stdlib.h>
 #include <unistd.h>
-
-// Forward declaration of the Go callback (exported via //export).
-extern void goDirtyPageCallback(uint64_t addr);
+#include <stdatomic.h>
 
 static struct sigaction g_prev_sigsegv;
-static volatile int     g_active   = 0;
-static uint64_t         g_base     = 0;
-static uint64_t         g_size     = 0;
+static volatile int     g_active    = 0;
+static uint64_t         g_base      = 0;
+static uint64_t         g_size      = 0;
+static int              g_page_size = 4096;
+
+// Dirty bitmap: one bit per page, stored in a malloc'd array of uint64_t words.
+// Accessed only with atomic operations so no mutex is needed in the signal handler.
+static _Atomic uint64_t *g_dirty_words = NULL;
+static int               g_dirty_nwords = 0;
+
+// mark_dirty_page: atomically set the bit for the given page index.
+// Signal-safe: uses only atomic RMW, no locks, no syscalls besides mprotect.
+static void mark_dirty_page(int page_idx) {
+    int word = page_idx / 64;
+    int bit  = page_idx % 64;
+    if (word < g_dirty_nwords) {
+        atomic_fetch_or_explicit(&g_dirty_words[word],
+                                 (uint64_t)1 << bit,
+                                 memory_order_relaxed);
+    }
+}
 
 static void mprotect_sigsegv(int sig, siginfo_t *info, void *ctx) {
     uint64_t addr = (uint64_t)(uintptr_t)info->si_addr;
     if (g_active && addr >= g_base && addr < g_base + g_size) {
-        goDirtyPageCallback(addr);
+        // Compute page index and mark dirty (signal-safe atomic).
+        int page_idx = (int)((addr - g_base) / (uint64_t)g_page_size);
+        mark_dirty_page(page_idx);
+
+        // Lift write-protection on this page so the faulting store can retry.
+        uintptr_t page_addr = (uintptr_t)addr & ~((uintptr_t)g_page_size - 1);
+        mprotect((void *)page_addr, (size_t)g_page_size, PROT_READ | PROT_WRITE);
         return;
     }
-    // Chain to the previous handler (Go runtime or SIG_DFL).
+    // Chain to the previous handler (Go runtime handles nil-pointer panics etc.).
     if (g_prev_sigsegv.sa_flags & SA_SIGINFO) {
         g_prev_sigsegv.sa_sigaction(sig, info, ctx);
     } else if (g_prev_sigsegv.sa_handler != SIG_DFL &&
                g_prev_sigsegv.sa_handler != SIG_IGN) {
         g_prev_sigsegv.sa_handler(sig);
     }
-    // For SIG_DFL we do nothing — Go's runtime will have already set up an
-    // alternate stack and the default action (core dump) will proceed.
 }
 
-static int mprotect_install(uint64_t base, uint64_t size) {
-    g_base   = base;
-    g_size   = size;
-    g_active = 0;
+static int mprotect_install(uint64_t base, uint64_t size, int page_size, int page_count) {
+    g_base      = base;
+    g_size      = size;
+    g_page_size = page_size;
+    g_active    = 0;
+
+    int nwords = (page_count + 63) / 64;
+    g_dirty_words  = (_Atomic uint64_t *)calloc((size_t)nwords, sizeof(_Atomic uint64_t));
+    g_dirty_nwords = nwords;
+    if (!g_dirty_words) return -1;
+
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_sigaction = mprotect_sigsegv;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_NODEFER;
-    return sigaction(SIGSEGV, &sa, &g_prev_sigsegv);
+    int ret = sigaction(SIGSEGV, &sa, &g_prev_sigsegv);
+    if (ret != 0) {
+        free(g_dirty_words);
+        g_dirty_words = NULL;
+    }
+    return ret;
 }
 
 static void mprotect_remove(void) {
     g_active = 0;
     sigaction(SIGSEGV, &g_prev_sigsegv, NULL);
+    free(g_dirty_words);
+    g_dirty_words  = NULL;
+    g_dirty_nwords = 0;
 }
 
-static void mprotect_set_active(int v) { g_active = v; }
+static void mprotect_set_active(int v)  { g_active = v; }
 
 static int mprotect_ro(uint64_t addr, uint64_t len) {
     return mprotect((void *)(uintptr_t)addr, (size_t)len, PROT_READ);
 }
 
-static int mprotect_rw_page(uint64_t addr, int pgsz) {
-    uintptr_t page = (uintptr_t)addr & ~((uintptr_t)pgsz - 1);
-    return mprotect((void *)page, (size_t)pgsz, PROT_READ | PROT_WRITE);
-}
-
 static int mprotect_rw(uint64_t addr, uint64_t len) {
     return mprotect((void *)(uintptr_t)addr, (size_t)len, PROT_READ | PROT_WRITE);
 }
+
+// clear_dirty_bitmap resets all dirty bits atomically.
+static void clear_dirty_bitmap(void) {
+    for (int i = 0; i < g_dirty_nwords; i++) {
+        atomic_store_explicit(&g_dirty_words[i], 0, memory_order_relaxed);
+    }
+}
+
+// read_dirty_word returns the i-th 64-bit word of the dirty bitmap.
+static uint64_t read_dirty_word(int i) {
+    if (i < 0 || i >= g_dirty_nwords) return 0;
+    return atomic_load_explicit(&g_dirty_words[i], memory_order_relaxed);
+}
+
+static int dirty_nwords(void) { return g_dirty_nwords; }
 */
 import "C"
 
@@ -104,44 +134,25 @@ import (
 	"github.com/tetratelabs/wazero/api"
 )
 
-// mprotectGlobal guards the single active MprotectStrategy instance.
-// Only one strategy may be active at a time because there is one global
-// SIGSEGV handler.
-var (
-	mprotectGlobal   sync.Mutex
-	mprotectActiveSt *MprotectStrategy
-)
-
-// goDirtyPageCallback is called from C when a write-protect SIGSEGV fires
-// inside the WASM linear memory region. It marks the faulting page dirty and
-// immediately re-allows writes so the faulting instruction can retry.
-//
-//export goDirtyPageCallback
-func goDirtyPageCallback(addr C.uint64_t) {
-	mprotectGlobal.Lock()
-	s := mprotectActiveSt
-	mprotectGlobal.Unlock()
-	if s == nil {
-		return
-	}
-	s.handleFault(uint64(addr))
-}
+// mprotectMu guards NewMprotectStrategy / Close so only one instance is active.
+var mprotectMu sync.Mutex
 
 // MprotectStrategy implements SnapshotStrategy via mprotect write-protection
 // and SIGSEGV-based dirty page tracking.
+//
+// The dirty-page bitmap lives in C-allocated memory and is updated exclusively
+// via C atomic operations inside the signal handler — no Go runtime involvement
+// during fault handling, so "morestack on g0" cannot occur.
 type MprotectStrategy struct {
 	basePtr   unsafe.Pointer
 	memSize   uint32
 	pageSize  int
 	pageCount int
 	snapshot  []byte
-
-	mu    sync.Mutex
-	dirty []bool
 }
 
 // NewMprotectStrategy creates a MprotectStrategy for the given WASM module
-// memory. It installs the global SIGSEGV handler.
+// memory and installs the global SIGSEGV handler.
 func NewMprotectStrategy(mem api.Memory) (*MprotectStrategy, error) {
 	if mem == nil {
 		return nil, fmt.Errorf("mprotect: nil api.Memory")
@@ -160,164 +171,123 @@ func NewMprotectStrategy(mem api.Memory) (*MprotectStrategy, error) {
 	pageSize := syscall.Getpagesize()
 	pageCount := int((uint64(size) + uint64(pageSize) - 1) / uint64(pageSize))
 
-	s := &MprotectStrategy{
+	mprotectMu.Lock()
+	defer mprotectMu.Unlock()
+
+	ret := C.mprotect_install(
+		C.uint64_t(uintptr(basePtr)),
+		C.uint64_t(size),
+		C.int(pageSize),
+		C.int(pageCount),
+	)
+	if ret != 0 {
+		return nil, fmt.Errorf("mprotect: sigaction install failed (ret=%d)", int(ret))
+	}
+
+	return &MprotectStrategy{
 		basePtr:   basePtr,
 		memSize:   size,
 		pageSize:  pageSize,
 		pageCount: pageCount,
 		snapshot:  make([]byte, size),
-		dirty:     make([]bool, pageCount),
-	}
-
-	// Install the global C signal handler.
-	if ret := C.mprotect_install(
-		C.uint64_t(uintptr(basePtr)),
-		C.uint64_t(size),
-	); ret != 0 {
-		return nil, fmt.Errorf("mprotect: sigaction install failed (ret=%d)", int(ret))
-	}
-
-	return s, nil
+	}, nil
 }
 
-// handleFault is called by goDirtyPageCallback when a fault fires inside our
-// region. It marks the page dirty and lifts write-protection on that page.
-func (s *MprotectStrategy) handleFault(addr uint64) {
-	base := uint64(uintptr(s.basePtr))
-	if addr < base || addr >= base+uint64(s.memSize) {
-		return
-	}
-	pageIdx := int((addr - base) / uint64(s.pageSize))
-
-	// Lift WP on this page BEFORE marking dirty so the faulting thread can
-	// immediately retry. mprotect_rw_page aligns addr to page boundary.
-	C.mprotect_rw_page(C.uint64_t(addr), C.int(s.pageSize))
-
-	s.mu.Lock()
-	if pageIdx < len(s.dirty) {
-		s.dirty[pageIdx] = true
-	}
-	s.mu.Unlock()
-}
-
-// Take implements SnapshotStrategy. It copies the current linear memory into
-// the snapshot and write-protects the entire region.
+// Take implements SnapshotStrategy. Copies current linear memory into the
+// snapshot, write-protects the whole region, and clears the dirty bitmap.
 func (s *MprotectStrategy) Take(mem api.Memory) error {
 	if mem == nil {
 		return nil
 	}
 
-	// Ensure we're the active strategy (only one at a time).
-	mprotectGlobal.Lock()
-	if mprotectActiveSt != nil && mprotectActiveSt != s {
-		mprotectGlobal.Unlock()
-		return fmt.Errorf("mprotect: another MprotectStrategy is already active")
-	}
-	mprotectActiveSt = s
-	mprotectGlobal.Unlock()
-
-	// Snapshot current memory contents.
+	// Snapshot from the raw backing slice (no wazero copy).
 	raw := unsafe.Slice((*byte)(s.basePtr), s.memSize)
-	s.mu.Lock()
 	copy(s.snapshot, raw)
-	for i := range s.dirty {
-		s.dirty[i] = false
-	}
-	s.mu.Unlock()
 
 	// Write-protect the entire region.
-	if ret := C.mprotect_ro(
-		C.uint64_t(uintptr(s.basePtr)),
-		C.uint64_t(s.memSize),
-	); ret != 0 {
-		return fmt.Errorf("mprotect: mprotect(PROT_READ) failed (ret=%d)", int(ret))
+	if ret := C.mprotect_ro(C.uint64_t(uintptr(s.basePtr)), C.uint64_t(s.memSize)); ret != 0 {
+		return fmt.Errorf("mprotect: Take: mprotect(PROT_READ) failed")
 	}
 
-	// Activate fault tracking.
+	// Clear dirty bitmap and activate fault tracking.
+	C.clear_dirty_bitmap()
 	C.mprotect_set_active(1)
 	return nil
 }
 
-// Restore implements SnapshotStrategy. It restores dirty pages from the
-// snapshot and re-protects the region for the next request.
+// Restore implements SnapshotStrategy. Restores only dirty pages, re-protects
+// the region, and clears the dirty bitmap for the next request.
 func (s *MprotectStrategy) Restore(mem api.Memory) error {
 	if mem == nil || s.snapshot == nil {
 		return nil
 	}
 
-	// Pause fault tracking while we restore (our own writes shouldn't be
-	// counted as guest writes).
+	// Pause fault tracking while we restore.
 	C.mprotect_set_active(0)
 
-	s.mu.Lock()
-	var dirtyPages []int
-	for i, d := range s.dirty {
-		if d {
-			dirtyPages = append(dirtyPages, i)
-			s.dirty[i] = false
-		}
-	}
-	s.mu.Unlock()
-
+	// Collect dirty pages from C bitmap.
+	nwords := int(C.dirty_nwords())
 	pageSize := s.pageSize
-	for _, pg := range dirtyPages {
-		off := uint32(pg * pageSize)
-		end := off + uint32(pageSize)
-		if end > s.memSize {
-			end = s.memSize
+
+	for w := 0; w < nwords; w++ {
+		word := uint64(C.read_dirty_word(C.int(w)))
+		if word == 0 {
+			continue
 		}
-		// Dirty pages are already PROT_READ|PROT_WRITE (lifted in handleFault).
-		if !mem.Write(off, s.snapshot[off:end]) {
-			return fmt.Errorf("mprotect: Restore: mem.Write failed at offset %d", off)
+		for b := 0; b < 64; b++ {
+			if word&(1<<uint(b)) == 0 {
+				continue
+			}
+			pg := w*64 + b
+			if pg >= s.pageCount {
+				break
+			}
+			off := uint32(pg * pageSize)
+			end := off + uint32(pageSize)
+			if end > s.memSize {
+				end = s.memSize
+			}
+			// Dirty pages are already PROT_READ|PROT_WRITE (lifted in handler).
+			if !mem.Write(off, s.snapshot[off:end]) {
+				return fmt.Errorf("mprotect: Restore: mem.Write failed at offset %d", off)
+			}
 		}
 	}
 
-	// Re-protect the entire region for the next request's fault tracking.
-	if ret := C.mprotect_ro(
-		C.uint64_t(uintptr(s.basePtr)),
-		C.uint64_t(s.memSize),
-	); ret != 0 {
-		return fmt.Errorf("mprotect: Restore: re-protect failed (ret=%d)", int(ret))
+	// Re-protect entire region and reset bitmap.
+	if ret := C.mprotect_ro(C.uint64_t(uintptr(s.basePtr)), C.uint64_t(s.memSize)); ret != 0 {
+		return fmt.Errorf("mprotect: Restore: re-protect failed")
 	}
-
-	// Resume fault tracking.
+	C.clear_dirty_bitmap()
 	C.mprotect_set_active(1)
 	return nil
 }
 
-// DirtyPageCount returns the number of pages dirtied since the last Take or
-// Restore. For benchmarking.
+// DirtyPageCount returns the number of dirty pages since the last Take/Restore.
 func (s *MprotectStrategy) DirtyPageCount() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	nwords := int(C.dirty_nwords())
+	count := 0
+	for w := 0; w < nwords; w++ {
+		word := uint64(C.read_dirty_word(C.int(w)))
+		count += int(popcount64(word))
+	}
+	return count
+}
+
+func popcount64(x uint64) int {
 	n := 0
-	for _, d := range s.dirty {
-		if d {
-			n++
-		}
+	for x != 0 {
+		n += int(x & 1)
+		x >>= 1
 	}
 	return n
 }
 
-// Close implements SnapshotStrategy. It deactivates fault tracking, removes
-// the SIGSEGV handler, and restores write access to the memory region.
+// Close deactivates fault tracking, removes the SIGSEGV handler, and restores
+// full read-write access.
 func (s *MprotectStrategy) Close() error {
 	C.mprotect_set_active(0)
-
-	mprotectGlobal.Lock()
-	if mprotectActiveSt == s {
-		mprotectActiveSt = nil
-	}
-	mprotectGlobal.Unlock()
-
 	C.mprotect_remove()
-
-	// Restore full read-write access so the caller can use the memory again.
-	C.mprotect_rw(
-		C.uint64_t(uintptr(s.basePtr)),
-		C.uint64_t(s.memSize),
-	)
-
-	s.snapshot = nil
+	C.mprotect_rw(C.uint64_t(uintptr(s.basePtr)), C.uint64_t(s.memSize))
 	return nil
 }

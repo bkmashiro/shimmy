@@ -44,6 +44,7 @@ package wasm
 //  8. (dealloc not needed — next restore clears the heap)
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -146,9 +147,15 @@ func (r *ReactorPythonRunner) Init(ctx context.Context) error {
 	defer func() { _ = compiled.Close(ctx) }()
 
 	// Reactor mode: wazero calls _initialize (not _start) on instantiation.
+	// PYTHONHOME tells CPython 3.14 where to find the stdlib that wasi-vfs
+	// packed at /usr/lib/python3.14 inside the WASM binary.
+	var stderrBuf bytes.Buffer
 	mc := wazero.NewModuleConfig().
 		WithName("").
 		WithStartFunctions("_initialize").
+		WithEnv("PYTHONHOME", "/usr").
+		WithEnv("PYTHONDONTWRITEBYTECODE", "1").
+		WithStderr(&stderrBuf).
 		WithSysNanosleep().
 		WithSysWalltime().
 		WithSysNanotime()
@@ -184,8 +191,9 @@ func (r *ReactorPythonRunner) Init(ctx context.Context) error {
 	// Call py_init() to start CPython and define _handle_request.
 	r.log.Info("calling py_init() to initialise CPython (~7-8 s)...")
 	if _, err := r.fnPyInit.Call(ctx); err != nil {
+		stderr := stderrBuf.String()
 		_ = r.closeAll(ctx)
-		return fmt.Errorf("reactor python: py_init(): %w", err)
+		return fmt.Errorf("reactor python: py_init(): %w\nstderr: %s", err, stderr)
 	}
 	r.log.Info("py_init() complete — CPython is ready")
 

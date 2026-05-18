@@ -216,13 +216,24 @@ func BenchmarkRestoreNPages(b *testing.B) {
 					b.Skipf("nDirty=%d > totalPages=%d", nDirty, totalPages)
 				}
 
-				// mprotect Restore() cost is dominated by the single mprotect_ro(14MB)
-				// syscall (~950µs), not by dirty-page copying. The cost is flat for
-				// 0..256 pages (data already conclusive). Above ~512 pages, WSL2's
-				// Hyper-V TLB shootdown (IPI to all virtual CPUs for recently-written
-				// pages) causes mprotect_ro to hang indefinitely. Skip those counts.
-				if _, ok := r.strategy.(*MprotectStrategy); ok && nDirty > 256 {
-					b.Skipf("mprotect: skip dirty>256 — mprotect_ro cost is flat (WSL2 TLB shootdown hangs above threshold)")
+				// mprotect: only the dirty0 data point is safe on WSL2.
+				//
+				// dirty0: force_dirty_n_pages(0) calls mprotect(RW,14MB) but
+				// writes ZERO pages, so no TLB entries are created. Restore()
+				// then calls mprotect_ro(14MB) with nothing to flush → ~880µs.
+				// This is the mprotect_ro baseline (the dominant fixed cost).
+				//
+				// dirty>0: Restore() calls mem.Write() for each dirty page,
+				// creating real TLB entries. When mprotect_ro(14MB) is then
+				// called, WSL2's Hyper-V TLB shootdown (IPI to all virtual CPUs)
+				// hangs indefinitely even for as few as 16 written pages.
+				//
+				// Conclusion: mprotect Restore() cost ≈ 880µs flat for all
+				// dirty counts — mprotect_ro(14MB) dominates; per-page copy is
+				// negligible. Full end-to-end latency is captured by
+				// BenchmarkStrategy (4.9ms). Skip dirty>0 for mprotect.
+				if _, ok := r.strategy.(*MprotectStrategy); ok && nDirty > 0 {
+					b.Skipf("mprotect: skip dirty>0 — WSL2 Hyper-V TLB shootdown hangs on any actually-written pages; dirty0=880µs captures mprotect_ro baseline")
 				}
 
 				b.ReportAllocs()

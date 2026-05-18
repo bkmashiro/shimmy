@@ -297,7 +297,7 @@ func TestUffdStrategy_SupervisorIntegration(t *testing.T) {
 		WithSysNanotime()
 
 	// useUffd=true
-	sv := newWasmSupervisor(rt, compiled, modCfg, 5*time.Second, true, newTestLogger(t))
+	sv := newWasmSupervisor(rt, compiled, modCfg, 5*time.Second, true, "", newTestLogger(t))
 	require.NoError(t, sv.Start(ctx))
 	t.Cleanup(func() { _ = sv.Shutdown(ctx) })
 

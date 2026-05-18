@@ -7,7 +7,7 @@ import (
 )
 
 // selectStrategy returns FullMemcpyStrategy on non-Linux platforms where
-// userfaultfd is not available.
+// userfaultfd, soft-dirty, and mprotect strategies are not available.
 func (s *wasmSupervisor) selectStrategy(mem api.Memory) SnapshotStrategy {
 	return NewFullMemcpyStrategy()
 }

@@ -119,7 +119,7 @@ func (d *Dispatcher) Start(ctx context.Context) error {
 	d.pool = make(chan *wasmSupervisor, maxInstances)
 
 	for i := 0; i < maxInstances; i++ {
-		sv := newWasmSupervisor(rt, compiled, modCfg, d.cfg.Timeout, d.cfg.UseUffd, d.log)
+		sv := newWasmSupervisor(rt, compiled, modCfg, d.cfg.Timeout, d.cfg.UseUffd, d.cfg.SnapshotMode, d.log)
 
 		if err := sv.Start(ctx); err != nil {
 			// Clean up already-started supervisors.

@@ -32,7 +32,12 @@ type wasmSupervisor struct {
 
 	// useUffd controls whether to attempt UffdStrategy on Start.
 	// When true and uffd is unavailable, falls back to FullMemcpyStrategy.
+	// Deprecated: prefer snapshotMode.
 	useUffd bool
+
+	// snapshotMode selects the snapshot strategy. See Config.SnapshotMode for
+	// valid values. When non-empty it takes precedence over useUffd.
+	snapshotMode string
 
 	timeout time.Duration
 	log     *zap.Logger
@@ -44,15 +49,17 @@ func newWasmSupervisor(
 	modCfg wazero.ModuleConfig,
 	timeout time.Duration,
 	useUffd bool,
+	snapshotMode string,
 	log *zap.Logger,
 ) *wasmSupervisor {
 	return &wasmSupervisor{
-		runtime:  rt,
-		compiled: compiled,
-		modCfg:   modCfg,
-		useUffd:  useUffd,
-		timeout:  timeout,
-		log:      log.Named("supervisor_wasm"),
+		runtime:      rt,
+		compiled:     compiled,
+		modCfg:       modCfg,
+		useUffd:      useUffd,
+		snapshotMode: snapshotMode,
+		timeout:      timeout,
+		log:          log.Named("supervisor_wasm"),
 	}
 }
 

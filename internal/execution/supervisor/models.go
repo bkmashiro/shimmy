@@ -29,6 +29,12 @@ const (
 	// The runner speaks LSP-framed JSON-RPC 2.0 over stdio.
 	// Use FUNCTION_PYODIDE_SCRIPT to specify the Python eval script path.
 	PyodideIO IOInterface = "pyodide"
+
+	// ReactorPythonIO describes execution of Python scripts via a reactor-mode
+	// python-reactor.wasm binary running inside wazero with snapshot/restore
+	// isolation. Provides true per-request interpreter isolation via memory
+	// snapshotting after py_init().
+	ReactorPythonIO IOInterface = "reactor-python"
 )
 
 // IOTransport describes the transport mechanism used to communicate with

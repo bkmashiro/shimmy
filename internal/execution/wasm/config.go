@@ -51,6 +51,17 @@ type Config struct {
 	// Populated from FUNCTION_WASM_USE_UFFD=true.
 	UseUffd bool `conf:"use_uffd"`
 
+	// SnapshotMode selects the strategy used to snapshot and restore WASM linear
+	// memory between requests. Valid values:
+	//   "memcpy"     — copy all pages on every restore (default, always available)
+	//   "soft-dirty" — use /proc/self/pagemap soft-dirty bits (Linux >= 3.18)
+	//   "mprotect"   — use mprotect(PROT_READ) + SIGSEGV dirty tracking (Linux + CGO)
+	//   "uffd"       — use userfaultfd write-protect (Linux, requires privilege)
+	//
+	// Falls back to "memcpy" if the requested strategy is unavailable.
+	// FUNCTION_WASM_SNAPSHOT_MODE env var.
+	SnapshotMode string `conf:"wasm_snapshot_mode"`
+
 	// PythonScriptPath is the path to the Python eval script (eval.py).
 	// Only used when FUNCTION_INTERFACE=python-wasm.
 	// The script must define evaluation_function(response, answer, params=None).
@@ -88,6 +99,9 @@ func (c *Config) applyEnv() {
 	}
 	if v := os.Getenv("FUNCTION_WASM_USE_UFFD"); v == "true" || v == "1" {
 		c.UseUffd = true
+	}
+	if v := os.Getenv("FUNCTION_WASM_SNAPSHOT_MODE"); v != "" {
+		c.SnapshotMode = v
 	}
 	if v := os.Getenv("FUNCTION_WASM_PYTHON_SCRIPT"); v != "" {
 		c.PythonScriptPath = v

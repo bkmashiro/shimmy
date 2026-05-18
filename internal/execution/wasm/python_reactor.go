@@ -73,9 +73,9 @@ type ReactorPythonRunner struct {
 	initialized bool
 	closed      bool
 
-	rt          wazero.Runtime
-	mod         api.Module
-	memSnapshot []byte // snapshot taken after py_init(); restored before each py_exec()
+	rt       wazero.Runtime
+	mod      api.Module
+	strategy SnapshotStrategy // snapshot taken after py_init(); restored before each py_exec()
 
 	// Cached exported functions.
 	fnPyInit  api.Function
@@ -180,19 +180,21 @@ func (r *ReactorPythonRunner) Init(ctx context.Context) error {
 	}
 	r.log.Info("py_init() complete — CPython is ready")
 
-	// Snapshot linear memory. The snapshot is restored before every py_exec().
-	memSize := mod.Memory().Size()
-	data, ok := mod.Memory().Read(0, memSize)
-	if !ok {
-		_ = r.closeAll(ctx)
-		return fmt.Errorf("reactor python: read memory for snapshot (size=%d)", memSize)
+	// Create snapshot strategy based on config.
+	s, err := r.newSnapshotStrategy(mod.Memory())
+	if err != nil {
+		r.log.Warn("requested snapshot strategy unavailable, falling back to memcpy",
+			zap.Error(err))
+		s = NewFullMemcpyStrategy()
 	}
-	snap := make([]byte, len(data))
-	copy(snap, data)
-	r.memSnapshot = snap
+	r.strategy = s
+	if err := r.strategy.Take(mod.Memory()); err != nil {
+		_ = r.closeAll(ctx)
+		return fmt.Errorf("reactor python: take snapshot: %w", err)
+	}
 	r.log.Info("memory snapshot taken",
-		zap.Uint32("pages", memSize/65536),
-		zap.Uint32("bytes", memSize),
+		zap.String("strategy", fmt.Sprintf("%T", r.strategy)),
+		zap.Uint32("mem_size", mod.Memory().Size()),
 	)
 
 	r.initialized = true
@@ -239,8 +241,8 @@ func (r *ReactorPythonRunner) SendRequest(ctx context.Context, script, method st
 	// This resets the Python heap, _resp_buf, _resp_len, and all CPython globals
 	// to their exact post-initialisation values. py_exec() will then run in a
 	// clean interpreter as if py_init() just completed.
-	if !r.mod.Memory().Write(0, r.memSnapshot) {
-		return nil, fmt.Errorf("reactor python: restore memory snapshot failed")
+	if err := r.strategy.Restore(r.mod.Memory()); err != nil {
+		return nil, fmt.Errorf("reactor python: restore snapshot: %w", err)
 	}
 
 	// ── Step 2: Allocate scratch for request JSON ─────────────────────────
@@ -326,7 +328,27 @@ func (r *ReactorPythonRunner) Shutdown(ctx context.Context) error {
 	r.log.Debug("shutting down reactor python runner")
 	r.closed = true
 	r.initialized = false
+	if r.strategy != nil {
+		_ = r.strategy.Close()
+	}
 	return r.closeAll(ctx)
+}
+
+// newSnapshotStrategy creates the SnapshotStrategy requested by r.cfg.SnapshotMode.
+// Returns an error if the strategy is unavailable; the caller should fall back
+// to NewFullMemcpyStrategy().
+func (r *ReactorPythonRunner) newSnapshotStrategy(mem api.Memory) (SnapshotStrategy, error) {
+	switch r.cfg.SnapshotMode {
+	case "soft-dirty":
+		return NewSoftDirtyStrategy(mem)
+	case "mprotect":
+		return NewMprotectStrategy(mem)
+	case "uffd":
+		return NewUffdStrategy(mem)
+	default:
+		// "memcpy" or "" — always-available baseline.
+		return NewFullMemcpyStrategy(), nil
+	}
 }
 
 // ── Dispatcher ───────────────────────────────────────────────────────────────

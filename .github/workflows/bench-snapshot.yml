@@ -51,7 +51,7 @@ jobs:
           CGO_ENABLED: "1"
         run: |
           go test -run='^$' -bench=BenchmarkRestoreNPages \
-            -benchtime=10s -timeout=600s -benchmem \
+            -benchtime=10s -timeout=3600s -benchmem \
             ./internal/execution/wasm/ | tee bench-dirty.txt
 
       - name: BenchmarkStrategy (per-request latency)

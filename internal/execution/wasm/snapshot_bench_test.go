@@ -216,23 +216,11 @@ func BenchmarkRestoreNPages(b *testing.B) {
 					b.Skipf("nDirty=%d > totalPages=%d", nDirty, totalPages)
 				}
 
-				// mprotect: skip dirty>=1024 — VM TLB shootdown threshold.
-				//
-				// mprotect_ro(14MB) must TLB-shootdown all vCPUs for each
-				// page written since the last Take. In virtualised environments
-				// (WSL2/Hyper-V, GitHub Actions/Azure) the hypervisor
-				// serialises cross-vCPU IPIs; above ~512 dirty pages the
-				// accumulated shootdown latency causes a hang/timeout.
-				//
-				// Measured on Azure (CI): dirty0..512 complete normally
-				// (40–89µs), dirty1024 hangs for >11 min. On bare-metal Linux
-				// the shootdown is fast (local APIC) and all counts would run.
-				//
-				// The 0..512 range gives a clear linear curve; higher counts
-				// add no new information for the paper.
-				if _, ok := r.strategy.(*MprotectStrategy); ok && nDirty >= 1024 {
-					b.Skipf("mprotect: skip dirty>=%d — VM TLB shootdown hangs above ~512 dirty pages", nDirty)
-				}
+				// mprotect: mprotect_ro(14MB) must TLB-shootdown all vCPUs for
+				// each written page. In VMs (Hyper-V/Azure) the hypervisor
+				// serialises cross-vCPU IPIs, so shootdown cost scales with
+				// dirty-page count. timeout=3600s gives dirty1024..3500 room
+				// to complete even if each iteration takes several minutes.
 
 				b.ReportAllocs()
 				b.ResetTimer()

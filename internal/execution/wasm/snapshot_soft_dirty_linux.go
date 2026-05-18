@@ -139,6 +139,10 @@ func (s *SoftDirtyStrategy) DirtyPageCount() (int, error) {
 
 // readDirtyPageIndices reads /proc/self/pagemap and returns the indices of pages
 // (relative to the WASM linear memory base) that have their soft-dirty bit set.
+//
+// Implementation: one bulk ReadAt covers the entire WASM linear memory region
+// (pageCount × 8 bytes), replacing the previous per-page ReadAt loop that
+// issued pageCount separate syscalls (~3584 for a 14 MB region).
 func (s *SoftDirtyStrategy) readDirtyPageIndices() ([]int, error) {
 	f, err := os.Open("/proc/self/pagemap")
 	if err != nil {
@@ -152,17 +156,17 @@ func (s *SoftDirtyStrategy) readDirtyPageIndices() ([]int, error) {
 	const softDirtyBit = uint64(1) << 55
 
 	baseVPN := uintptr(s.basePtr) / uintptr(s.pageSize)
-	entrySize := int64(8) // bytes per page-map entry
+	offset := int64(baseVPN) * 8
+
+	// Single bulk read: all page entries for the WASM linear memory region.
+	buf := make([]byte, s.pageCount*8)
+	if _, err := f.ReadAt(buf, offset); err != nil {
+		return nil, fmt.Errorf("pagemap bulk ReadAt (offset=%d, len=%d): %w", offset, len(buf), err)
+	}
 
 	var dirty []int
-	buf := make([]byte, 8)
-
 	for pg := 0; pg < s.pageCount; pg++ {
-		offset := int64(baseVPN+uintptr(pg)) * entrySize
-		if _, err := f.ReadAt(buf, offset); err != nil {
-			return nil, fmt.Errorf("pagemap ReadAt pg=%d offset=%d: %w", pg, offset, err)
-		}
-		entry := binary.LittleEndian.Uint64(buf)
+		entry := binary.LittleEndian.Uint64(buf[pg*8 : pg*8+8])
 		if entry&softDirtyBit != 0 {
 			dirty = append(dirty, pg)
 		}

@@ -128,36 +128,11 @@ func (r *ReactorPythonRunner) Init(ctx context.Context) error {
 		return fmt.Errorf("reactor python: instantiate wasi: %w", err)
 	}
 
-	// CPython 3.14 WASM built with WASI SDK 33 imports dynamic-linking symbols
-	// from a host module named "env". We don't support dlopen (numpy is
-	// statically linked), so register no-op stubs that return NULL/0.
-	// Signatures match the WASM32 ABI: pointers and int are i32.
-	envBuilder := rt.NewHostModuleBuilder("env")
-	// dlopen(filename *i8, flags i32) -> i32  — returns NULL (no dynamic loading)
-	envBuilder.NewFunctionBuilder().
-		WithGoModuleFunction(api.GoModuleFunc(func(_ context.Context, _ api.Module, stack []uint64) {
-			stack[0] = 0 // NULL handle
-		}), []api.ValueType{api.ValueTypeI32, api.ValueTypeI32}, []api.ValueType{api.ValueTypeI32}).
-		Export("dlopen")
-	// dlclose(handle i32) -> i32  — always succeeds (returns 0)
-	envBuilder.NewFunctionBuilder().
-		WithGoModuleFunction(api.GoModuleFunc(func(_ context.Context, _ api.Module, stack []uint64) {
-			stack[0] = 0
-		}), []api.ValueType{api.ValueTypeI32}, []api.ValueType{api.ValueTypeI32}).
-		Export("dlclose")
-	// dlsym(handle i32, symbol *i8) -> i32  — returns NULL
-	envBuilder.NewFunctionBuilder().
-		WithGoModuleFunction(api.GoModuleFunc(func(_ context.Context, _ api.Module, stack []uint64) {
-			stack[0] = 0 // NULL
-		}), []api.ValueType{api.ValueTypeI32, api.ValueTypeI32}, []api.ValueType{api.ValueTypeI32}).
-		Export("dlsym")
-	// dlerror() -> i32  — returns NULL (no error string)
-	envBuilder.NewFunctionBuilder().
-		WithGoModuleFunction(api.GoModuleFunc(func(_ context.Context, _ api.Module, stack []uint64) {
-			stack[0] = 0 // NULL
-		}), []api.ValueType{}, []api.ValueType{api.ValueTypeI32}).
-		Export("dlerror")
-	if _, err := envBuilder.Instantiate(ctx); err != nil {
+	// CPython 3.14 WASM built with WASI SDK 33 imports ~90 symbols from the
+	// "env" host module: dynamic-linking stubs, numpy complex math, float16
+	// helpers, float status setters, and random hypergeometric stubs.
+	// All are registered by instantiateEnvModule.
+	if err := instantiateEnvModule(ctx, rt); err != nil {
 		_ = rt.Close(ctx)
 		return fmt.Errorf("reactor python: instantiate env module: %w", err)
 	}

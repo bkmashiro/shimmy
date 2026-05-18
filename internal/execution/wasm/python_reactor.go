@@ -128,6 +128,14 @@ func (r *ReactorPythonRunner) Init(ctx context.Context) error {
 		return fmt.Errorf("reactor python: instantiate wasi: %w", err)
 	}
 
+	// Some CPython WASM builds (e.g. built with WASI SDK 33) import symbols
+	// from a module named "env". Register an empty host module so that wazero
+	// does not fail with "module[env] not instantiated".
+	if _, err := rt.NewHostModuleBuilder("env").Instantiate(ctx); err != nil {
+		_ = rt.Close(ctx)
+		return fmt.Errorf("reactor python: instantiate env module: %w", err)
+	}
+
 	r.log.Info("compiling python-reactor.wasm (~1-2 s)")
 	compiled, err := rt.CompileModule(ctx, wasmBytes)
 	if err != nil {

@@ -216,25 +216,22 @@ func BenchmarkRestoreNPages(b *testing.B) {
 					b.Skipf("nDirty=%d > totalPages=%d", nDirty, totalPages)
 				}
 
-				// mprotect: only dirty0 is safe in any virtualised environment.
+				// mprotect: skip dirty>=1024 — VM TLB shootdown threshold.
 				//
-				// dirty0: force_dirty_n_pages(0) calls mprotect(RW,14MB) but
-				// writes ZERO pages — no real TLB entries. Restore() calls
-				// mprotect_ro(14MB) with nothing to flush → ~880µs. This is
-				// the mprotect_ro fixed-cost baseline (the dominant cost).
+				// mprotect_ro(14MB) must TLB-shootdown all vCPUs for each
+				// page written since the last Take. In virtualised environments
+				// (WSL2/Hyper-V, GitHub Actions/Azure) the hypervisor
+				// serialises cross-vCPU IPIs; above ~512 dirty pages the
+				// accumulated shootdown latency causes a hang/timeout.
 				//
-				// dirty>0: Restore() calls mem.Write() for each dirty page,
-				// creating real TLB entries. The subsequent mprotect_ro(14MB)
-				// must shoot down those TLB entries across all virtual CPUs
-				// (IPI). In any VM environment (WSL2/Hyper-V, GitHub Actions/
-				// Azure, QEMU, …) this hangs indefinitely even for ~16 pages,
-				// because the hypervisor serialises cross-vCPU IPIs.
+				// Measured on Azure (CI): dirty0..512 complete normally
+				// (40–89µs), dirty1024 hangs for >11 min. On bare-metal Linux
+				// the shootdown is fast (local APIC) and all counts would run.
 				//
-				// On bare-metal Linux the shootdown is fast (local APIC), but
-				// benchmark CI always runs in VMs. Skip dirty>0 universally.
-				// The end-to-end latency is captured by BenchmarkStrategy (4.9ms).
-				if _, ok := r.strategy.(*MprotectStrategy); ok && nDirty > 0 {
-					b.Skipf("mprotect: skip dirty>0 — VM TLB shootdown hangs on written pages; dirty0≈880µs captures mprotect_ro baseline")
+				// The 0..512 range gives a clear linear curve; higher counts
+				// add no new information for the paper.
+				if _, ok := r.strategy.(*MprotectStrategy); ok && nDirty >= 1024 {
+					b.Skipf("mprotect: skip dirty>=%d — VM TLB shootdown hangs above ~512 dirty pages", nDirty)
 				}
 
 				b.ReportAllocs()

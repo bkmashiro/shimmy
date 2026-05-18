@@ -6,10 +6,12 @@ on:
     paths:
       - 'internal/execution/wasm/snapshot*.go'
       - 'internal/execution/wasm/snapshot_bench_test.go'
+      - '.github/workflows/bench-snapshot.yml'
   pull_request:
     paths:
       - 'internal/execution/wasm/snapshot*.go'
       - 'internal/execution/wasm/snapshot_bench_test.go'
+      - '.github/workflows/bench-snapshot.yml'
   workflow_dispatch:  # allow manual trigger
 
 jobs:

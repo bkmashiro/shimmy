@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
+	"unsafe"
 
 	"go.uber.org/zap"
 )
@@ -18,38 +20,43 @@ import (
 //
 // Dimensions measured:
 //
-//  1. BenchmarkStrategy — per-request latency: strategy × workload (dirty ratio)
-//  2. BenchmarkPool     — concurrent throughput: strategy × pool size N
+//  1. BenchmarkStrategy    — realistic per-request latency: strategy × workload
+//  2. BenchmarkRestoreNPages — precise dirty-page-count effect on Restore cost
+//  3. BenchmarkPool        — concurrent throughput: strategy × pool size N
+//  4. BenchmarkTakeOnly    — isolate Take() (snapshot copy) cost
+//  5. BenchmarkRestoreOnly — isolate Restore() with zero dirty pages
 //
-// Run all:
+// Run examples:
 //
-//	PYTHON_REACTOR_WASM=~/bench/python-reactor.wasm \
-//	  CGO_ENABLED=1 go test -bench=BenchmarkStrategy \
-//	  -benchtime=30s -benchmem ./internal/execution/wasm/ | tee bench-strategy.txt
+//	PYTHON_REACTOR_WASM=~/bench/python-reactor.wasm CGO_ENABLED=1 \
+//	  go test -bench=BenchmarkStrategy -benchtime=30s -benchmem \
+//	  ./internal/execution/wasm/ | tee bench-strategy.txt
 //
-//	PYTHON_REACTOR_WASM=~/bench/python-reactor.wasm \
-//	  CGO_ENABLED=1 go test -bench=BenchmarkPool \
-//	  -benchtime=30s -benchmem ./internal/execution/wasm/ | tee bench-pool.txt
+//	PYTHON_REACTOR_WASM=~/bench/python-reactor.wasm CGO_ENABLED=1 \
+//	  go test -bench='BenchmarkPool|BenchmarkRestoreNPages' \
+//	  -benchtime=20s -benchmem \
+//	  ./internal/execution/wasm/ | tee bench-pool.txt
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Workload definitions
+// Workload scripts
 //
-// Each workload controls how many 4 KB pages CPython writes during one
-// py_exec() call.  After strategy.Take() the WASM linear memory is write-
-// protected (mprotect) or soft-dirty-cleared; writes from Python set the
-// dirty state that Restore() must undo.
+// Python bytearray(n) for n < 256KB goes through dlmalloc's heap (sbrk/brk
+// path inside WASM linear memory) rather than mmap/memory.grow.  The heap
+// metadata is fully reset by snapshot restore, so no cumulative growth occurs.
 //
-// Dirty-page counts are approximate: CPython's allocator coalesces small
-// objects, so the actual number of newly-touched pages is workload-dependent.
+// Allocations ≥ 256KB (dlmalloc's DEFAULT_MMAP_THRESHOLD) call memory.grow,
+// which is irreversible.  Those must NOT be used in a tight benchmark loop.
 //
-//	sparse  —  <  50 dirty pages  (minimal eval, no large allocs)
-//	medium  — ~128 dirty pages  (512 KB bytearray, one write per page)
-//	dense   — ~512 dirty pages  (2 MB bytearray, one write per page)
+//	sparse  — minimal writes  (~50 dirty pages  — interpreter overhead only)
+//	medium  — 128 KB bytearray (~82 dirty pages  — 32 new pages + overhead)
+//	dense   — 192 KB bytearray (~98 dirty pages  — 48 new pages + overhead)
+//
+// For finer control over dirty-page count, see BenchmarkRestoreNPages, which
+// uses direct Go writes to the WASM linear memory instead of Python.
 // ---------------------------------------------------------------------------
 
 const (
-	// sparseScript: equivalent to the standard eval.py — minimal heap pressure.
 	sparseScript = `
 def evaluation_function(response, answer, params=None):
     try:
@@ -58,24 +65,21 @@ def evaluation_function(response, answer, params=None):
         ok = False
     return {"is_correct": ok, "feedback": "ok" if ok else "no"}
 `
-
-	// mediumScript: allocates a 512 KB bytearray and writes one byte per page.
-	// Expected: ~128 dirty pages beyond normal interpreter overhead.
+	// mediumScript: 128 KB bytearray — well below dlmalloc's 256 KB mmap
+	// threshold, so memory stays within the 14 MB snapshot region.
 	mediumScript = `
 def evaluation_function(response, answer, params=None):
-    n = 128
-    buf = bytearray(n * 4096)
+    n = 32
+    buf = bytearray(n * 4096)  # 128 KB — uses heap, not mmap
     for i in range(n):
         buf[i * 4096] = i & 0xFF
     return {"is_correct": True, "feedback": str(n)}
 `
-
-	// denseScript: allocates a 2 MB bytearray and writes one byte per page.
-	// Expected: ~512 dirty pages beyond normal interpreter overhead.
+	// denseScript: 192 KB bytearray — still below the 256 KB mmap threshold.
 	denseScript = `
 def evaluation_function(response, answer, params=None):
-    n = 512
-    buf = bytearray(n * 4096)
+    n = 48
+    buf = bytearray(n * 4096)  # 192 KB — uses heap, not mmap
     for i in range(n):
         buf[i * 4096] = i & 0xFF
     return {"is_correct": True, "feedback": str(n)}
@@ -94,14 +98,14 @@ var allWorkloads = []workloadCase{
 	{"dense", denseScript, `{"response":"","answer":""}`},
 }
 
-// allStrategies lists the strategies under test.
-// uffd is currently a memcpy fallback (wazero does not expose the raw linear-
-// memory mmap address needed for UFFDIO_REGISTER_MODE_WP).
 var allStrategies = []string{"memcpy", "soft-dirty", "mprotect", "uffd"}
 
 // concurrentSafe reports whether a strategy supports N>1 concurrent runners.
-// mprotect: global C signal handler + global dirty bitmap → single-instance only.
-// soft-dirty: /proc/self/clear_refs resets ALL PTEs in the process → single-instance only.
+//
+// mprotect:   global C SIGSEGV handler tracks a single [base, base+size) region;
+//             a second runner overwrites g_base/g_size and corrupts tracking.
+// soft-dirty: /proc/self/clear_refs resets ALL PTEs in the process;
+//             concurrent runners destroy each other's dirty-page information.
 func concurrentSafe(mode string) bool {
 	return mode == "memcpy" || mode == "uffd"
 }
@@ -143,14 +147,8 @@ func newBenchRunner(b testing.TB, wasmPath, mode string) *ReactorPythonRunner {
 // ---------------------------------------------------------------------------
 // BenchmarkStrategy — per-request latency: strategy × workload
 //
-// Each sub-benchmark measures: strategy.Restore() + py_exec() round-trip.
-// This is the dominant cost for a single-runner deployment.
-//
-// Results interpretation:
-//   - sparse workload   → favours mprotect (few dirty pages → cheap restore)
-//   - dense workload    → strategies converge (more pages = more restore work)
-//   - soft-dirty/dense  → soft-dirty may stay slower than memcpy due to
-//     pagemap scan overhead even with bulk read
+// Measures the full Restore() + py_exec() round-trip time under realistic
+// Python workloads with varying heap write pressure.
 // ---------------------------------------------------------------------------
 
 func BenchmarkStrategy(b *testing.B) {
@@ -177,25 +175,81 @@ func BenchmarkStrategy(b *testing.B) {
 }
 
 // ---------------------------------------------------------------------------
+// BenchmarkRestoreNPages — precise dirty-page-count effect on Restore cost
+//
+// Instead of using Python to dirty memory (which risks OOM via memory.grow),
+// this benchmark writes directly to WASM linear memory from Go to dirty
+// exactly N 4 KB pages, then times strategy.Restore().
+//
+// For mprotect: writing to PROT_READ memory triggers the C SIGSEGV handler,
+// which marks the page dirty and lifts write-protection — identical to what
+// happens when WASM guest code writes during py_exec.
+//
+// For soft-dirty: Go writes set the soft-dirty bit in the kernel PTE, which
+// is exactly what pagemap tracks.
+//
+// This lets us plot Restore cost as a function of dirty page count without
+// any Python involvement, enabling a clean strategy comparison curve.
+// ---------------------------------------------------------------------------
+
+func BenchmarkRestoreNPages(b *testing.B) {
+	wasmPath := wasmPathOrSkip(b)
+	pageSize := syscall.Getpagesize()
+
+	// Dirty page counts to test. 3500 ≈ full 14 MB / 4 KB.
+	dirtyCounts := []int{0, 16, 64, 256, 512, 1024, 2048, 3500}
+
+	for _, st := range allStrategies {
+		for _, nDirty := range dirtyCounts {
+			b.Run(fmt.Sprintf("%s/dirty%d", st, nDirty), func(b *testing.B) {
+				r := newBenchRunner(b, wasmPath, st)
+				mem := r.mod.Memory()
+
+				// Get the base pointer of the WASM linear memory backing slice.
+				buf, ok := mem.Read(0, mem.Size())
+				if !ok {
+					b.Fatal("mem.Read failed")
+				}
+				basePtr := unsafe.Pointer(unsafe.SliceData(buf))
+				totalPages := int(mem.Size()) / pageSize
+				if nDirty > totalPages {
+					b.Skipf("nDirty=%d > totalPages=%d", nDirty, totalPages)
+				}
+
+				b.ReportAllocs()
+				b.ResetTimer()
+
+				for i := 0; i < b.N; i++ {
+					b.StopTimer()
+					// Dirty exactly nDirty pages by XOR-writing the first byte
+					// of each page.  For mprotect this triggers SIGSEGV on each
+					// write (memory is PROT_READ after the previous Restore),
+					// the C handler marks dirty + re-enables PROT_RW, and the
+					// write completes — identical to WASM guest writes.
+					raw := unsafe.Slice((*byte)(basePtr), nDirty*pageSize)
+					for pg := 0; pg < nDirty; pg++ {
+						raw[pg*pageSize] ^= 0xFF
+					}
+					b.StartTimer()
+
+					if err := r.strategy.Restore(mem); err != nil {
+						b.Fatalf("Restore: %v", err)
+					}
+				}
+			})
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // BenchmarkPool — concurrent throughput: strategy × pool size N
 //
-// Models a production deployment where N independent ReactorPythonRunner
-// instances serve concurrent requests.  A channel-based pool distributes
-// requests across the N runners; true parallelism is bounded by N, not
-// GOMAXPROCS.
+// Models a production deployment with N independent ReactorPythonRunner
+// instances serving concurrent requests via a channel-based pool.
+// True concurrency is bounded by N, not GOMAXPROCS.
 //
-// Strategies with process-wide global state (mprotect, soft-dirty) are
-// skipped for N>1 with a documented reason:
-//
-//	mprotect:   global C SIGSEGV handler tracks only one [base, base+size)
-//	            region; a second runner would corrupt the dirty bitmap.
-//	soft-dirty: /proc/self/clear_refs resets ALL PTEs, so concurrent
-//	            runners would lose each other's dirty-page information.
-//
-// Expected outcome:
-//   - memcpy / uffd  → near-linear throughput scaling with N
-//   - mprotect       → only N=1 tested (skipped for N>1)
-//   - soft-dirty     → only N=1 tested (skipped for N>1)
+// mprotect and soft-dirty are skipped for N>1 (process-wide global state).
+// Expected: memcpy / uffd scale near-linearly; mprotect / soft-dirty: N=1 only.
 // ---------------------------------------------------------------------------
 
 func BenchmarkPool(b *testing.B) {
@@ -204,13 +258,11 @@ func BenchmarkPool(b *testing.B) {
 
 	for _, st := range allStrategies {
 		for _, N := range poolSizes {
-			name := fmt.Sprintf("%s/N%d", st, N)
-			b.Run(name, func(b *testing.B) {
+			b.Run(fmt.Sprintf("%s/N%d", st, N), func(b *testing.B) {
 				if N > 1 && !concurrentSafe(st) {
-					b.Skipf("strategy %s uses process-wide global state; not safe for N>1 concurrent runners", st)
+					b.Skipf("strategy %s uses process-wide global state — not safe for N>1 runners", st)
 				}
 
-				// Initialise N runners.
 				runners := make([]*ReactorPythonRunner, N)
 				for i := range runners {
 					cfg := Config{
@@ -235,7 +287,6 @@ func BenchmarkPool(b *testing.B) {
 					}
 				})
 
-				// Channel-based pool: limits true concurrency to N.
 				pool := make(chan *ReactorPythonRunner, N)
 				for _, r := range runners {
 					pool <- r
@@ -268,7 +319,7 @@ func BenchmarkPool(b *testing.B) {
 				})
 
 				if firstErr != nil {
-					b.Fatalf("SendRequest error: %v", firstErr)
+					b.Fatalf("SendRequest: %v", firstErr)
 				}
 			})
 		}
@@ -276,33 +327,24 @@ func BenchmarkPool(b *testing.B) {
 }
 
 // ---------------------------------------------------------------------------
-// BenchmarkRestoreOnly — isolate the Restore() cost from py_exec()
+// BenchmarkTakeOnly — isolate Take() (snapshot copy) cost
 //
-// Calls strategy.Restore(mem) in a tight loop without running Python between
-// calls.  Because no pages are dirtied, this measures the minimum restore
-// overhead (write-unprotect-and-re-protect for mprotect; pagemap scan for
-// soft-dirty; memcpy for full strategies).
-//
-// Note: mprotect's Restore() with zero dirty pages is extremely cheap — it
-// only calls mprotect(PROT_RO) on the region and clears the bitmap.
-// The per-request benchmark (BenchmarkStrategy/sparse) better reflects
-// realistic cost including SIGSEGV fault handling during py_exec.
+// All strategies copy the full linear memory during Take(), plus any
+// strategy-specific bookkeeping (mprotect: write-protect region;
+// soft-dirty: clear_refs write).
 // ---------------------------------------------------------------------------
 
-func BenchmarkRestoreOnly(b *testing.B) {
+func BenchmarkTakeOnly(b *testing.B) {
 	wasmPath := wasmPathOrSkip(b)
-
 	for _, st := range allStrategies {
 		b.Run(st, func(b *testing.B) {
 			r := newBenchRunner(b, wasmPath, st)
 			mem := r.mod.Memory()
-
 			b.ReportAllocs()
 			b.ResetTimer()
-
 			for i := 0; i < b.N; i++ {
-				if err := r.strategy.Restore(mem); err != nil {
-					b.Fatalf("Restore: %v", err)
+				if err := r.strategy.Take(mem); err != nil {
+					b.Fatalf("Take: %v", err)
 				}
 			}
 		})
@@ -310,28 +352,27 @@ func BenchmarkRestoreOnly(b *testing.B) {
 }
 
 // ---------------------------------------------------------------------------
-// BenchmarkTakeOnly — isolate the Take() (snapshot) cost
+// BenchmarkRestoreOnly — isolate Restore() cost with zero dirty pages
 //
-// Calls strategy.Take(mem) in a tight loop.  Take() always copies the full
-// linear memory regardless of strategy (all strategies need a ground-truth
-// snapshot).  This measures raw memcpy throughput for the 14 MB region plus
-// any strategy-specific bookkeeping (mprotect PROT_RO, clear_refs write).
+// Measures the minimum Restore overhead when no pages were written since
+// the last Take (no dirty pages to copy back).
+//
+// mprotect: only calls mprotect_ro(whole region) + clear_dirty_bitmap — cheap.
+// soft-dirty: reads pagemap (bulk ReadAt), finds no dirty bits — cheap.
+// memcpy / uffd: copies all 14 MB regardless — expensive.
 // ---------------------------------------------------------------------------
 
-func BenchmarkTakeOnly(b *testing.B) {
+func BenchmarkRestoreOnly(b *testing.B) {
 	wasmPath := wasmPathOrSkip(b)
-
 	for _, st := range allStrategies {
 		b.Run(st, func(b *testing.B) {
 			r := newBenchRunner(b, wasmPath, st)
 			mem := r.mod.Memory()
-
 			b.ReportAllocs()
 			b.ResetTimer()
-
 			for i := 0; i < b.N; i++ {
-				if err := r.strategy.Take(mem); err != nil {
-					b.Fatalf("Take: %v", err)
+				if err := r.strategy.Restore(mem); err != nil {
+					b.Fatalf("Restore: %v", err)
 				}
 			}
 		})

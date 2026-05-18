@@ -4,7 +4,7 @@ package wasm
 
 // MprotectStrategy tracks dirty pages by write-protecting the WASM linear
 // memory region with mprotect(PROT_READ) and catching SIGSEGV faults via a C
-// signal handler installed with SA_SIGACTION.
+// signal handler installed with SA_SIGINFO.
 //
 // On each write fault:
 //  1. The C handler invokes the goDirtyPageCallback Go export.
@@ -25,7 +25,7 @@ package wasm
 //     active at a time. A global mutex guards registration.
 //   - Chains to Go's runtime SIGSEGV handler for faults outside the registered
 //     region; the runtime handler deals with nil-pointer panics etc.
-//   - Not suitable for environments where installing SA_SIGACTION is
+//   - Not suitable for environments where installing SA_SIGINFO is
 //     restricted (e.g. strict seccomp profiles).
 
 /*
@@ -51,7 +51,7 @@ static void mprotect_sigsegv(int sig, siginfo_t *info, void *ctx) {
         return;
     }
     // Chain to the previous handler (Go runtime or SIG_DFL).
-    if (g_prev_sigsegv.sa_flags & SA_SIGACTION) {
+    if (g_prev_sigsegv.sa_flags & SA_SIGINFO) {
         g_prev_sigsegv.sa_sigaction(sig, info, ctx);
     } else if (g_prev_sigsegv.sa_handler != SIG_DFL &&
                g_prev_sigsegv.sa_handler != SIG_IGN) {
@@ -69,7 +69,7 @@ static int mprotect_install(uint64_t base, uint64_t size) {
     memset(&sa, 0, sizeof(sa));
     sa.sa_sigaction = mprotect_sigsegv;
     sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_SIGACTION | SA_ONSTACK | SA_NODEFER;
+    sa.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_NODEFER;
     return sigaction(SIGSEGV, &sa, &g_prev_sigsegv);
 }
 

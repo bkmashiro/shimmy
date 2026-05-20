@@ -187,17 +187,46 @@ func probeSmaps() {
 	pass("proc_smaps_rollup", fmt.Sprintf("%d lines", len(lines)))
 }
 
-// 7. mmap(addr=0, …) — some hardened kernels set vm.mmap_min_addr > 0
+// 7a. Read vm.mmap_min_addr sysctl directly
+func probeMmapMinAddr() {
+	b, err := os.ReadFile("/proc/sys/vm/mmap_min_addr")
+	if err != nil {
+		fail("mmap_min_addr_sysctl", "not readable: "+err.Error())
+		return
+	}
+	val := strings.TrimSpace(string(b))
+	pass("mmap_min_addr_sysctl", "vm.mmap_min_addr="+val)
+}
+
+// 7b. mmap(addr=0, PROT_RW) — check whether returned address is actually 0
+// or rounded up to mmap_min_addr (typically 4096 on hardened kernels).
 func probeMmapZero() {
 	b, err := syscall.Mmap(-1, 0, 4096, syscall.PROT_READ|syscall.PROT_WRITE,
 		syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS)
 	if err != nil {
-		// EPERM means vm.mmap_min_addr blocks null-page mapping — OK, expected
-		fail("mmap_addr0", "EPERM (expected in hardened env): "+err.Error())
+		fail("mmap_addr0_rw", "mmap failed: "+err.Error())
+		return
+	}
+	actualAddr := uintptr(unsafe.Pointer(&b[0]))
+	syscall.Munmap(b)
+	detail := fmt.Sprintf("returned addr=0x%x (%d)", actualAddr, actualAddr)
+	if actualAddr == 0 {
+		pass("mmap_addr0_rw", detail+" — true null-page mapping")
+	} else {
+		warn("mmap_addr0_rw", detail+" — addr rounded up (mmap_min_addr>0)", "zpoline requires addr=0")
+	}
+}
+
+// 7c. mmap(PROT_EXEC) — blocked by Lambda seccomp?
+func probeMmapExec() {
+	b, err := syscall.Mmap(-1, 0, 4096, syscall.PROT_READ|syscall.PROT_EXEC,
+		syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS)
+	if err != nil {
+		fail("mmap_prot_exec", err.Error()+" — DynamoRIO/zpoline not viable")
 		return
 	}
 	syscall.Munmap(b)
-	pass("mmap_addr0", "succeeded (vm.mmap_min_addr=0 or addr rounded up)")
+	pass("mmap_prot_exec", "succeeded")
 }
 
 // 8. /proc/sys/vm/unprivileged_userfaultfd
@@ -260,7 +289,9 @@ func main() {
 	probeUnprivilegedUffdSysctl()
 	probeUserfaultfdFd()
 	probeSmaps()
+	probeMmapMinAddr()
 	probeMmapZero()
+	probeMmapExec()
 	probeProcMem()
 
 	// Summary

@@ -3,7 +3,6 @@ CC        := $(WASI_SDK)/bin/clang
 CFLAGS    := --target=wasm32-wasip1 \
              --sysroot=$(WASI_SDK)/share/wasi-sysroot \
              -O2 -Wall \
-             -mexport-all \
              -Wl,--export=alloc \
              -Wl,--export=evaluate \
              -Wl,--no-entry

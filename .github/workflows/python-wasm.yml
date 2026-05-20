@@ -42,6 +42,14 @@ jobs:
       - name: Install dependencies
         run: go mod download
 
+      - name: Download python-reactor.wasm (CPython 3.14 + numpy)
+        run: |
+          mkdir -p internal/execution/wasm/testdata
+          curl -fsSL \
+            https://github.com/bkmashiro/webassembly-language-runtimes/releases/download/v1.0.1/python-reactor.wasm \
+            -o internal/execution/wasm/testdata/python-reactor.wasm
+          ls -lh internal/execution/wasm/testdata/python-reactor.wasm
+
       - name: Unit tests — PythonRunner (per-request instantiation)
         run: |
           PYTHON_WASM=./testdata/python.wasm \
@@ -64,10 +72,8 @@ jobs:
             -v -count=1 -timeout 300s
 
       - name: Numpy integration test
-        # Probes whether numpy is importable in the reactor binary.
-        # Skips gracefully if numpy is absent — no failure.
-        # To run the full suite: rebuild python-reactor.wasm with
-        # wasi-wheels numpy, or set PYTHON_NUMPY_PATH to a site-packages dir.
+        # python-reactor.wasm has numpy statically linked (CPython 3.14 + WASI SDK 33).
+        # All subtests should run — correctness, tolerance, shape-mismatch, RNG isolation.
         run: |
           PYTHON_REACTOR_WASM=./testdata/python-reactor.wasm \
             go test ./internal/execution/wasm/... \

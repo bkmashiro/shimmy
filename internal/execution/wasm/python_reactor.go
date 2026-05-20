@@ -501,6 +501,12 @@ def _rand_stub(name, **attrs):
     for _k, _v in attrs.items():
         setattr(_m, _k, _v)
     def _stub_getattr(_attr):
+        # Let Python's normal "attribute not found" machinery handle dunder
+        # lookups (e.g. __all__, __iter__, __getitem__).  Returning a callable
+        # for __all__ would make "from stub import *" try to iterate over a
+        # function and raise "'function' object is not iterable".
+        if _attr.startswith('__'):
+            raise AttributeError(_attr)
         def _not_impl(*_a, **_kw):
             raise NotImplementedError(
                 'numpy.random C extensions are not available in the WASI '

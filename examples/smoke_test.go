@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/tetratelabs/wazero"
@@ -151,15 +150,10 @@ func runWasmExample(t *testing.T, wasmPath string) {
 	})
 }
 
-func thisDir() string {
-	_, f, _, _ := runtime.Caller(0)
-	return filepath.Dir(f)
-}
-
 func TestEvalRust(t *testing.T) {
-	runWasmExample(t, filepath.Join(thisDir(), "eval-rust", "eval.wasm"))
+	runWasmExample(t, filepath.Join("eval-rust", "eval.wasm"))
 }
 
 func TestEvalC(t *testing.T) {
-	runWasmExample(t, filepath.Join(thisDir(), "eval-c", "eval.wasm"))
+	runWasmExample(t, filepath.Join("eval-c", "eval.wasm"))
 }

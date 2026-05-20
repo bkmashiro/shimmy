@@ -439,7 +439,10 @@ class _WasivfsFinder:
             return _ilu.spec_from_file_location(fullname, src, loader=loader)
         return None
 
-_sys.meta_path.append(_WasivfsFinder())
+# Insert BEFORE PathFinder (last in meta_path by default) so our finder
+# intercepts C-extension and VFS-package lookups before PathFinder can
+# attempt a dlopen() that WASI does not support.
+_sys.meta_path.insert(-1, _WasivfsFinder())
 
 # ── 3. Report result ──────────────────────────────────────────────────────────
 def evaluation_function(r, a, p=None):

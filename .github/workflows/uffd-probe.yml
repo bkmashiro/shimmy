@@ -1,18 +1,7 @@
 name: userfaultfd Probe
 
 on:
-  push:
-    branches:
-      - "feat/wasm-backend"
-      - "main"
-    paths:
-      - "internal/execution/wasm/**"
-      - ".github/workflows/uffd-probe.yml"
-  pull_request:
-    paths:
-      - "internal/execution/wasm/**"
-      - ".github/workflows/uffd-probe.yml"
-  workflow_dispatch:
+  workflow_dispatch: # manual trigger only
 
 # Run directly on the Ubuntu VM (not inside a container) so that userfaultfd
 # is available.  Docker's default seccomp profile blocks the userfaultfd(2)

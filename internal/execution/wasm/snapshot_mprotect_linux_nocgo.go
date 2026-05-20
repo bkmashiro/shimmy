@@ -26,3 +26,6 @@ func (s *MprotectStrategy) Restore(_ api.Memory) error { return nil }
 
 // Close implements SnapshotStrategy (stub).
 func (s *MprotectStrategy) Close() error { return nil }
+
+// forceDirtyNPages is a no-op stub for non-CGo builds (benchmark use only).
+func (s *MprotectStrategy) forceDirtyNPages(_ int) {}

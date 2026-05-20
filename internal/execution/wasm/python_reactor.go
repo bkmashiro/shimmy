@@ -450,9 +450,40 @@ _sys.meta_path = [_f for _f in _sys.meta_path if _f is not _ilm.PathFinder]
 _sys.meta_path.append(_WasivfsFinder())
 _sys.meta_path.append(_ilm.PathFinder)
 
-# ── 3. Report result ──────────────────────────────────────────────────────────
+# ── 3. Stub numpy test-only C extensions ─────────────────────────────────────
+# numpy/core/_add_newdocs.py imports test-only C extensions
+# (e.g. numpy.core._multiarray_tests) solely to attach docstrings via
+# add_newdoc().  These test extensions are not compiled into the WASI binary.
+# Without a stub they fall through to PathFinder → dlopen() → ImportError.
+#
+# We inject empty module stubs into sys.modules and extend _base_modules
+# (defined in __main__ by HANDLER_SRC) so the stubs survive the per-request
+# eviction pass and persist in the memory snapshot.
+import types as _types
+import __main__ as _main
+
+_NUMPY_STUBS = [
+    'numpy.core._multiarray_tests',
+    'numpy.core._umath_tests',
+    'numpy.core._rational_tests',
+    'numpy.core._struct_ufunc_tests',
+    'numpy.core._operand_flag_tests',
+]
+for _n in _NUMPY_STUBS:
+    if _n not in _sys.modules:
+        _m = _types.ModuleType(_n)
+        # _add_newdocs.py calls getattr(module, func_name) to attach docstrings.
+        # The module has no real functions, so __getattr__ returns a dummy callable.
+        _m.__getattr__ = lambda _attr: (lambda *_a, **_kw: None)
+        _sys.modules[_n] = _m
+
+# Extend _base_modules to include the new stubs so _handle_request's
+# finally-clause eviction leaves them in sys.modules after each request.
+_main._base_modules = frozenset(_sys.modules.keys())
+
+# ── 4. Report result ──────────────────────────────────────────────────────────
 def evaluation_function(r, a, p=None):
-    return {'is_correct': True, 'feedback': 'meta_path ok'}
+    return {'is_correct': True, 'feedback': 'meta_path+stubs ok'}
 `
 
 func (r *ReactorPythonRunner) initSysPath(ctx context.Context) error {

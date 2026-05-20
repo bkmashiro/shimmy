@@ -100,36 +100,18 @@ func TestReactorPythonRunner_SysPathDiag(t *testing.T) {
 	defer cancel()
 
 	diagScript := `
-import sys, importlib.util
+import sys, traceback
 
 def evaluation_function(response, answer, params=None):
     info = {}
-    info["sys_path"] = sys.path
     info["sys_version"] = sys.version.split()[0]
-
-    # importlib.util.find_spec: returns None if not found, or tells us the origin
-    spec = importlib.util.find_spec("numpy")
-    info["numpy_spec"] = str(spec)
-
-    # Try to open specific numpy files directly via path_open
-    probes = [
-        "/usr/lib/python3.14/site-packages/numpy/__init__.py",
-        "/usr/local/lib/python3.14/site-packages/numpy/__init__.py",
-        "/usr/lib/python3.14/site-packages/numpy",
-    ]
-    file_probes = {}
-    for p in probes:
-        try:
-            with open(p, "rb") as f:
-                file_probes[p] = "OK (" + str(len(f.read(64))) + " bytes)"
-        except Exception as e:
-            file_probes[p] = str(e)
-    info["file_probes"] = file_probes
-
-    # Check builtin/frozen modules for numpy
-    info["numpy_in_builtins"] = [m for m in sys.builtin_module_names if "numpy" in m or "npy" in m]
-    info["numpy_in_frozen"]   = [m for m in sys.stdlib_module_names  if "numpy" in m or "npy" in m] if hasattr(sys, "stdlib_module_names") else []
-
+    info["sys_path"] = sys.path
+    try:
+        import numpy as np
+        info["numpy_ok"] = np.__version__
+    except Exception as e:
+        info["numpy_err"] = str(e)
+        info["numpy_tb"] = traceback.format_exc()
     return {"is_correct": True, "feedback": str(info)}
 `
 	result, err := runner.SendRequest(ctx, diagScript, "eval", `{"response":"x","answer":"x"}`)

@@ -222,6 +222,19 @@ func (r *ReactorPythonRunner) Init(ctx context.Context) error {
 	}
 	r.log.Info("py_init() complete — CPython is ready")
 
+	// Inject site-packages into sys.path before taking the snapshot.
+	//
+	// WASI CPython builds typically set Py_IgnoreEnvironmentFlag=1 (skipping
+	// PYTHONPATH) and do not run site.py, so site-packages is absent from
+	// sys.path by default.  We call py_exec with a tiny setup script that
+	// directly mutates sys.path; the snapshot taken immediately afterwards
+	// captures the updated path, which is then inherited by every request
+	// without per-request overhead.
+	if err := r.initSysPath(ctx); err != nil {
+		r.log.Warn("sys.path injection failed — built-in packages may not be importable",
+			zap.Error(err))
+	}
+
 	// Create snapshot strategy based on config.
 	s, err := r.newSnapshotStrategy(mod.Memory())
 	if err != nil {
@@ -344,6 +357,72 @@ func (r *ReactorPythonRunner) SendRequest(ctx context.Context, script, method st
 		return nil, fmt.Errorf("reactor python script error: %s", errMsg)
 	}
 	return result, nil
+}
+
+// initSysPath calls py_exec with a setup script that inserts site-packages
+// paths into sys.path.  This must be called after py_init() and before
+// taking the snapshot so the modified sys.path is baked into the snapshot
+// and inherited by every subsequent request.
+//
+// WASI CPython sets Py_IgnoreEnvironmentFlag=1 and skips site.py, so
+// PYTHONPATH env vars are not read and site-packages is not on sys.path.
+// Mutating sys.path directly via Python code is the only reliable fix.
+func (r *ReactorPythonRunner) initSysPath(ctx context.Context) error {
+	// Build the candidate list: packed site-packages + any mounted AllowedPaths.
+	candidates := []string{
+		"/usr/lib/python3.14/site-packages",
+		"/usr/local/lib/python3.14/site-packages",
+	}
+	candidates = append(candidates, r.cfg.AllowedPaths...)
+
+	// Build the Python preamble.
+	var sb strings.Builder
+	sb.WriteString("import sys as _sys\n")
+	for _, p := range candidates {
+		fmt.Fprintf(&sb, "_p = %q\n", p)
+		sb.WriteString("if _p not in _sys.path:\n    _sys.path.insert(0, _p)\n")
+	}
+	sb.WriteString("del _p\n")
+	sb.WriteString("def evaluation_function(r,a,p=None):\n")
+	sb.WriteString("    return {'is_correct':True,'feedback':str(_sys.path)}\n")
+
+	reqObj := map[string]any{
+		"script": sb.String(),
+		"method": "eval",
+		"input":  json.RawMessage(`{"response":"","answer":""}`),
+	}
+	reqBytes, err := json.Marshal(reqObj)
+	if err != nil {
+		return fmt.Errorf("initSysPath: marshal: %w", err)
+	}
+
+	allocRes, err := r.fnAlloc.Call(ctx, uint64(len(reqBytes)))
+	if err != nil {
+		return fmt.Errorf("initSysPath: alloc: %w", err)
+	}
+	ptr := uint32(allocRes[0])
+	if ptr == 0 {
+		return fmt.Errorf("initSysPath: alloc returned NULL")
+	}
+	if !r.mod.Memory().Write(ptr, reqBytes) {
+		return fmt.Errorf("initSysPath: write memory")
+	}
+	if _, err := r.fnPyExec.Call(ctx, uint64(ptr), uint64(len(reqBytes))); err != nil {
+		return fmt.Errorf("initSysPath: py_exec: %w", err)
+	}
+
+	// Read and log the updated sys.path for visibility.
+	bufPtrRes, _ := r.fnRespBuf.Call(ctx)
+	lenPtrRes, _ := r.fnRespLen.Call(ctx)
+	if lenRaw, ok := r.mod.Memory().Read(uint32(lenPtrRes[0]), 4); ok {
+		respLen := int32(binary.LittleEndian.Uint32(lenRaw))
+		if respLen > 0 {
+			if body, ok := r.mod.Memory().Read(uint32(bufPtrRes[0]), uint32(respLen)); ok {
+				r.log.Info("sys.path after injection", zap.String("path", string(body)))
+			}
+		}
+	}
+	return nil
 }
 
 // closeAll closes the module and runtime. Must be called with r.mu held.

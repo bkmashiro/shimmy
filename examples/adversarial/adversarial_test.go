@@ -57,7 +57,11 @@ func loadAndCall(t *testing.T, wasmPath string, timeout time.Duration) (attackRe
 
 	// WithCloseOnContextDone enables epoch-based interruption: when ctx is
 	// cancelled (or times out) wazero will interrupt any running WASM execution.
-	rtCfg := wazero.NewRuntimeConfig().WithCloseOnContextDone(true)
+	// WithMemoryLimitPages caps linear memory at 64 MB (1024 × 64 KB pages),
+	// which is enough for the Go WASM runtime but blocks unbounded allocations.
+	rtCfg := wazero.NewRuntimeConfig().
+		WithCloseOnContextDone(true).
+		WithMemoryLimitPages(1024)
 	rt := wazero.NewRuntimeWithConfig(ctx, rtCfg)
 	defer rt.Close(ctx)
 

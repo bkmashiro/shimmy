@@ -442,11 +442,17 @@ class _WasivfsFinder:
 # Insert BEFORE PathFinder (last in meta_path by default) so our finder
 # intercepts C-extension and VFS-package lookups before PathFinder can
 # attempt a dlopen() that WASI does not support.
-_sys.meta_path.insert(-1, _WasivfsFinder())
+# Remove PathFinder from its current position (wherever the binary put it),
+# append our finder, then re-append PathFinder.  This guarantees the order:
+#   [BuiltinImporter, FrozenImporter, ..., _WasivfsFinder, PathFinder]
+# regardless of what the binary's HANDLER_SRC has already done to meta_path.
+_sys.meta_path = [_f for _f in _sys.meta_path if _f is not _ilm.PathFinder]
+_sys.meta_path.append(_WasivfsFinder())
+_sys.meta_path.append(_ilm.PathFinder)
 
 # ── 3. Report result ──────────────────────────────────────────────────────────
 def evaluation_function(r, a, p=None):
-    return {'is_correct': True, 'feedback': 'meta_path+sys.path ok'}
+    return {'is_correct': True, 'feedback': 'meta_path ok'}
 `
 
 func (r *ReactorPythonRunner) initSysPath(ctx context.Context) error {

@@ -487,8 +487,12 @@ for _n in _NUMPY_STUBS:
 # Generator (new API) will raise AttributeError on actual use — acceptable.
 _bg_stub = _types.ModuleType('numpy.random.bit_generator')
 class _BitGenerator:
-    """Stub BitGenerator — C extension unavailable in WASI."""
-    pass
+    # 10 __slots__ -> tp_basicsize = object.__basicsize__ + 10*sizeof(void*)
+    # On wasm32 (4-byte pointers): 8 + 10*4 = 48, which is exactly what
+    # Cython's __Pyx_ImportType expects from the numpy 1.26 C header.
+    # Without this, every numpy.random extension that does "cimport bit_generator"
+    # raises "BitGenerator size changed, may indicate binary incompatibility".
+    __slots__ = ('_s0','_s1','_s2','_s3','_s4','_s5','_s6','_s7','_s8','_s9')
 class _SeedSequence:
     """Stub SeedSequence."""
     def __init__(self, entropy=None, **kwargs):

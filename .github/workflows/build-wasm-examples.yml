@@ -103,43 +103,43 @@ jobs:
 
       - name: Build mem-bomb
         working-directory: examples/adversarial/mem-bomb
-        run: GOOS=wasip1 GOARCH=wasm go build -o eval.wasm .
+        run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o eval.wasm .
 
       - name: Build cpu-bomb
         working-directory: examples/adversarial/cpu-bomb
-        run: GOOS=wasip1 GOARCH=wasm go build -o eval.wasm .
+        run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o eval.wasm .
 
       - name: Build stack-bomb
         working-directory: examples/adversarial/stack-bomb
-        run: GOOS=wasip1 GOARCH=wasm go build -o eval.wasm .
+        run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o eval.wasm .
 
       - name: Build fs-read-environ
         working-directory: examples/adversarial/fs-read-environ
-        run: GOOS=wasip1 GOARCH=wasm go build -o eval.wasm .
+        run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o eval.wasm .
 
       - name: Build fs-read-etc
         working-directory: examples/adversarial/fs-read-etc
-        run: GOOS=wasip1 GOARCH=wasm go build -o eval.wasm .
+        run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o eval.wasm .
 
       - name: Build fs-write-tmp
         working-directory: examples/adversarial/fs-write-tmp
-        run: GOOS=wasip1 GOARCH=wasm go build -o eval.wasm .
+        run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o eval.wasm .
 
       - name: Build net-tcp
         working-directory: examples/adversarial/net-tcp
-        run: GOOS=wasip1 GOARCH=wasm go build -o eval.wasm .
+        run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o eval.wasm .
 
       - name: Build env-read
         working-directory: examples/adversarial/env-read
-        run: GOOS=wasip1 GOARCH=wasm go build -o eval.wasm .
+        run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o eval.wasm .
 
       - name: Build fork-exec
         working-directory: examples/adversarial/fork-exec
-        run: GOOS=wasip1 GOARCH=wasm go build -o eval.wasm .
+        run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o eval.wasm .
 
       - name: Build large-output
         working-directory: examples/adversarial/large-output
-        run: GOOS=wasip1 GOARCH=wasm go build -o eval.wasm .
+        run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o eval.wasm .
 
       - name: Upload adversarial-mem-bomb.wasm
         uses: actions/upload-artifact@v4

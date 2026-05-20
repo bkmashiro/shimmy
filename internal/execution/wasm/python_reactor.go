@@ -362,7 +362,7 @@ func (r *ReactorPythonRunner) SendRequest(ctx context.Context, script, method st
 // initSysPath installs a wasi-vfs–aware meta path finder and fixes sys.path
 // before taking the snapshot.
 //
-// # Problem
+// # Problem 1 — scandir
 //
 // wasi-vfs supports path_open (reading individual files) but NOT fd_readdir
 // (directory listing via scandir/listdir).  Python's standard FileFinder
@@ -370,17 +370,24 @@ func (r *ReactorPythonRunner) SendRequest(ctx context.Context, script, method st
 // scandir fails on the site-packages directory, Python's FileFinder reports
 // every package as absent — even though the files are readable via open().
 //
-// # Fix
+// Fix: probe package existence with open() instead of scandir.
 //
-// We inject a custom sys.meta_path finder (_WasivfsFinder) that probes
-// package existence with open() instead of scandir.  The finder is added
-// once here, before the memory snapshot is taken, so it is present in every
-// subsequent request without per-request overhead.
+// # Problem 2 — BuiltinImporter skips submodule imports
+//
+// Numpy C extensions are registered as built-in modules via
+// PyImport_AppendInittab("numpy.core._multiarray_umath", ...) etc.
+// However, BuiltinImporter.find_spec() returns None when path is not None
+// (i.e. when importing a submodule such as numpy.core._multiarray_umath).
+// This causes PathFinder to try to dlopen() the extension as a .so file,
+// which WASI does not support and returns "unknown dlopen() error".
+//
+// Fix: check _imp.is_builtin(fullname) in _WasivfsFinder and return a
+// BuiltinImporter spec, bypassing PathFinder entirely.
 //
 // WASI CPython also sets Py_IgnoreEnvironmentFlag=1, so PYTHONPATH env vars
 // are ignored.  We mutate sys.path directly to add site-packages candidates.
 const initSysPathScript = `
-import sys as _sys, importlib.util as _ilu, importlib.machinery as _ilm
+import sys as _sys, importlib.util as _ilu, importlib.machinery as _ilm, _imp as _imp_mod
 
 # ── 1. Add site-packages candidates to sys.path ──────────────────────────────
 for _p in ['/usr/lib/python3.14/site-packages',
@@ -389,12 +396,19 @@ for _p in ['/usr/lib/python3.14/site-packages',
         _sys.path.insert(0, _p)
 
 # ── 2. Install a scandir-free meta path finder ───────────────────────────────
-# wasi-vfs supports path_open but not fd_readdir, so FileFinder's scandir
-# fails on site-packages.  This finder uses open() to probe file existence.
 _SITE = '/usr/lib/python3.14/site-packages'
 
 class _WasivfsFinder:
-    """Meta-path finder for wasi-vfs packed site-packages."""
+    """Meta-path finder for wasi-vfs packed site-packages.
+
+    Handles two cases:
+    (a) Built-in C extensions (e.g. numpy.core._multiarray_umath) registered
+        via PyImport_AppendInittab.  BuiltinImporter skips these when path is
+        not None (submodule import context); we catch them here so PathFinder
+        never attempts a dlopen() that WASI cannot fulfil.
+    (b) Pure-Python packages / modules packed into wasi-vfs site-packages.
+        Uses open() instead of scandir() to probe file existence.
+    """
     @staticmethod
     def _exists(path):
         try:
@@ -404,7 +418,10 @@ class _WasivfsFinder:
             return False
 
     def find_spec(self, fullname, path, target=None):
-        # Only handle packages rooted in site-packages.
+        # (a) Built-in C extension?
+        if _imp_mod.is_builtin(fullname):
+            return _ilu.spec_from_loader(fullname, _ilm.BuiltinImporter)
+        # (b) Pure-Python package or module in wasi-vfs site-packages.
         parts = fullname.split('.')
         base  = _SITE + '/' + '/'.join(parts)
         # Package: base/__init__.py

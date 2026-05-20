@@ -485,25 +485,47 @@ for _n in _NUMPY_STUBS:
 # from ever being invoked when numpy.random.mtrand imports it.
 # RandomState (old numpy.random API) works fine with this stub.
 # Generator (new API) will raise AttributeError on actual use — acceptable.
+import ctypes as _ctypes
+
+def _sized_stub(name, target_basicsize):
+    """Return a Python type whose tp_basicsize == target_basicsize.
+
+    Cython's __Pyx_ImportType validates:
+      1. tp_basicsize matches the C struct size compiled into the extension.
+      2. __pyx_vtable__ is present and is a PyCapsule(non-null ptr) for cdef
+         classes that declare virtual methods (e.g. BitGenerator).
+
+    On wasm32 (4-byte pointers) object.__basicsize__ == 8; each __slots__
+    entry adds 4 bytes.  This helper computes the number of slots needed for
+    any target size so we never have to hardcode platform-specific counts.
+
+    The __pyx_vtable__ capsule pointer is never dereferenced — real numpy
+    extension types (MT19937, Generator, etc.) install their own vtables when
+    they are initialised; the stub type is never instantiated directly.
+    """
+    base = object.__basicsize__
+    slot_sz = _ctypes.sizeof(_ctypes.c_void_p)  # 4 on wasm32, 8 on amd64
+    n = max(0, (target_basicsize - base) // slot_sz)
+    cls = type(name, (), {'__slots__': tuple('_s%d' % i for i in range(n))})
+    # Satisfy __Pyx_GetVtable: needs __pyx_vtable__ = PyCapsule(non-null, name=None).
+    # id(cls) is a guaranteed non-null CPython object address.
+    _pcn = _ctypes.pythonapi.PyCapsule_New
+    _pcn.restype = _ctypes.py_object
+    _pcn.argtypes = [_ctypes.c_void_p, _ctypes.c_char_p, _ctypes.c_void_p]
+    cls.__pyx_vtable__ = _pcn(_ctypes.c_void_p(id(cls)), None, None)
+    return cls
+
 _bg_stub = _types.ModuleType('numpy.random.bit_generator')
-class _BitGenerator:
-    # 10 __slots__ -> tp_basicsize = object.__basicsize__ + 10*sizeof(void*)
-    # On wasm32 (4-byte pointers): 8 + 10*4 = 48, which is exactly what
-    # Cython's __Pyx_ImportType expects from the numpy 1.26 C header.
-    # Without this, every numpy.random extension that does "cimport bit_generator"
-    # raises "BitGenerator size changed, may indicate binary incompatibility".
-    __slots__ = ('_s0','_s1','_s2','_s3','_s4','_s5','_s6','_s7','_s8','_s9')
-class _SeedSequence:
-    # 6 __slots__ -> tp_basicsize = 8 + 6*4 = 32 on wasm32, matching
-    # the expected C struct size from the numpy 1.26 header.
-    __slots__ = ('_s0','_s1','_s2','_s3','_s4','_s5')
-    def __init__(self, entropy=None, **kwargs):
-        pass
-_bg_stub.BitGenerator = _BitGenerator
-_bg_stub.SeedSequence = _SeedSequence
-_bg_stub.ISeedSequence = _SeedSequence
+# Sizes from numpy 1.26 bit_generator.pxd, measured at wasm32 link time.
+# PyInit_bit_generator() crashes in WASI (Py_FatalError->abort->unreachable);
+# pre-populating sys.modules with correctly-sized stubs prevents that init
+# from ever being called, while satisfying Cython's __Pyx_ImportType checks
+# in all extensions that do "cimport bit_generator" (mtrand, _generator, etc.)
+_bg_stub.BitGenerator  = _sized_stub('BitGenerator',  48)
+_bg_stub.SeedSequence  = _sized_stub('SeedSequence',  32)
+_bg_stub.ISeedSequence = _sized_stub('ISeedSequence', 32)
 _sys.modules.setdefault('numpy.random.bit_generator', _bg_stub)
-del _bg_stub, _BitGenerator, _SeedSequence
+del _bg_stub, _ctypes, _sized_stub
 
 # ── 5. Pre-warm numpy ─────────────────────────────────────────────────────────
 # Import numpy now so the snapshot captures all numpy modules in sys.modules.

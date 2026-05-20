@@ -157,3 +157,7 @@ func TestEvalRust(t *testing.T) {
 func TestEvalC(t *testing.T) {
 	runWasmExample(t, filepath.Join("eval-c", "eval.wasm"))
 }
+
+func TestEvalCpp(t *testing.T) {
+	runWasmExample(t, filepath.Join("eval-cpp", "eval.wasm"))
+}

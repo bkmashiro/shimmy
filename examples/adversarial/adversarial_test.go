@@ -163,7 +163,7 @@ func TestStackBomb(t *testing.T) {
 // (a) the evaluate call returned an error (wasm trap = blocked), or
 // (b) the call succeeded and the guest reported blocked:true.
 // It fails only if the call succeeded AND blocked==false (attack got through).
-func assertBlocked(t *testing.T, name string, res *attackResult, err error) {
+func assertBlocked(t *testing.T, name string, res attackResult, err error) {
 	t.Helper()
 	if err != nil {
 		t.Logf("%s: blocked via wasm trap: %v", name, err)

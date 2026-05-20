@@ -151,28 +151,38 @@ func (r *ReactorPythonRunner) Init(ctx context.Context) error {
 	// PYTHONHOME tells CPython where to find the stdlib that wasi-vfs packed
 	// at /usr/lib/python3.x inside the WASM binary.
 	var stderrBuf bytes.Buffer
+
+	// WASI CPython builds typically skip site.py (Py_NoSiteFlag=1), so
+	// site-packages is not added to sys.path automatically.  We set PYTHONPATH
+	// to the standard site-packages directory packed by wasi-vfs so that
+	// built-in packages (e.g. numpy) are importable.
+	// The path can be overridden via FUNCTION_WASM_PYTHON_PATH.
+	pythonPath := "/usr/lib/python3.14/site-packages"
+	if v := os.Getenv("FUNCTION_WASM_PYTHON_PATH"); v != "" {
+		pythonPath = v
+	}
+
 	mc := wazero.NewModuleConfig().
 		WithName("").
 		WithStartFunctions("_initialize").
 		WithEnv("PYTHONHOME", "/usr").
 		WithEnv("PYTHONDONTWRITEBYTECODE", "1").
+		WithEnv("PYTHONPATH", pythonPath).
 		WithStderr(&stderrBuf).
 		WithSysNanosleep().
 		WithSysWalltime().
 		WithSysNanotime()
 
-	// Mount read-only host paths into the WASM sandbox.
-	// AllowedPaths is used to expose wasi-wheels site-packages directories
-	// (or any other read-only data) to the Python interpreter.
-	// Each path is mounted at the same absolute location inside the sandbox.
+	// Mount additional read-only host paths into the WASM sandbox.
+	// Used to expose external wasi-wheels site-packages directories.
+	// Each path is appended to PYTHONPATH so Python can find the packages.
 	if len(r.cfg.AllowedPaths) > 0 {
 		fsCfg := wazero.NewFSConfig()
 		for _, p := range r.cfg.AllowedPaths {
 			fsCfg = fsCfg.WithReadOnlyDirMount(p, p)
 		}
 		mc = mc.WithFSConfig(fsCfg)
-		// Tell Python where to find the extra packages.
-		mc = mc.WithEnv("PYTHONPATH", strings.Join(r.cfg.AllowedPaths, ":"))
+		mc = mc.WithEnv("PYTHONPATH", pythonPath+":"+strings.Join(r.cfg.AllowedPaths, ":"))
 	}
 
 	r.log.Info("instantiating (reactor mode, _initialize)...")

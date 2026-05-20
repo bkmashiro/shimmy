@@ -88,6 +88,59 @@ func numpyEvalScript(t testing.TB) string {
 	return string(b)
 }
 
+// TestReactorPythonRunner_SysPathDiag prints sys.path and scans /usr/lib for
+// installed packages.  Run this when numpy import fails to find the right path.
+//
+//	PYTHON_REACTOR_WASM=./testdata/python-reactor.wasm \
+//	  go test -v -run TestReactorPythonRunner_SysPathDiag -timeout 300s \
+//	  ./internal/execution/wasm/
+func TestReactorPythonRunner_SysPathDiag(t *testing.T) {
+	runner := newReactorRunnerWithNumpy(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	diagScript := `
+import sys, os
+
+def evaluation_function(response, answer, params=None):
+    info = {}
+    info["sys_path"] = sys.path
+    info["sys_version"] = sys.version
+
+    # Scan /usr/lib for Python dirs
+    try:
+        info["usr_lib"] = os.listdir("/usr/lib")
+    except Exception as e:
+        info["usr_lib_err"] = str(e)
+
+    # Try to find site-packages
+    candidates = []
+    for root in ["/usr", "/usr/local"]:
+        try:
+            for d in os.listdir(root + "/lib"):
+                if d.startswith("python"):
+                    sp = root + "/lib/" + d + "/site-packages"
+                    try:
+                        pkgs = os.listdir(sp)
+                        candidates.append(sp + " => " + str(pkgs[:8]))
+                    except Exception as e2:
+                        candidates.append(sp + " => " + str(e2))
+        except Exception as e:
+            candidates.append(root + "/lib: " + str(e))
+    info["site_package_candidates"] = candidates
+
+    return {"is_correct": True, "feedback": str(info)}
+`
+	result, err := runner.SendRequest(ctx, diagScript, "eval", `{"response":"x","answer":"x"}`)
+	if err != nil {
+		t.Logf("diag error: %v", err)
+		return
+	}
+	feedback, _ := result["feedback"].(string)
+	// Print each key/value on its own line for readability.
+	t.Logf("=== DIAGNOSTIC ===\n%s", feedback)
+}
+
 // probeNumpy sends a minimal script that does nothing but import numpy.
 // Returns (true, "") if the import succeeds; (false, errMsg) otherwise.
 // This lets us skip individual sub-tests gracefully rather than failing the

@@ -71,6 +71,13 @@ jobs:
             -run TestReactorPythonRunner \
             -v -count=1 -timeout 300s
 
+      - name: Numpy sys.path diagnostic
+        run: |
+          PYTHON_REACTOR_WASM=./testdata/python-reactor.wasm \
+            go test ./internal/execution/wasm/... \
+            -run TestReactorPythonRunner_SysPathDiag \
+            -v -count=1 -timeout 300s
+
       - name: Numpy integration test
         # python-reactor.wasm has numpy statically linked (CPython 3.14 + WASI SDK 33).
         # All subtests should run — correctness, tolerance, shape-mismatch, RNG isolation.

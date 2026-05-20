@@ -75,6 +75,8 @@ type ReactorPythonRunner struct {
 	initialized bool
 	closed      bool
 
+	stderrBuf bytes.Buffer // CPython stderr — readable from SendRequest errors
+
 	rt       wazero.Runtime
 	mod      api.Module
 	strategy SnapshotStrategy // snapshot taken after py_init(); restored before each py_exec()
@@ -150,7 +152,7 @@ func (r *ReactorPythonRunner) Init(ctx context.Context) error {
 	// Reactor mode: wazero calls _initialize (not _start) on instantiation.
 	// PYTHONHOME tells CPython where to find the stdlib that wasi-vfs packed
 	// at /usr/lib/python3.x inside the WASM binary.
-	var stderrBuf bytes.Buffer
+	r.stderrBuf.Reset()
 
 	// WASI CPython builds typically skip site.py (Py_NoSiteFlag=1), so
 	// site-packages is not added to sys.path automatically.  We set PYTHONPATH
@@ -168,7 +170,7 @@ func (r *ReactorPythonRunner) Init(ctx context.Context) error {
 		WithEnv("PYTHONHOME", "/usr").
 		WithEnv("PYTHONDONTWRITEBYTECODE", "1").
 		WithEnv("PYTHONPATH", pythonPath).
-		WithStderr(&stderrBuf).
+		WithStderr(&r.stderrBuf).
 		WithSysNanosleep().
 		WithSysWalltime().
 		WithSysNanotime()
@@ -216,9 +218,8 @@ func (r *ReactorPythonRunner) Init(ctx context.Context) error {
 	// Call py_init() to start CPython and define _handle_request.
 	r.log.Info("calling py_init() to initialise CPython (~7-8 s)...")
 	if _, err := r.fnPyInit.Call(ctx); err != nil {
-		stderr := stderrBuf.String()
 		_ = r.closeAll(ctx)
-		return fmt.Errorf("reactor python: py_init(): %w\nstderr: %s", err, stderr)
+		return fmt.Errorf("reactor python: py_init(): %w\nstderr: %s", err, r.stderrBuf.String())
 	}
 	r.log.Info("py_init() complete — CPython is ready")
 
@@ -317,7 +318,7 @@ func (r *ReactorPythonRunner) SendRequest(ctx context.Context, script, method st
 
 	// ── Step 4: Execute ───────────────────────────────────────────────────
 	if _, err := r.fnPyExec.Call(execCtx, uint64(reqPtr), uint64(len(reqBytes))); err != nil {
-		return nil, fmt.Errorf("reactor python: py_exec: %w", err)
+		return nil, fmt.Errorf("reactor python: py_exec: %w\nstderr: %s", err, r.stderrBuf.String())
 	}
 
 	// ── Step 5: Read response ─────────────────────────────────────────────
@@ -477,13 +478,49 @@ for _n in _NUMPY_STUBS:
         _m.__getattr__ = lambda _attr: (lambda *_a, **_kw: None)
         _sys.modules[_n] = _m
 
-# Extend _base_modules to include the new stubs so _handle_request's
-# finally-clause eviction leaves them in sys.modules after each request.
+# ── 4. Stub numpy.random.bit_generator ───────────────────────────────────────
+# PyInit_bit_generator() calls Py_FatalError (→ abort → WASM unreachable) in
+# the WASI sandbox.  Python's import system checks sys.modules BEFORE calling
+# any finder, so pre-populating the module here prevents PyInit_bit_generator()
+# from ever being invoked when numpy.random.mtrand imports it.
+# RandomState (old numpy.random API) works fine with this stub.
+# Generator (new API) will raise AttributeError on actual use — acceptable.
+_bg_stub = _types.ModuleType('numpy.random.bit_generator')
+class _BitGenerator:
+    """Stub BitGenerator — C extension unavailable in WASI."""
+    pass
+class _SeedSequence:
+    """Stub SeedSequence."""
+    def __init__(self, entropy=None, **kwargs):
+        self.entropy = entropy
+_bg_stub.BitGenerator = _BitGenerator
+_bg_stub.SeedSequence = _SeedSequence
+_bg_stub.ISeedSequence = _SeedSequence
+_sys.modules.setdefault('numpy.random.bit_generator', _bg_stub)
+del _bg_stub, _BitGenerator, _SeedSequence
+
+# ── 5. Pre-warm numpy ─────────────────────────────────────────────────────────
+# Import numpy now so the snapshot captures all numpy modules in sys.modules.
+# Every subsequent request then satisfies "import numpy" via a fast lookup
+# instead of re-running all C extension init functions.
+# _base_modules is updated after this import so eviction never removes numpy.
+try:
+    import numpy as _np_pw
+    _numpy_prewarm_status = 'numpy ' + _np_pw.__version__ + ' pre-warmed'
+    del _np_pw
+except Exception as _exc:
+    _numpy_prewarm_status = 'numpy pre-warm exception: ' + str(_exc)
+    del _exc
+
+# ── 6. Extend _base_modules ───────────────────────────────────────────────────
+# Capture sys.modules state now (includes test stubs, bit_generator stub, and
+# all pre-warmed numpy modules).  _handle_request's eviction pass only removes
+# modules NOT in _base_modules, so numpy persists across requests.
 _main._base_modules = frozenset(_sys.modules.keys())
 
-# ── 4. Report result ──────────────────────────────────────────────────────────
+# ── 7. Report result ──────────────────────────────────────────────────────────
 def evaluation_function(r, a, p=None):
-    return {'is_correct': True, 'feedback': 'meta_path+stubs ok'}
+    return {'is_correct': True, 'feedback': _numpy_prewarm_status}
 `
 
 func (r *ReactorPythonRunner) initSysPath(ctx context.Context) error {
@@ -524,7 +561,7 @@ func (r *ReactorPythonRunner) initSysPath(ctx context.Context) error {
 		return fmt.Errorf("initSysPath: write memory")
 	}
 	if _, err := r.fnPyExec.Call(ctx, uint64(ptr), uint64(len(reqBytes))); err != nil {
-		return fmt.Errorf("initSysPath: py_exec: %w", err)
+		return fmt.Errorf("initSysPath: py_exec: %w\nstderr: %s", err, r.stderrBuf.String())
 	}
 
 	// Read and log the response.

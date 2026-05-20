@@ -8,13 +8,17 @@ on:
     paths:
       - "internal/execution/wasm/python*.go"
       - "internal/execution/wasm/testdata/python.wasm"
+      - "internal/execution/wasm/testdata/python-reactor.wasm"
       - "examples/eval-python/**"
+      - "examples/eval-numpy/**"
       - ".github/workflows/python-wasm.yml"
   pull_request:
     paths:
       - "internal/execution/wasm/python*.go"
       - "internal/execution/wasm/testdata/python.wasm"
+      - "internal/execution/wasm/testdata/python-reactor.wasm"
       - "examples/eval-python/**"
+      - "examples/eval-numpy/**"
       - ".github/workflows/python-wasm.yml"
   workflow_dispatch:
 
@@ -50,6 +54,24 @@ jobs:
           PYTHON_WASM=./testdata/python.wasm \
             go test ./internal/execution/wasm/... \
             -run TestResidentPythonRunner \
+            -v -count=1 -timeout 300s
+
+      - name: Unit tests — ReactorPythonRunner (snapshot/restore)
+        run: |
+          PYTHON_REACTOR_WASM=./testdata/python-reactor.wasm \
+            go test ./internal/execution/wasm/... \
+            -run TestReactorPythonRunner \
+            -v -count=1 -timeout 300s
+
+      - name: Numpy integration test
+        # Probes whether numpy is importable in the reactor binary.
+        # Skips gracefully if numpy is absent — no failure.
+        # To run the full suite: rebuild python-reactor.wasm with
+        # wasi-wheels numpy, or set PYTHON_NUMPY_PATH to a site-packages dir.
+        run: |
+          PYTHON_REACTOR_WASM=./testdata/python-reactor.wasm \
+            go test ./internal/execution/wasm/... \
+            -run TestReactorPythonRunner_Numpy \
             -v -count=1 -timeout 300s
 
       - name: Benchmark — per-request vs resident latency

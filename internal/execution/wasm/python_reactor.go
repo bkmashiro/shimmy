@@ -51,6 +51,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -147,8 +148,8 @@ func (r *ReactorPythonRunner) Init(ctx context.Context) error {
 	defer func() { _ = compiled.Close(ctx) }()
 
 	// Reactor mode: wazero calls _initialize (not _start) on instantiation.
-	// PYTHONHOME tells CPython 3.14 where to find the stdlib that wasi-vfs
-	// packed at /usr/lib/python3.14 inside the WASM binary.
+	// PYTHONHOME tells CPython where to find the stdlib that wasi-vfs packed
+	// at /usr/lib/python3.x inside the WASM binary.
 	var stderrBuf bytes.Buffer
 	mc := wazero.NewModuleConfig().
 		WithName("").
@@ -159,6 +160,20 @@ func (r *ReactorPythonRunner) Init(ctx context.Context) error {
 		WithSysNanosleep().
 		WithSysWalltime().
 		WithSysNanotime()
+
+	// Mount read-only host paths into the WASM sandbox.
+	// AllowedPaths is used to expose wasi-wheels site-packages directories
+	// (or any other read-only data) to the Python interpreter.
+	// Each path is mounted at the same absolute location inside the sandbox.
+	if len(r.cfg.AllowedPaths) > 0 {
+		fsCfg := wazero.NewFSConfig()
+		for _, p := range r.cfg.AllowedPaths {
+			fsCfg = fsCfg.WithReadOnlyDirMount(p, p)
+		}
+		mc = mc.WithFSConfig(fsCfg)
+		// Tell Python where to find the extra packages.
+		mc = mc.WithEnv("PYTHONPATH", strings.Join(r.cfg.AllowedPaths, ":"))
+	}
 
 	r.log.Info("instantiating (reactor mode, _initialize)...")
 	mod, err := rt.InstantiateModule(ctx, compiled, mc)

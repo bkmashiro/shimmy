@@ -494,9 +494,11 @@ class _BitGenerator:
     # raises "BitGenerator size changed, may indicate binary incompatibility".
     __slots__ = ('_s0','_s1','_s2','_s3','_s4','_s5','_s6','_s7','_s8','_s9')
 class _SeedSequence:
-    """Stub SeedSequence."""
+    # 6 __slots__ -> tp_basicsize = 8 + 6*4 = 32 on wasm32, matching
+    # the expected C struct size from the numpy 1.26 header.
+    __slots__ = ('_s0','_s1','_s2','_s3','_s4','_s5')
     def __init__(self, entropy=None, **kwargs):
-        self.entropy = entropy
+        pass
 _bg_stub.BitGenerator = _BitGenerator
 _bg_stub.SeedSequence = _SeedSequence
 _bg_stub.ISeedSequence = _SeedSequence

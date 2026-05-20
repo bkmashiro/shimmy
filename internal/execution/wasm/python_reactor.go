@@ -478,54 +478,81 @@ for _n in _NUMPY_STUBS:
         _m.__getattr__ = lambda _attr: (lambda *_a, **_kw: None)
         _sys.modules[_n] = _m
 
-# ── 4. Stub numpy.random.bit_generator ───────────────────────────────────────
-# PyInit_bit_generator() calls Py_FatalError (→ abort → WASM unreachable) in
-# the WASI sandbox.  Python's import system checks sys.modules BEFORE calling
-# any finder, so pre-populating the module here prevents PyInit_bit_generator()
-# from ever being invoked when numpy.random.mtrand imports it.
-# RandomState (old numpy.random API) works fine with this stub.
-# Generator (new API) will raise AttributeError on actual use — acceptable.
-import ctypes as _ctypes
+# ── 4. Stub ALL numpy.random C extensions ────────────────────────────────────
+# All numpy.random Cython extensions (bit_generator, _mt19937, mtrand, etc.)
+# call Py_FatalError() -> abort() -> WASM unreachable during their PyInit_*
+# functions in the WASI sandbox.  The root cause is Cython's vtable
+# initialisation dereferencing function pointers that are invalid in WASI.
+#
+# Universal fix: pre-populate sys.modules with pure-Python stubs for EVERY
+# numpy.random.* C extension BEFORE numpy is imported.  Python checks
+# sys.modules before calling any finder or init function, so the broken C
+# initialisers are never reached.  numpy.core, linalg, and fft C extensions
+# remain fully registered and work correctly.
+#
+# Trade-off: np.random.seed()/rand() and the new Generator API raise
+# NotImplementedError.  All array operations (np.allclose, np.linalg,
+# np.fft, etc.) work normally.
 
-def _sized_stub(name, target_basicsize):
-    """Return a Python type whose tp_basicsize == target_basicsize.
+def _rand_stub(name, **attrs):
+    """Create a stub module for a numpy.random C extension."""
+    _m = _types.ModuleType(name)
+    _m.__file__ = '<wasi-stub>'
+    for _k, _v in attrs.items():
+        setattr(_m, _k, _v)
+    def _stub_getattr(_attr):
+        def _not_impl(*_a, **_kw):
+            raise NotImplementedError(
+                'numpy.random C extensions are not available in the WASI '
+                'sandbox (stubbed to prevent abort/unreachable traps). '
+                'Array ops (np.array, np.allclose, np.linalg, np.fft) '
+                'work fine; use pre-computed values instead of RNG.')
+        _not_impl.__name__ = _attr
+        return _not_impl
+    _m.__getattr__ = _stub_getattr
+    _sys.modules.setdefault(name, _m)
+    return _m
 
-    Cython's __Pyx_ImportType validates:
-      1. tp_basicsize matches the C struct size compiled into the extension.
-      2. __pyx_vtable__ is present and is a PyCapsule(non-null ptr) for cdef
-         classes that declare virtual methods (e.g. BitGenerator).
+class _StubBitGen:
+    """Pure-Python stand-in for BitGenerator cdef base class."""
+    def __init__(self, seed=None): pass
 
-    On wasm32 (4-byte pointers) object.__basicsize__ == 8; each __slots__
-    entry adds 4 bytes.  This helper computes the number of slots needed for
-    any target size so we never have to hardcode platform-specific counts.
+class _StubSeedSeq:
+    """Pure-Python stand-in for SeedSequence."""
+    def __init__(self, entropy=None, **kw): self.entropy = entropy
 
-    The __pyx_vtable__ capsule pointer is never dereferenced — real numpy
-    extension types (MT19937, Generator, etc.) install their own vtables when
-    they are initialised; the stub type is never instantiated directly.
-    """
-    base = object.__basicsize__
-    slot_sz = _ctypes.sizeof(_ctypes.c_void_p)  # 4 on wasm32, 8 on amd64
-    n = max(0, (target_basicsize - base) // slot_sz)
-    cls = type(name, (), {'__slots__': tuple('_s%d' % i for i in range(n))})
-    # Satisfy __Pyx_GetVtable: needs __pyx_vtable__ = PyCapsule(non-null, name=None).
-    # id(cls) is a guaranteed non-null CPython object address.
-    _pcn = _ctypes.pythonapi.PyCapsule_New
-    _pcn.restype = _ctypes.py_object
-    _pcn.argtypes = [_ctypes.c_void_p, _ctypes.c_char_p, _ctypes.c_void_p]
-    cls.__pyx_vtable__ = _pcn(_ctypes.c_void_p(id(cls)), None, None)
-    return cls
+class _StubRandomState:
+    """Pure-Python stand-in for RandomState (legacy mtrand API)."""
+    def __init__(self, seed=None): pass
 
-_bg_stub = _types.ModuleType('numpy.random.bit_generator')
-# Sizes from numpy 1.26 bit_generator.pxd, measured at wasm32 link time.
-# PyInit_bit_generator() crashes in WASI (Py_FatalError->abort->unreachable);
-# pre-populating sys.modules with correctly-sized stubs prevents that init
-# from ever being called, while satisfying Cython's __Pyx_ImportType checks
-# in all extensions that do "cimport bit_generator" (mtrand, _generator, etc.)
-_bg_stub.BitGenerator  = _sized_stub('BitGenerator',  48)
-_bg_stub.SeedSequence  = _sized_stub('SeedSequence',  32)
-_bg_stub.ISeedSequence = _sized_stub('ISeedSequence', 32)
-_sys.modules.setdefault('numpy.random.bit_generator', _bg_stub)
-del _bg_stub, _ctypes, _sized_stub
+_rand_stub('numpy.random.bit_generator',
+    BitGenerator=_StubBitGen,
+    SeedSequence=_StubSeedSeq,
+    ISeedSequence=_StubSeedSeq)
+
+_rand_stub('numpy.random._mt19937',
+    MT19937=type('MT19937', (_StubBitGen,), {}))
+
+_rand_stub('numpy.random._philox',
+    Philox=type('Philox', (_StubBitGen,), {}))
+
+_rand_stub('numpy.random._pcg64',
+    PCG64=type('PCG64', (_StubBitGen,), {}),
+    PCG64DXSM=type('PCG64DXSM', (_StubBitGen,), {}))
+
+_rand_stub('numpy.random._sfc64',
+    SFC64=type('SFC64', (_StubBitGen,), {}))
+
+_rand_stub('numpy.random._generator',
+    Generator=type('Generator', (), {}))
+
+_rand_stub('numpy.random._common')
+_rand_stub('numpy.random._bounded_integers')
+
+_rand_stub('numpy.random.mtrand',
+    RandomState=_StubRandomState)
+
+del _rand_stub, _StubBitGen, _StubSeedSeq, _StubRandomState
 
 # ── 5. Pre-warm numpy ─────────────────────────────────────────────────────────
 # Import numpy now so the snapshot captures all numpy modules in sys.modules.

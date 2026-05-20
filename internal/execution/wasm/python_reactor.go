@@ -359,35 +359,94 @@ func (r *ReactorPythonRunner) SendRequest(ctx context.Context, script, method st
 	return result, nil
 }
 
-// initSysPath calls py_exec with a setup script that inserts site-packages
-// paths into sys.path.  This must be called after py_init() and before
-// taking the snapshot so the modified sys.path is baked into the snapshot
-// and inherited by every subsequent request.
+// initSysPath installs a wasi-vfs–aware meta path finder and fixes sys.path
+// before taking the snapshot.
 //
-// WASI CPython sets Py_IgnoreEnvironmentFlag=1 and skips site.py, so
-// PYTHONPATH env vars are not read and site-packages is not on sys.path.
-// Mutating sys.path directly via Python code is the only reliable fix.
-func (r *ReactorPythonRunner) initSysPath(ctx context.Context) error {
-	// Build the candidate list: packed site-packages + any mounted AllowedPaths.
-	candidates := []string{
-		"/usr/lib/python3.14/site-packages",
-		"/usr/local/lib/python3.14/site-packages",
-	}
-	candidates = append(candidates, r.cfg.AllowedPaths...)
+// # Problem
+//
+// wasi-vfs supports path_open (reading individual files) but NOT fd_readdir
+// (directory listing via scandir/listdir).  Python's standard FileFinder
+// discovers packages by calling os.scandir() on each sys.path entry.  When
+// scandir fails on the site-packages directory, Python's FileFinder reports
+// every package as absent — even though the files are readable via open().
+//
+// # Fix
+//
+// We inject a custom sys.meta_path finder (_WasivfsFinder) that probes
+// package existence with open() instead of scandir.  The finder is added
+// once here, before the memory snapshot is taken, so it is present in every
+// subsequent request without per-request overhead.
+//
+// WASI CPython also sets Py_IgnoreEnvironmentFlag=1, so PYTHONPATH env vars
+// are ignored.  We mutate sys.path directly to add site-packages candidates.
+const initSysPathScript = `
+import sys as _sys, importlib.util as _ilu, importlib.machinery as _ilm
 
-	// Build the Python preamble.
-	var sb strings.Builder
-	sb.WriteString("import sys as _sys\n")
-	for _, p := range candidates {
-		fmt.Fprintf(&sb, "_p = %q\n", p)
-		sb.WriteString("if _p not in _sys.path:\n    _sys.path.insert(0, _p)\n")
+# ── 1. Add site-packages candidates to sys.path ──────────────────────────────
+for _p in ['/usr/lib/python3.14/site-packages',
+           '/usr/local/lib/python3.14/site-packages']:
+    if _p not in _sys.path:
+        _sys.path.insert(0, _p)
+
+# ── 2. Install a scandir-free meta path finder ───────────────────────────────
+# wasi-vfs supports path_open but not fd_readdir, so FileFinder's scandir
+# fails on site-packages.  This finder uses open() to probe file existence.
+_SITE = '/usr/lib/python3.14/site-packages'
+
+class _WasivfsFinder:
+    """Meta-path finder for wasi-vfs packed site-packages."""
+    @staticmethod
+    def _exists(path):
+        try:
+            open(path, 'rb').close()
+            return True
+        except OSError:
+            return False
+
+    def find_spec(self, fullname, path, target=None):
+        # Only handle packages rooted in site-packages.
+        parts = fullname.split('.')
+        base  = _SITE + '/' + '/'.join(parts)
+        # Package: base/__init__.py
+        init = base + '/__init__.py'
+        if self._exists(init):
+            loader = _ilm.SourceFileLoader(fullname, init)
+            return _ilu.spec_from_file_location(
+                fullname, init,
+                loader=loader,
+                submodule_search_locations=[base])
+        # Module: base.py
+        src = base + '.py'
+        if self._exists(src):
+            loader = _ilm.SourceFileLoader(fullname, src)
+            return _ilu.spec_from_file_location(fullname, src, loader=loader)
+        return None
+
+_sys.meta_path.append(_WasivfsFinder())
+
+# ── 3. Report result ──────────────────────────────────────────────────────────
+def evaluation_function(r, a, p=None):
+    return {'is_correct': True, 'feedback': 'meta_path+sys.path ok'}
+`
+
+func (r *ReactorPythonRunner) initSysPath(ctx context.Context) error {
+	script := initSysPathScript
+
+	// Append AllowedPaths to the site-packages candidate list dynamically.
+	if len(r.cfg.AllowedPaths) > 0 {
+		var extra strings.Builder
+		for _, p := range r.cfg.AllowedPaths {
+			fmt.Fprintf(&extra, "\nif %q not in _sys.path: _sys.path.insert(0, %q)", p, p)
+		}
+		// Insert after the sys.path loop in the script.
+		script = strings.Replace(script,
+			"# ── 2. Install a scandir-free meta path finder",
+			extra.String()+"\n# ── 2. Install a scandir-free meta path finder",
+			1)
 	}
-	sb.WriteString("del _p\n")
-	sb.WriteString("def evaluation_function(r,a,p=None):\n")
-	sb.WriteString("    return {'is_correct':True,'feedback':str(_sys.path)}\n")
 
 	reqObj := map[string]any{
-		"script": sb.String(),
+		"script": script,
 		"method": "eval",
 		"input":  json.RawMessage(`{"response":"","answer":""}`),
 	}
@@ -411,14 +470,14 @@ func (r *ReactorPythonRunner) initSysPath(ctx context.Context) error {
 		return fmt.Errorf("initSysPath: py_exec: %w", err)
 	}
 
-	// Read and log the updated sys.path for visibility.
+	// Read and log the response.
 	bufPtrRes, _ := r.fnRespBuf.Call(ctx)
 	lenPtrRes, _ := r.fnRespLen.Call(ctx)
 	if lenRaw, ok := r.mod.Memory().Read(uint32(lenPtrRes[0]), 4); ok {
 		respLen := int32(binary.LittleEndian.Uint32(lenRaw))
 		if respLen > 0 {
 			if body, ok := r.mod.Memory().Read(uint32(bufPtrRes[0]), uint32(respLen)); ok {
-				r.log.Info("sys.path after injection", zap.String("path", string(body)))
+				r.log.Info("initSysPath complete", zap.String("result", string(body)))
 			}
 		}
 	}

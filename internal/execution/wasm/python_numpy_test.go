@@ -100,34 +100,35 @@ func TestReactorPythonRunner_SysPathDiag(t *testing.T) {
 	defer cancel()
 
 	diagScript := `
-import sys, os
+import sys, importlib.util
 
 def evaluation_function(response, answer, params=None):
     info = {}
     info["sys_path"] = sys.path
-    info["sys_version"] = sys.version
+    info["sys_version"] = sys.version.split()[0]
 
-    # Scan /usr/lib for Python dirs
-    try:
-        info["usr_lib"] = os.listdir("/usr/lib")
-    except Exception as e:
-        info["usr_lib_err"] = str(e)
+    # importlib.util.find_spec: returns None if not found, or tells us the origin
+    spec = importlib.util.find_spec("numpy")
+    info["numpy_spec"] = str(spec)
 
-    # Try to find site-packages
-    candidates = []
-    for root in ["/usr", "/usr/local"]:
+    # Try to open specific numpy files directly via path_open
+    probes = [
+        "/usr/lib/python3.14/site-packages/numpy/__init__.py",
+        "/usr/local/lib/python3.14/site-packages/numpy/__init__.py",
+        "/usr/lib/python3.14/site-packages/numpy",
+    ]
+    file_probes = {}
+    for p in probes:
         try:
-            for d in os.listdir(root + "/lib"):
-                if d.startswith("python"):
-                    sp = root + "/lib/" + d + "/site-packages"
-                    try:
-                        pkgs = os.listdir(sp)
-                        candidates.append(sp + " => " + str(pkgs[:8]))
-                    except Exception as e2:
-                        candidates.append(sp + " => " + str(e2))
+            with open(p, "rb") as f:
+                file_probes[p] = "OK (" + str(len(f.read(64))) + " bytes)"
         except Exception as e:
-            candidates.append(root + "/lib: " + str(e))
-    info["site_package_candidates"] = candidates
+            file_probes[p] = str(e)
+    info["file_probes"] = file_probes
+
+    # Check builtin/frozen modules for numpy
+    info["numpy_in_builtins"] = [m for m in sys.builtin_module_names if "numpy" in m or "npy" in m]
+    info["numpy_in_frozen"]   = [m for m in sys.stdlib_module_names  if "numpy" in m or "npy" in m] if hasattr(sys, "stdlib_module_names") else []
 
     return {"is_correct": True, "feedback": str(info)}
 `

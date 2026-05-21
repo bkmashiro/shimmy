@@ -46,7 +46,7 @@ jobs:
         run: |
           mkdir -p internal/execution/wasm/testdata
           curl -fsSL \
-            https://github.com/bkmashiro/webassembly-language-runtimes/releases/download/v1.0.7/python-reactor.wasm \
+            https://github.com/bkmashiro/webassembly-language-runtimes/releases/download/v1.0.8/python-reactor.wasm \
             -o internal/execution/wasm/testdata/python-reactor.wasm
           ls -lh internal/execution/wasm/testdata/python-reactor.wasm
 

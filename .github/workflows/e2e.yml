@@ -240,19 +240,21 @@ jobs:
           FUNCTION_WASM_MODULE: /tmp/python-reactor.wasm
           FUNCTION_WASM_PYTHON_SCRIPT: ${{ github.workspace }}/examples/eval-python/eval.py
           FUNCTION_WASM_MAX_MEMORY_PAGES: "4096"
+          # Use a single runner for E2E — avoids 4× parallel CPython init (~8 s each).
+          FUNCTION_MAX_PROCS: "1"
           LOG_LEVEL: info
         run: /tmp/shimmy serve --port 18082 &
 
-      - name: Wait for server (CPython init ~8-10 s)
+      - name: Wait for server (CPython compile + init ~20 s)
         run: |
-          for i in $(seq 1 60); do
+          for i in $(seq 1 90); do
             if curl -sf http://localhost:18082/health > /dev/null 2>&1; then
               echo "Server ready after ${i}s"
               break
             fi
             sleep 1
           done
-          curl -sf http://localhost:18082/health || (echo "Server did not start within 60s" && exit 1)
+          curl -sf http://localhost:18082/health || (echo "Server did not start within 90s" && exit 1)
 
       - name: Health check
         run: |

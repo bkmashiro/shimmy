@@ -386,9 +386,10 @@ jobs:
           FUNCTION_WASM_MODULE=/tmp/python-reactor.wasm \
           FUNCTION_WASM_PYTHON_SCRIPT=/tmp/eval_scipy.py \
           FUNCTION_WASM_MAX_MEMORY_PAGES=4096 \
+          FUNCTION_MAX_PROCS=1 \
           LOG_LEVEL=info \
           /tmp/shimmy serve --port 18083 &
-          for i in $(seq 1 60); do
+          for i in $(seq 1 90); do
             if curl -sf http://localhost:18083/health > /dev/null 2>&1; then break; fi
             sleep 1
           done

@@ -360,8 +360,21 @@ func (r *ReactorPythonRunner) SendRequest(ctx context.Context, script, method st
 	return result, nil
 }
 
-// initSysPath installs a wasi-vfs–aware meta path finder and fixes sys.path
-// before taking the snapshot.
+// initSysPath installs a wasi-vfs–aware meta path finder, stubs numpy.random,
+// and pre-warms numpy before taking the snapshot.
+//
+// Two-phase design
+// ─────────────────
+// Phase 1 (initSysPathPhase1): sys.path, meta-path finder, numpy test stubs,
+//   numpy.random package stubs.  Updates _base_modules so the stubs survive
+//   the per-request eviction pass.  Must not import numpy (avoids crash risk).
+//
+// Phase 2 (initSysPathPhase2): imports numpy so the snapshot captures it in
+//   sys.modules.  If this phase crashes (WASM unreachable), Phase 1 results
+//   are preserved and numpy is still importable per-request from the binary.
+//
+// Splitting the script means a crash in phase 2 does not swallow the phase 1
+// setup, and the log clearly identifies which phase failed.
 //
 // # Problem 1 — scandir
 //
@@ -387,7 +400,11 @@ func (r *ReactorPythonRunner) SendRequest(ctx context.Context, script, method st
 //
 // WASI CPython also sets Py_IgnoreEnvironmentFlag=1, so PYTHONPATH env vars
 // are ignored.  We mutate sys.path directly to add site-packages candidates.
-const initSysPathScript = `
+// initSysPathPhase1 sets up sys.path, the wasi-vfs meta-path finder, numpy
+// test-extension stubs, and numpy.random stubs.  It updates _base_modules so
+// all stubs survive the per-request eviction pass inside _handle_request.
+// No numpy import here — that lives in phase 2 so a crash there is isolated.
+const initSysPathPhase1 = `
 import sys as _sys, importlib.util as _ilu, importlib.machinery as _ilm, _imp as _imp_mod
 
 # ── 1. Add site-packages candidates to sys.path ──────────────────────────────
@@ -620,46 +637,72 @@ _rand_stub('numpy.random.mtrand',
 del _rand_stub, _StubBitGen, _StubSeedSeq, _StubRandomState
 del _np_seed, _np_rand, _np_randn, _np_rng, _pyr
 
-# ── 5. Pre-warm numpy ─────────────────────────────────────────────────────────
-# Import numpy now so the snapshot captures all numpy modules in sys.modules.
-# Every subsequent request then satisfies "import numpy" via a fast lookup
-# instead of re-running all C extension init functions.
-# _base_modules is updated after this import so eviction never removes numpy.
-try:
-    import numpy as _np_pw
-    _numpy_prewarm_status = 'numpy ' + _np_pw.__version__ + ' pre-warmed'
-    del _np_pw
-except Exception as _exc:
-    _numpy_prewarm_status = 'numpy pre-warm exception: ' + str(_exc)
-    del _exc
-
-# ── 6. Extend _base_modules ───────────────────────────────────────────────────
-# Capture sys.modules state now (includes test stubs, bit_generator stub, and
-# all pre-warmed numpy modules).  _handle_request's eviction pass only removes
-# modules NOT in _base_modules, so numpy persists across requests.
+# ── 5. Update _base_modules to include all stubs ─────────────────────────────
+# Must happen here, before _handle_request's eviction finally-block runs.
+# Every module added to sys.modules in sections 3-4 must be in _base_modules
+# or it will be deleted by the eviction pass before the snapshot is taken.
 _main._base_modules = frozenset(_sys.modules.keys())
 
-# ── 7. Report result ──────────────────────────────────────────────────────────
 def evaluation_function(r, a, p=None):
-    return {'is_correct': True, 'feedback': _numpy_prewarm_status}
+    return {'is_correct': True, 'feedback': 'phase1:stubs-ready'}
+`
+
+// initSysPathPhase2 pre-warms numpy by importing it so the snapshot captures
+// all numpy modules in sys.modules.  If this crashes (WASM unreachable) the
+// error is reported as a non-fatal warning; phase 1 stubs remain intact and
+// numpy is still importable per-request from the WASM binary.
+const initSysPathPhase2 = `
+import sys as _sys
+import __main__ as _main
+
+# ── Pre-warm numpy ────────────────────────────────────────────────────────────
+# numpy.random and its submodules are already stubbed in sys.modules (phase 1).
+# This import completes the rest of numpy's initialisation (core, linalg, fft).
+try:
+    import numpy as _np_pw
+    _status = 'numpy ' + _np_pw.__version__ + ' pre-warmed'
+    del _np_pw
+except Exception as _exc:
+    _status = 'numpy pre-warm exception: ' + str(_exc)
+    del _exc
+
+# Extend _base_modules to include all numpy.* modules so eviction never removes
+# them.  From this point every request starts with numpy already imported.
+_main._base_modules = frozenset(_sys.modules.keys())
+
+def evaluation_function(r, a, p=None):
+    return {'is_correct': True, 'feedback': _status}
 `
 
 func (r *ReactorPythonRunner) initSysPath(ctx context.Context) error {
-	script := initSysPathScript
-
-	// Append AllowedPaths to the site-packages candidate list dynamically.
+	// Phase 1: sys.path, finder, stubs.  Failure here is fatal.
+	phase1 := initSysPathPhase1
 	if len(r.cfg.AllowedPaths) > 0 {
 		var extra strings.Builder
 		for _, p := range r.cfg.AllowedPaths {
 			fmt.Fprintf(&extra, "\nif %q not in _sys.path: _sys.path.insert(0, %q)", p, p)
 		}
-		// Insert after the sys.path loop in the script.
-		script = strings.Replace(script,
+		phase1 = strings.Replace(phase1,
 			"# ── 2. Install a scandir-free meta path finder",
 			extra.String()+"\n# ── 2. Install a scandir-free meta path finder",
 			1)
 	}
+	if err := r.runInitScript(ctx, "phase1:setup", phase1); err != nil {
+		return fmt.Errorf("initSysPath phase1: %w", err)
+	}
 
+	// Phase 2: numpy pre-warm.  Failure is non-fatal — numpy is still importable
+	// per-request from the WASM binary; it just won't be cached in the snapshot.
+	if err := r.runInitScript(ctx, "phase2:numpy-prewarm", initSysPathPhase2); err != nil {
+		r.log.Warn("numpy pre-warm failed — numpy will be imported per-request",
+			zap.Error(err))
+	}
+	return nil
+}
+
+// runInitScript runs a single-phase init script through py_exec and logs the result.
+// It is a lower-level helper for initSysPath; callers decide whether errors are fatal.
+func (r *ReactorPythonRunner) runInitScript(ctx context.Context, phase, script string) error {
 	reqObj := map[string]any{
 		"script": script,
 		"method": "eval",
@@ -667,32 +710,29 @@ func (r *ReactorPythonRunner) initSysPath(ctx context.Context) error {
 	}
 	reqBytes, err := json.Marshal(reqObj)
 	if err != nil {
-		return fmt.Errorf("initSysPath: marshal: %w", err)
+		return fmt.Errorf("marshal: %w", err)
 	}
-
 	allocRes, err := r.fnAlloc.Call(ctx, uint64(len(reqBytes)))
 	if err != nil {
-		return fmt.Errorf("initSysPath: alloc: %w", err)
+		return fmt.Errorf("alloc: %w", err)
 	}
 	ptr := uint32(allocRes[0])
 	if ptr == 0 {
-		return fmt.Errorf("initSysPath: alloc returned NULL")
+		return fmt.Errorf("alloc returned NULL")
 	}
 	if !r.mod.Memory().Write(ptr, reqBytes) {
-		return fmt.Errorf("initSysPath: write memory")
+		return fmt.Errorf("write memory")
 	}
 	if _, err := r.fnPyExec.Call(ctx, uint64(ptr), uint64(len(reqBytes))); err != nil {
-		return fmt.Errorf("initSysPath: py_exec: %w\nstderr: %s", err, r.stderrBuf.String())
+		return fmt.Errorf("py_exec: %w\nstderr: %s", err, r.stderrBuf.String())
 	}
-
-	// Read and log the response.
 	bufPtrRes, _ := r.fnRespBuf.Call(ctx)
 	lenPtrRes, _ := r.fnRespLen.Call(ctx)
 	if lenRaw, ok := r.mod.Memory().Read(uint32(lenPtrRes[0]), 4); ok {
 		respLen := int32(binary.LittleEndian.Uint32(lenRaw))
 		if respLen > 0 {
 			if body, ok := r.mod.Memory().Read(uint32(bufPtrRes[0]), uint32(respLen)); ok {
-				r.log.Info("initSysPath complete", zap.String("result", string(body)))
+				r.log.Info("initSysPath "+phase, zap.String("result", string(body)))
 			}
 		}
 	}

@@ -90,6 +90,16 @@ type ReactorPythonRunner struct {
 	fnRespLen api.Function
 }
 
+// IsHealthy reports whether the runner is initialised and not closed.
+// A runner becomes unhealthy when its WASM module is closed by wazero after
+// a context timeout (WithCloseOnContextDone). The dispatcher uses this to
+// decide whether to return a runner to the pool or discard it.
+func (r *ReactorPythonRunner) IsHealthy() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.initialized && !r.closed
+}
+
 // NewReactorPythonRunner creates a ReactorPythonRunner.
 // Call Init before SendRequest.
 func NewReactorPythonRunner(wasmPath string, cfg Config, log *zap.Logger) *ReactorPythonRunner {
@@ -121,7 +131,14 @@ func (r *ReactorPythonRunner) Init(ctx context.Context) error {
 		return fmt.Errorf("reactor python: read %q: %w", r.wasmPath, err)
 	}
 
-	rtCfg := wazero.NewRuntimeConfig()
+	rtCfg := wazero.NewRuntimeConfig().
+		// WithCloseOnContextDone causes wazero to interrupt a running WASM module
+		// when the call context is cancelled or times out. Without this flag, a
+		// Python infinite loop would block the runner goroutine indefinitely even
+		// after context.WithTimeout fires. When the module is interrupted it is
+		// permanently closed; the runner is then marked unhealthy and dropped from
+		// the pool by ReactorPythonDispatcher.
+		WithCloseOnContextDone(true)
 	if r.cfg.MaxMemoryPages > 0 {
 		rtCfg = rtCfg.WithMemoryLimitPages(r.cfg.MaxMemoryPages)
 	}
@@ -318,6 +335,13 @@ func (r *ReactorPythonRunner) SendRequest(ctx context.Context, script, method st
 
 	// ── Step 4: Execute ───────────────────────────────────────────────────
 	if _, err := r.fnPyExec.Call(execCtx, uint64(reqPtr), uint64(len(reqBytes))); err != nil {
+		if execCtx.Err() != nil {
+			// The request context timed out or was cancelled. WithCloseOnContextDone
+			// caused wazero to permanently close the module — mark the runner closed
+			// so the dispatcher discards it rather than returning it to the pool.
+			r.closed = true
+			return nil, fmt.Errorf("reactor python: py_exec timed out after %s — script likely contains an infinite loop", reqTimeout)
+		}
 		return nil, fmt.Errorf("reactor python: py_exec: %w\nstderr: %s", err, r.stderrBuf.String())
 	}
 
@@ -948,7 +972,18 @@ func (d *ReactorPythonDispatcher) Send(ctx context.Context, method string, param
 	case <-ctx.Done():
 		return nil, fmt.Errorf("reactor-python: acquire runner: %w", ctx.Err())
 	}
-	defer func() { d.pool <- runner }()
+	defer func() {
+		if runner.IsHealthy() {
+			d.pool <- runner
+		} else {
+			// Runner's WASM module was closed (e.g. by a timeout). Discard it
+			// and spin up a replacement in the background so pool capacity is
+			// restored without blocking the current request.
+			d.log.Warn("reactor runner unhealthy after request — dropping from pool, spawning replacement")
+			go func() { _ = runner.Shutdown(context.Background()) }()
+			go d.spawnReplacement()
+		}
+	}()
 
 	inputJSON, err := json.Marshal(params)
 	if err != nil {
@@ -963,6 +998,23 @@ func (d *ReactorPythonDispatcher) Send(ctx context.Context, method string, param
 		"command": method,
 		"result":  result,
 	}, nil
+}
+
+// spawnReplacement initialises a fresh ReactorPythonRunner and adds it to the
+// pool. Called in a goroutine when an unhealthy runner is discarded, so that
+// pool capacity is eventually restored. Failures are logged but not fatal.
+func (d *ReactorPythonDispatcher) spawnReplacement() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	d.log.Info("reactor-python: initialising replacement runner")
+	runner := NewReactorPythonRunner(d.cfg.ModulePath, d.cfg, d.log)
+	if err := runner.Init(ctx); err != nil {
+		d.log.Error("reactor-python: replacement runner init failed", zap.Error(err))
+		return
+	}
+	d.pool <- runner
+	d.log.Info("reactor-python: replacement runner ready")
 }
 
 // Shutdown drains the pool and shuts down each runner.

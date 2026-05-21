@@ -2,11 +2,18 @@ package shell
 
 import (
 	"context"
+	"time"
 
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxevent"
 	"go.uber.org/zap"
 )
+
+// startTimeout overrides fx's default 15s startup timeout.
+// On a cold start (no wazero compilation cache) JIT-compiling a large WASM
+// binary can take several minutes, so we use a generous limit that still
+// catches truly broken configurations without cutting off legitimate starts.
+const startTimeout = 5 * time.Minute
 
 type Shell struct {
 	log     *zap.Logger
@@ -38,7 +45,7 @@ func (s *Shell) Run(ctx context.Context, options ...fx.Option) error {
 	s.fxApp = fxApp
 
 	// 4. create start context w/ timeout
-	startCtx, cancelStart := context.WithTimeout(shellCtx, fxApp.StartTimeout())
+	startCtx, cancelStart := context.WithTimeout(shellCtx, startTimeout)
 	defer cancelStart()
 
 	// 5. start the application, exit on error

@@ -233,6 +233,13 @@ jobs:
             https://github.com/bkmashiro/webassembly-language-runtimes/releases/download/v1.0.11/python-reactor.wasm \
             -o /tmp/python-reactor.wasm
           ls -lh /tmp/python-reactor.wasm
+          echo "WASM_SHA=$(sha256sum /tmp/python-reactor.wasm | cut -d' ' -f1)" >> $GITHUB_ENV
+
+      - name: Restore wazero compilation cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/wazero-reactor-cache
+          key: wazero-reactor-${{ env.WASM_SHA }}
 
       - name: Start shimmy (reactor-python backend)
         env:
@@ -242,6 +249,7 @@ jobs:
           FUNCTION_WASM_MAX_MEMORY_PAGES: "4096"
           # Use a single runner for E2E — avoids 4× parallel CPython init (~8 s each).
           FUNCTION_MAX_PROCS: "1"
+          FUNCTION_WASM_COMPILE_CACHE: /tmp/wazero-reactor-cache
           LOG_LEVEL: info
         run: /tmp/shimmy serve --port 18082 &
 
@@ -387,6 +395,7 @@ jobs:
           FUNCTION_WASM_PYTHON_SCRIPT=/tmp/eval_scipy.py \
           FUNCTION_WASM_MAX_MEMORY_PAGES=4096 \
           FUNCTION_MAX_PROCS=1 \
+          FUNCTION_WASM_COMPILE_CACHE=/tmp/wazero-reactor-cache \
           LOG_LEVEL=info \
           /tmp/shimmy serve --port 18083 &
           for i in $(seq 1 90); do

@@ -66,6 +66,12 @@ type Config struct {
 	// Only used when FUNCTION_INTERFACE=python-wasm.
 	// The script must define evaluation_function(response, answer, params=None).
 	PythonScriptPath string `conf:"wasm_python_script"`
+
+	// CompileCacheDir, if non-empty, enables wazero's on-disk compilation cache.
+	// Set via FUNCTION_WASM_COMPILE_CACHE env var. Shared across all runners and
+	// processes that point at the same directory, making cold starts much faster
+	// after the first compile.
+	CompileCacheDir string `conf:"wasm_compile_cache"`
 }
 
 // applyDefaults fills in zero-value fields with sensible defaults.
@@ -105,6 +111,9 @@ func (c *Config) applyEnv() {
 	}
 	if v := os.Getenv("FUNCTION_WASM_PYTHON_SCRIPT"); v != "" {
 		c.PythonScriptPath = v
+	}
+	if v := os.Getenv("FUNCTION_WASM_COMPILE_CACHE"); v != "" {
+		c.CompileCacheDir = v
 	}
 }
 

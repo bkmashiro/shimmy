@@ -139,6 +139,19 @@ func (r *ReactorPythonRunner) Init(ctx context.Context) error {
 		// permanently closed; the runner is then marked unhealthy and dropped from
 		// the pool by ReactorPythonDispatcher.
 		WithCloseOnContextDone(true)
+
+	if r.cfg.CompileCacheDir != "" {
+		cache, err := wazero.NewCompilationCacheWithDir(r.cfg.CompileCacheDir)
+		if err != nil {
+			r.log.Warn("failed to create wazero compilation cache, continuing without cache",
+				zap.String("dir", r.cfg.CompileCacheDir),
+				zap.Error(err))
+		} else {
+			rtCfg = rtCfg.WithCompilationCache(cache)
+			r.log.Info("wazero compilation cache enabled", zap.String("dir", r.cfg.CompileCacheDir))
+		}
+	}
+
 	if r.cfg.MaxMemoryPages > 0 {
 		rtCfg = rtCfg.WithMemoryLimitPages(r.cfg.MaxMemoryPages)
 	}

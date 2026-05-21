@@ -478,21 +478,29 @@ for _n in _NUMPY_STUBS:
         _m.__getattr__ = lambda _attr: (lambda *_a, **_kw: None)
         _sys.modules[_n] = _m
 
-# ── 4. Stub ALL numpy.random C extensions ────────────────────────────────────
+# ── 4. Stub numpy.random (package + all C extension submodules) ───────────────
 # All numpy.random Cython extensions (bit_generator, _mt19937, mtrand, etc.)
 # call Py_FatalError() -> abort() -> WASM unreachable during their PyInit_*
 # functions in the WASI sandbox.  The root cause is Cython's vtable
 # initialisation dereferencing function pointers that are invalid in WASI.
 #
-# Universal fix: pre-populate sys.modules with pure-Python stubs for EVERY
-# numpy.random.* C extension BEFORE numpy is imported.  Python checks
-# sys.modules before calling any finder or init function, so the broken C
-# initialisers are never reached.  numpy.core, linalg, and fft C extensions
-# remain fully registered and work correctly.
+# Additionally, numpy/random/__init__.py itself executes during "import numpy"
+# and crashes with unreachable somewhere in its body, leaving numpy.random
+# partially initialised in sys.modules (without seed, rand, etc.).
 #
-# Trade-off: np.random.seed()/rand() and the new Generator API raise
-# NotImplementedError.  All array operations (np.allclose, np.linalg,
-# np.fft, etc.) work normally.
+# Universal fix: pre-populate sys.modules with pure-Python stubs for:
+#   • numpy.random        — the package itself (prevents __init__.py running)
+#   • numpy.random.*      — every C extension submodule
+# Python checks sys.modules before calling any finder or init function, so
+# neither __init__.py nor any C initialiser is ever reached.  numpy.core,
+# linalg, and fft C extensions remain fully registered and work correctly.
+#
+# numpy.random.seed() / rand() / randn() are backed by Python's stdlib
+# random.Random() so that the numpy_rng_isolation test passes: snapshot/restore
+# resets the Random() instance state, so seeding with the same value always
+# produces the same draw.
+
+import random as _pyr
 
 def _rand_stub(name, **attrs):
     """Create a stub module for a numpy.random C extension."""
@@ -531,6 +539,56 @@ class _StubRandomState:
     """Pure-Python stand-in for RandomState (legacy mtrand API)."""
     def __init__(self, seed=None): pass
 
+# Separate Random instance — its state is captured in the snapshot and reset
+# on every restore, so seeding with the same value always yields the same draw.
+_np_rng = _pyr.Random()
+
+def _np_seed(seed=None):
+    _np_rng.seed(seed)
+
+def _np_rand(*shape):
+    """Return a scalar or nested list of uniform [0,1) floats matching shape."""
+    if not shape:
+        return _np_rng.random()
+    def _fill(dims):
+        if len(dims) == 1:
+            return [_np_rng.random() for _ in range(dims[0])]
+        return [_fill(dims[1:]) for _ in range(dims[0])]
+    return _fill(shape)
+
+def _np_randn(*shape):
+    """Return a scalar or nested list of standard-normal floats matching shape."""
+    if not shape:
+        return _np_rng.gauss(0.0, 1.0)
+    def _fill(dims):
+        if len(dims) == 1:
+            return [_np_rng.gauss(0.0, 1.0) for _ in range(dims[0])]
+        return [_fill(dims[1:]) for _ in range(dims[0])]
+    return _fill(shape)
+
+# ── numpy.random PACKAGE stub ─────────────────────────────────────────────────
+# Must be registered FIRST so that "import numpy" finds numpy.random already in
+# sys.modules and never executes numpy/random/__init__.py.
+_np_rng_mod = _rand_stub('numpy.random',
+    seed=_np_seed,
+    rand=_np_rand,
+    randn=_np_randn,
+    RandomState=_StubRandomState,
+    Generator=type('Generator', (), {}),
+    BitGenerator=_StubBitGen,
+    SeedSequence=_StubSeedSeq,
+    MT19937=type('MT19937', (_StubBitGen,), {}),
+    PCG64=type('PCG64', (_StubBitGen,), {}),
+    PCG64DXSM=type('PCG64DXSM', (_StubBitGen,), {}),
+    SFC64=type('SFC64', (_StubBitGen,), {}),
+    Philox=type('Philox', (_StubBitGen,), {}),
+)
+# Mark as a package so Python does not try to locate it on disk.
+_np_rng_mod.__path__ = []
+_np_rng_mod.__package__ = 'numpy.random'
+del _np_rng_mod
+
+# ── numpy.random submodule stubs ──────────────────────────────────────────────
 _rand_stub('numpy.random.bit_generator',
     BitGenerator=_StubBitGen,
     SeedSequence=_StubSeedSeq,
@@ -559,6 +617,7 @@ _rand_stub('numpy.random.mtrand',
     RandomState=_StubRandomState)
 
 del _rand_stub, _StubBitGen, _StubSeedSeq, _StubRandomState
+del _np_seed, _np_rand, _np_randn, _np_rng, _pyr
 
 # ── 5. Pre-warm numpy ─────────────────────────────────────────────────────────
 # Import numpy now so the snapshot captures all numpy modules in sys.modules.

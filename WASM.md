@@ -217,6 +217,7 @@ PORT=8080 \
 | `FUNCTION_WASM_MAX_MEMORY_PAGES` | 256 (16 MB) | WASM linear memory hard cap (1 page = 64 KB) |
 | `FUNCTION_WASM_ALLOWED_PATHS` | — | Comma-separated host paths mounted read-only into the guest filesystem |
 | `FUNCTION_WASM_ALLOWED_ENV` | — | Comma-separated env var keys passed through to the module |
+| `FUNCTION_WASM_COMPILE_CACHE` | — | Directory for wazero's on-disk JIT compilation cache (see section 9) |
 
 `FUNCTION_TIMEOUT` (default: 30 s) applies as a per-request deadline passed via context cancellation to the wazero call.
 
@@ -278,6 +279,20 @@ The `.wasm` file is compiled once at startup into a single `wazero.CompiledModul
 Each pool slot holds an independent `api.Module` instantiated from the shared `CompiledModule`. Module instances do not share linear memory or mutable state; they only share the read-only compiled code. This means N requests can execute in parallel on N instances without any locking between them — the only synchronisation is the pool channel used to acquire and release supervisors.
 
 Pool size is fixed at startup to `FUNCTION_MAX_PROCS` (defaulting to `runtime.NumCPU()`). If all instances are busy, incoming requests block on the pool channel until a slot becomes available, honouring the caller's context deadline. There is no dynamic scaling; the pool size is chosen to match the available CPU parallelism.
+
+### On-disk compilation cache
+
+Set `FUNCTION_WASM_COMPILE_CACHE` to a persistent directory to enable wazero's on-disk JIT cache:
+
+```bash
+FUNCTION_WASM_COMPILE_CACHE=/var/cache/wazero ./shimmy serve
+```
+
+On the first start wazero compiles the module and writes the result to the cache directory. On subsequent starts — including container restarts and CI re-runs — the pre-compiled artifact is read from disk and `CompileModule` completes in milliseconds instead of minutes. The directory is safe to share across processes: wazero uses file locking and keyed sub-directories internally.
+
+The cache is keyed on the binary content of the `.wasm` file. Deploying a new WASM binary automatically invalidates the cached entry.
+
+For large binaries (e.g. CPython compiled to WASM, ~240 MB) this cache is strongly recommended: a cold compile can take 1–3 minutes, which would exceed the default fx startup timeout (now 5 minutes, raised from 15 s).
 
 ## 10. Writing an eval function (JavaScript / javy)
 

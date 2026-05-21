@@ -81,18 +81,28 @@ You may include any additional keys (e.g. `absolute_error`, `relative_error`). T
 
 ### Error handling
 
-If your function raises an exception the sandbox catches it and returns a structured error:
+If your function raises an exception the sandbox catches it and returns a structured error. The full HTTP response looks like:
 
 ```json
 {
-  "error": "invalid literal for int() with base 10: 'abc'",
-  "error_type": "ValueError",
-  "lineno": 3,
-  "traceback": "Traceback (most recent call last):\n  File \"<eval>\", line 3, ..."
+  "command": "eval",
+  "result": {
+    "error":      "invalid literal for int() with base 10: 'abc'",
+    "error_type": "ValueError",
+    "lineno":     3,
+    "traceback":  "Traceback (most recent call last):\n  File \"<eval>\", line 3, ..."
+  }
 }
 ```
 
-This means an unhandled exception never crashes the evaluator — the student gets a clear error message. You may also catch exceptions yourself and return `{"is_correct": false, "feedback": "..."}` for cleaner UX.
+| Field | Type | Description |
+|-------|------|-------------|
+| `error` | string | Exception message (`str(e)`) |
+| `error_type` | string | Exception class name (e.g. `ValueError`, `ImportError`) |
+| `lineno` | int | Line number in your script where the exception originated |
+| `traceback` | string | Full formatted traceback from `traceback.format_exc()` |
+
+This means an unhandled exception never crashes the evaluator. You may also catch exceptions yourself and return `{"is_correct": false, "feedback": "..."}` for cleaner student-facing UX.
 
 ---
 
@@ -282,8 +292,9 @@ Set these environment variables in your evaluator container:
 
 | Variable | Value | Description |
 |----------|-------|-------------|
-| `SUPERVISOR_IO_INTERFACE` | `reactor-python` | Select the WASM reactor backend |
-| `FUNCTION_WASM_MODULE_PATH` | `/app/python-reactor.wasm` | Path to the WASM binary |
+| `FUNCTION_INTERFACE` | `reactor-python` | Select the WASM reactor backend |
+| `FUNCTION_WASM_MODULE` | `/app/python-reactor.wasm` | Path to the WASM binary |
 | `FUNCTION_WASM_PYTHON_SCRIPT` | `/app/eval.py` | Path to your eval script |
-| `FUNCTION_WASM_TIMEOUT` | `30s` | Per-request timeout (default: 30s) |
-| `FUNCTION_WASM_MAX_INSTANCES` | `2` | Runner pool size (default: NumCPU, max 4) |
+| `FUNCTION_TIMEOUT` | `30` | Per-request timeout in seconds (default: 30) |
+| `FUNCTION_MAX_PROCS` | `2` | Runner pool size (default: NumCPU, max 4) |
+| `FUNCTION_WASM_COMPILE_CACHE` | `/var/cache/wazero` | **Recommended.** On-disk JIT cache for the WASM binary. Eliminates the ~2-minute cold-compile on first start; subsequent starts are instant. The directory is created automatically. |

@@ -20,7 +20,14 @@
         }
       },
       "additionalProperties": true,
-      "required": ["is_correct"]
+      "if": {
+        "not": {
+          "required": ["error"]
+        }
+      },
+      "then": {
+        "required": ["is_correct"]
+      }
     },
     "error": {
       "type": "object",

@@ -468,6 +468,48 @@ _sys.meta_path = [_f for _f in _sys.meta_path if _f is not _ilm.PathFinder]
 _sys.meta_path.append(_WasivfsFinder())
 _sys.meta_path.append(_ilm.PathFinder)
 
+# ── 2b. Fail-loud finder for known-unavailable packages ───────────────────────
+# When a user script imports a package that is unavailable in this sandbox,
+# raise ImportError with a clear explanation rather than the generic
+# "No module named 'X'" message.
+#
+# Inserted just before PathFinder so all valid finders (BuiltinImporter,
+# FrozenImporter, _WasivfsFinder) get first chance; only packages that
+# none of those finders recognise reach this check.
+_SANDBOX_UNAVAILABLE = {
+    'scipy':        'scipy requires compiled C extensions; use a Pyodide-based runtime instead.',
+    'pandas':       'pandas requires compiled C extensions; use standard Python or Pyodide.',
+    'matplotlib':   'matplotlib requires a display backend unavailable in WASI.',
+    'sklearn':      'scikit-learn requires compiled C extensions.',
+    'scikit_learn': 'scikit-learn requires compiled C extensions.',
+    'torch':        'PyTorch is not available in the WASI sandbox.',
+    'tensorflow':   'TensorFlow is not available in the WASI sandbox.',
+    'keras':        'Keras/TensorFlow is not available in the WASI sandbox.',
+    'PIL':          'Pillow requires compiled C extensions.',
+    'cv2':          'OpenCV requires compiled C extensions.',
+    'requests':     'Network access is disabled in the WASI sandbox.',
+    'httpx':        'Network access is disabled in the WASI sandbox.',
+    'aiohttp':      'Network access is disabled in the WASI sandbox.',
+    'sqlalchemy':   'SQLAlchemy is not available in the WASI sandbox.',
+    'psycopg2':     'psycopg2 requires compiled C extensions.',
+}
+_SANDBOX_AVAILABLE = 'Available packages: numpy, sympy, and the Python standard library (no network).'
+
+class _UnavailablePackageFinder:
+    def find_spec(self, fullname, path, target=None):
+        root = fullname.split('.')[0]
+        msg = _SANDBOX_UNAVAILABLE.get(root)
+        if msg:
+            raise ImportError(
+                f"'{fullname}' is not available in the shimmy-wasm sandbox.\n"
+                f"Reason: {msg}\n"
+                f"{_SANDBOX_AVAILABLE}"
+            )
+        return None
+
+_sys.meta_path.insert(-1, _UnavailablePackageFinder())
+del _SANDBOX_UNAVAILABLE, _SANDBOX_AVAILABLE, _UnavailablePackageFinder
+
 # ── 3. Stub numpy test-only C extensions ─────────────────────────────────────
 # numpy/core/_add_newdocs.py imports test-only C extensions
 # (e.g. numpy.core._multiarray_tests) solely to attach docstrings via

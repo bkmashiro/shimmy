@@ -135,11 +135,25 @@ jobs:
       - name: Build shimmy
         run: go build -o /tmp/shimmy .
 
+      - name: Hash python.wasm for cache key
+        run: |
+          echo "WASM_SHA=$(sha256sum \
+            ${{ github.workspace }}/internal/execution/wasm/testdata/python.wasm \
+            | cut -d' ' -f1)" >> $GITHUB_ENV
+
+      - name: Restore wazero compilation cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/wazero-resident-cache
+          key: wazero-resident-${{ env.WASM_SHA }}
+
       - name: Start shimmy (python-wasm backend)
         env:
           FUNCTION_INTERFACE: python-wasm
           FUNCTION_WASM_MODULE: ${{ github.workspace }}/internal/execution/wasm/testdata/python.wasm
           FUNCTION_WASM_PYTHON_SCRIPT: ${{ github.workspace }}/examples/eval-python/eval.py
+          FUNCTION_MAX_PROCS: "1"
+          FUNCTION_WASM_COMPILE_CACHE: /tmp/wazero-resident-cache
           LOG_LEVEL: info
         run: /tmp/shimmy serve --port 18081 &
 
@@ -206,6 +220,54 @@ jobs:
           result = d.get('result', d)
           assert 'preview' in result, f'expected preview field in result, got {result}'
           print('PASS: preview returns preview field')
+          "
+
+      - name: State isolation — mutable default does not bleed between requests
+        run: |
+          # A mutable default argument accumulates calls if the function object
+          # persists across requests. In resident mode each request re-exec()s
+          # the script in a fresh namespace, so _calls should always be len=1.
+          cat > /tmp/eval_stateful.py << 'EOF'
+          def evaluation_function(response, answer, params=None, _calls=[]):
+              _calls.append(1)
+              return {
+                  "is_correct": len(_calls) == 1,
+                  "feedback": f"calls={len(_calls)}",
+              }
+          EOF
+          pkill -f "shimmy serve" 2>/dev/null || true
+          sleep 1
+          FUNCTION_INTERFACE=python-wasm \
+          FUNCTION_WASM_MODULE=${{ github.workspace }}/internal/execution/wasm/testdata/python.wasm \
+          FUNCTION_WASM_PYTHON_SCRIPT=/tmp/eval_stateful.py \
+          FUNCTION_MAX_PROCS=1 \
+          FUNCTION_WASM_COMPILE_CACHE=/tmp/wazero-resident-cache \
+          LOG_LEVEL=info \
+          /tmp/shimmy serve --port 18084 &
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:18084/health > /dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          curl -sf http://localhost:18084/health || (echo "Server did not start" && exit 1)
+          # First request
+          R1=$(curl -sf -X POST http://localhost:18084/ \
+            -H 'Content-Type: application/json' \
+            -d '{"response":"x","answer":"x"}')
+          echo "Request 1: $R1"
+          # Second request — would have is_correct=false if state leaked
+          R2=$(curl -sf -X POST http://localhost:18084/ \
+            -H 'Content-Type: application/json' \
+            -d '{"response":"x","answer":"x"}')
+          echo "Request 2: $R2"
+          python3 -c "
+          import json
+          r1 = json.loads('$R1')['result']
+          r2 = json.loads('$R2')['result']
+          assert r1['is_correct'] == True,  f'request 1: expected is_correct=true, got {r1}'
+          assert r2['is_correct'] == True,  f'request 2: state leaked! got {r2}'
+          assert r1['feedback'] == 'calls=1', f'request 1: expected calls=1, got {r1[\"feedback\"]}'
+          assert r2['feedback'] == 'calls=1', f'request 2: state leaked! got {r2[\"feedback\"]}'
+          print('PASS: mutable default does not leak between requests (state isolation)')
           "
 
   e2e-reactor-python:

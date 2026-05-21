@@ -378,9 +378,11 @@ func (r *ReactorPythonRunner) SendRequest(ctx context.Context, script, method st
 	if err != nil {
 		return nil, fmt.Errorf("reactor python: parse response: %w; raw: %.200s", err, respBytes)
 	}
-	if errMsg, ok := result["error"].(string); ok {
-		return nil, fmt.Errorf("reactor python script error: %s", errMsg)
-	}
+	// Return Python-level errors as structured results rather than Go errors.
+	// Callers (dispatcher, CLI) can inspect result["error"] and result["error_type"]
+	// to distinguish user-script exceptions from infrastructure failures.
+	// We only promote to a Go error for init-time scripts (runInitScript) where
+	// the result["error"] is always a plain string with no extra fields.
 	return result, nil
 }
 
@@ -801,6 +803,13 @@ func (r *ReactorPythonRunner) runInitScript(ctx context.Context, phase, script s
 		if respLen > 0 {
 			if body, ok := r.mod.Memory().Read(uint32(bufPtrRes[0]), uint32(respLen)); ok {
 				r.log.Info("initSysPath "+phase, zap.String("result", string(body)))
+				// Treat a Python-level error during init as a hard failure.
+				var parsed map[string]any
+				if json.Unmarshal(body, &parsed) == nil {
+					if errMsg, ok := parsed["error"].(string); ok {
+						return fmt.Errorf("python error: %s", errMsg)
+					}
+				}
 			}
 		}
 	}

@@ -245,16 +245,16 @@ jobs:
           LOG_LEVEL: info
         run: /tmp/shimmy serve --port 18082 &
 
-      - name: Wait for server (CPython compile + init ~20 s)
+      - name: Wait for server (CPython compile + init, up to 3 min)
         run: |
-          for i in $(seq 1 90); do
+          for i in $(seq 1 180); do
             if curl -sf http://localhost:18082/health > /dev/null 2>&1; then
               echo "Server ready after ${i}s"
               break
             fi
             sleep 1
           done
-          curl -sf http://localhost:18082/health || (echo "Server did not start within 90s" && exit 1)
+          curl -sf http://localhost:18082/health || (echo "Server did not start within 180s" && exit 1)
 
       - name: Health check
         run: |

@@ -171,7 +171,10 @@ func (r *ReactorPythonRunner) Init(ctx context.Context) error {
 		return fmt.Errorf("reactor python: instantiate env module: %w", err)
 	}
 
-	r.log.Info("compiling python-reactor.wasm (~1-2 s)")
+	// Compile module (instant on cache hit; ~1-3 min cold for 242 MB binary).
+	if r.cfg.CompileCacheDir == "" {
+		r.log.Info("compiling python-reactor.wasm (~1-3 min cold, set FUNCTION_WASM_COMPILE_CACHE to skip on repeat starts)")
+	}
 	compiled, err := rt.CompileModule(ctx, wasmBytes)
 	if err != nil {
 		_ = rt.Close(ctx)

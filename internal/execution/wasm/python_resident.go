@@ -233,8 +233,10 @@ func (r *ResidentPythonRunner) Init(ctx context.Context) error {
 	}
 	rt := wazero.NewRuntimeWithConfig(ctx, rtCfg)
 
-	// Compile module.
-	r.log.Info("compiling python.wasm (this takes ~1-2 s)")
+	// Compile module (instant on cache hit; ~1-2 s cold).
+	if r.cfg.CompileCacheDir == "" {
+		r.log.Info("compiling python.wasm (~1-2 s, set FUNCTION_WASM_COMPILE_CACHE to skip on repeat starts)")
+	}
 	compiled, err := rt.CompileModule(ctx, wasmBytes)
 	if err != nil {
 		_ = rt.Close(ctx)

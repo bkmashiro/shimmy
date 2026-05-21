@@ -84,6 +84,16 @@ public API) but works in practice on current wazero versions.
 ### Python Execution Paths
 - `python.go` — PythonRunner: per-request instantiation (~160ms, compile amortised)
 - `python_resident.go` — ResidentPythonRunner: goroutine + io.Pipe (~1.8ms after init)
+- `python_reactor.go` — ReactorPythonDispatcher: CPython as WASM reactor with per-request
+  memory snapshot/restore; `FUNCTION_INTERFACE=reactor-python`
+
+### On-disk Compilation Cache (`FUNCTION_WASM_COMPILE_CACHE`)
+wazero can persist its JIT-compiled module to disk via `NewCompilationCacheWithDir`. Both
+python_resident and python_reactor backends support this. On a cold start the cache is
+populated (JIT compile takes ~1-2 s for python.wasm, ~1-3 min for python-reactor.wasm);
+subsequent starts read from cache and `CompileModule` completes in milliseconds.
+Cache key is the binary content of the `.wasm` file — deploying a new binary auto-invalidates.
+Also used in CI via `actions/cache@v4` with `sha256sum` of the wasm as the cache key.
 
 ### Tests & Benchmarks
 - 11 unit tests (Dispatcher, Supervisor, snapshot/restore, concurrency)
@@ -137,6 +147,8 @@ restore on large modules.
 - [x] JavaScript eval functions via javy/QuickJS — `examples/eval-js/`; subprocess mode
       (`FUNCTION_INTERFACE=rpc`, `FUNCTION_COMMAND="wazero run runner.wasm"`);
       state isolation via `Function()` scope per request; `TestDispatcher_Send_JS` passes
+- [x] On-disk compilation cache — `FUNCTION_WASM_COMPILE_CACHE`; both python_resident
+      and python_reactor backends; CI caches via `actions/cache@v4` keyed on sha256 of wasm
 - [ ] Open PR feat/wasm-backend → main
 
 ## Architecture Notes

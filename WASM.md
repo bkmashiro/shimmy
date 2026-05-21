@@ -198,6 +198,8 @@ Without this flag, Go compiles the module as a WASI _command_ module. Command mo
 
 ## 5. Running shimmy with the WASM backend
 
+### Go / Rust / C eval functions (`wasm` interface)
+
 ```bash
 FUNCTION_INTERFACE=wasm \
 FUNCTION_COMMAND=./eval.wasm \
@@ -206,6 +208,34 @@ PORT=8080 \
 ```
 
 `FUNCTION_COMMAND` is reused as the path to the `.wasm` file when `FUNCTION_INTERFACE=wasm`.
+
+### Python eval functions — reactor mode (`reactor-python` interface)
+
+Reactor mode runs CPython as a WASM reactor module with per-request memory snapshot/restore. Use this for the best isolation and state-clean guarantees.
+
+```bash
+FUNCTION_INTERFACE=reactor-python \
+FUNCTION_WASM_MODULE=/app/python-reactor.wasm \
+FUNCTION_WASM_PYTHON_SCRIPT=/app/eval.py \
+FUNCTION_WASM_COMPILE_CACHE=/var/cache/wazero \
+FUNCTION_MAX_PROCS=2 \
+PORT=8080 \
+./shimmy serve
+```
+
+### Python eval functions — resident mode (`python-wasm` interface)
+
+Resident mode keeps a single long-lived CPython interpreter alive per pool slot, communicating via stdin/stdout JSON. Lower per-request overhead (~1.8 ms vs ~30 ms), but no memory snapshot — isolation relies on `exec()` namespace cleanup.
+
+```bash
+FUNCTION_INTERFACE=python-wasm \
+FUNCTION_WASM_MODULE=./internal/execution/wasm/testdata/python.wasm \
+FUNCTION_WASM_PYTHON_SCRIPT=/app/eval.py \
+FUNCTION_WASM_COMPILE_CACHE=/var/cache/wazero \
+FUNCTION_MAX_PROCS=2 \
+PORT=8080 \
+./shimmy serve
+```
 
 ## 6. Configuration
 

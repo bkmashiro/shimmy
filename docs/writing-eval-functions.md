@@ -282,7 +282,7 @@ Exit code is `0` on success, `1` if the result contains an `"error"` key or if t
 | `py_exec timed out after 30s` | Infinite loop or very slow computation | Add early exit, reduce complexity |
 | `name 'eval' is not defined` | Script missing `eval()` function | Add the function |
 | `JSONDecodeError` | `response` is not valid JSON | Validate input before parsing |
-| `reactor python: resp_len=0` | Script raised an unhandled exception with no output | Wrap top-level code in try/except |
+| `py_exec: _handle_request raised an unhandled exception` | Exception escaped the C-level catch (should not happen in normal use) | Check for syntax errors in the except block itself |
 
 ---
 

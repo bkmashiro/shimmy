@@ -543,26 +543,27 @@ class _StubRandomState:
 # on every restore, so seeding with the same value always yields the same draw.
 _np_rng = _pyr.Random()
 
-def _np_seed(seed=None):
-    _np_rng.seed(seed)
+def _np_seed(seed=None, _rng=_np_rng):
+    # _rng captured as default arg so del _np_rng below does not break this.
+    _rng.seed(seed)
 
-def _np_rand(*shape):
+def _np_rand(*shape, _rng=_np_rng):
     """Return a scalar or nested list of uniform [0,1) floats matching shape."""
     if not shape:
-        return _np_rng.random()
+        return _rng.random()
     def _fill(dims):
         if len(dims) == 1:
-            return [_np_rng.random() for _ in range(dims[0])]
+            return [_rng.random() for _ in range(dims[0])]
         return [_fill(dims[1:]) for _ in range(dims[0])]
     return _fill(shape)
 
-def _np_randn(*shape):
+def _np_randn(*shape, _rng=_np_rng):
     """Return a scalar or nested list of standard-normal floats matching shape."""
     if not shape:
-        return _np_rng.gauss(0.0, 1.0)
+        return _rng.gauss(0.0, 1.0)
     def _fill(dims):
         if len(dims) == 1:
-            return [_np_rng.gauss(0.0, 1.0) for _ in range(dims[0])]
+            return [_rng.gauss(0.0, 1.0) for _ in range(dims[0])]
         return [_fill(dims[1:]) for _ in range(dims[0])]
     return _fill(shape)
 

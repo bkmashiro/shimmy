@@ -7,7 +7,7 @@ This guide is for question authors who write the Python scripts that grade stude
 ## Quick Start
 
 ```python
-def eval(response, answer, params=None):
+def evaluation_function(response, answer, params=None):
     """
     Evaluate a student response.
 
@@ -44,29 +44,55 @@ Save this as `eval.py` and test it locally with `shimmy-eval` (see below).
 
 The sandbox calls one of two functions depending on the request type:
 
-| Method    | Function called | Purpose |
-|-----------|----------------|---------|
-| `eval`    | `eval(response, answer, params)` | Grade the student's response |
-| `preview` | `preview(response, params)`      | Show a formatted preview of the input |
+| Method    | Function looked up in script | Purpose |
+|-----------|------------------------------|---------|
+| `eval`    | `evaluation_function`        | Grade the student's response |
+| `preview` | `preview_function` (falls back to `evaluation_function`) | Show a formatted preview |
 
-Both functions receive:
+Both functions receive the same three arguments:
+
+```python
+def evaluation_function(response, answer, params=None):
+    ...
+
+def preview_function(response, answer, params=None):
+    ...
+```
+
 - **`response`** (`str`) — raw string from the student's submission
-- **`answer`** (`str`) — correct answer string (eval only)
+- **`answer`** (`str`) — correct answer string configured by the question author
 - **`params`** (`dict | None`) — question-level settings (e.g. `{"tolerance": 0.01}`)
+
+`preview_function` is optional. If not defined, `evaluation_function` is used for preview requests too.
 
 ### Return value
 
-`eval` must return a dict with at least:
+`evaluation_function` must return a dict with at least:
 ```python
 {"is_correct": bool, "feedback": str}
 ```
 
 You may include any additional keys (e.g. `absolute_error`, `relative_error`). They are passed through to the frontend.
 
-`preview` must return:
+`preview_function` must return:
 ```python
 {"preview": str}   # LaTeX or plain text shown to the student
 ```
+
+### Error handling
+
+If your function raises an exception the sandbox catches it and returns a structured error:
+
+```json
+{
+  "error": "invalid literal for int() with base 10: 'abc'",
+  "error_type": "ValueError",
+  "lineno": 3,
+  "traceback": "Traceback (most recent call last):\n  File \"<eval>\", line 3, ..."
+}
+```
+
+This means an unhandled exception never crashes the evaluator — the student gets a clear error message. You may also catch exceptions yourself and return `{"is_correct": false, "feedback": "..."}` for cleaner UX.
 
 ---
 
@@ -126,7 +152,7 @@ All network syscalls are blocked. `import requests` will fail at import time.
 ```python
 import math
 
-def eval(response, answer, params=None):
+def evaluation_function(response, answer, params=None):
     tol = float((params or {}).get("tolerance", 1e-6))
     try:
         r, a = float(response), float(answer)
@@ -144,7 +170,7 @@ def eval(response, answer, params=None):
 ```python
 import sympy
 
-def eval(response, answer, params=None):
+def evaluation_function(response, answer, params=None):
     try:
         r = sympy.sympify(response)
         a = sympy.sympify(answer)
@@ -155,17 +181,26 @@ def eval(response, answer, params=None):
     if diff == 0:
         return {"is_correct": True, "feedback": "Correct!"}
     return {"is_correct": False, "feedback": f"Your answer simplifies to {sympy.latex(r)}, expected {sympy.latex(a)}."}
+
+
+def preview_function(response, answer, params=None):
+    try:
+        r = sympy.sympify(response)
+        return {"preview": f"$$\\displaystyle {sympy.latex(r)}$$"}
+    except Exception:
+        return {"preview": response}
 ```
 
 ### Vector / matrix with numpy
 
 ```python
+import json
 import numpy as np
 
-def eval(response, answer, params=None):
+def evaluation_function(response, answer, params=None):
     try:
-        r = np.array(eval(response))   # use json.loads for safety
-        a = np.array(eval(answer))
+        r = np.array(json.loads(response))
+        a = np.array(json.loads(answer))
     except Exception as e:
         return {"is_correct": False, "feedback": f"Could not parse: {e}"}
 

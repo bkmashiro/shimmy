@@ -202,6 +202,87 @@ func TestReactorPythonRunner_Preview(t *testing.T) {
 	assert.NotEmpty(t, preview)
 }
 
+// TestReactorPythonRunner_Timeout verifies that a script containing an infinite
+// loop is killed after the configured timeout and the runner is marked unhealthy
+// (so the dispatcher discards rather than recycling it).
+func TestReactorPythonRunner_Timeout(t *testing.T) {
+	wasmPath := os.Getenv("PYTHON_REACTOR_WASM")
+	if wasmPath == "" {
+		t.Skip("PYTHON_REACTOR_WASM not set — skipping reactor tests")
+	}
+
+	log, err := zap.NewDevelopment()
+	require.NoError(t, err)
+
+	// Use a very short per-request timeout so the test completes quickly.
+	cfg := Config{
+		Timeout:        3 * time.Second,
+		MaxMemoryPages: 8192,
+	}
+
+	runner := NewReactorPythonRunner(wasmPath, cfg, log)
+	initCtx, initCancel := context.WithTimeout(context.Background(), 300*time.Second)
+	defer initCancel()
+	require.NoError(t, runner.Init(initCtx), "Init")
+	t.Cleanup(func() {
+		shutCtx, sc := context.WithTimeout(context.Background(), 15*time.Second)
+		defer sc()
+		_ = runner.Shutdown(shutCtx)
+	})
+
+	infiniteScript := `
+def evaluation_function(response, answer, params=None):
+    while True:
+        pass
+`
+
+	assert.True(t, runner.IsHealthy(), "runner should be healthy before request")
+
+	reqCtx, reqCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer reqCancel()
+
+	_, err = runner.SendRequest(reqCtx, infiniteScript, "eval", `{"response":"x","answer":"x"}`)
+	require.Error(t, err, "infinite loop should have been killed by timeout")
+	t.Logf("timeout error (expected): %v", err)
+	require.Contains(t, err.Error(), "timed out", "error should mention timeout")
+
+	assert.False(t, runner.IsHealthy(), "runner should be unhealthy after timeout kill")
+}
+
+// TestReactorPythonRunner_StructuredError verifies that Python exceptions return
+// structured error information (type, message, traceback) rather than a bare string.
+func TestReactorPythonRunner_StructuredError(t *testing.T) {
+	runner := newReactorRunner(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	badScript := `
+def evaluation_function(response, answer, params=None):
+    x = int("not-a-number")  # raises ValueError on line 3
+    return {"is_correct": True, "feedback": "ok"}
+`
+
+	result, err := runner.SendRequest(ctx, badScript, "eval", `{"response":"x","answer":"x"}`)
+	require.NoError(t, err, "SendRequest should not error — Python exception is returned in result")
+
+	t.Logf("error result: %v", result)
+
+	errVal, hasErr := result["error"]
+	require.True(t, hasErr, "result should contain 'error' key")
+	assert.NotEmpty(t, errVal)
+
+	errType, hasType := result["error_type"]
+	require.True(t, hasType, "result should contain 'error_type' key")
+	assert.Equal(t, "ValueError", errType)
+
+	_, hasTB := result["traceback"]
+	assert.True(t, hasTB, "result should contain 'traceback' key")
+
+	lineno, hasLineno := result["lineno"]
+	assert.True(t, hasLineno, "result should contain 'lineno' key")
+	t.Logf("lineno: %v, error_type: %v", lineno, errType)
+}
+
 // BenchmarkReactorPythonRunner_SendRequest measures per-request latency with
 // snapshot/restore isolation. Compare against BenchmarkResidentPythonRunner_SendRequest.
 func BenchmarkReactorPythonRunner_SendRequest(b *testing.B) {

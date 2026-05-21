@@ -220,6 +220,17 @@ func (r *ResidentPythonRunner) Init(ctx context.Context) error {
 	if r.cfg.MaxMemoryPages > 0 {
 		rtCfg = rtCfg.WithMemoryLimitPages(r.cfg.MaxMemoryPages)
 	}
+	if r.cfg.CompileCacheDir != "" {
+		cache, cacheErr := wazero.NewCompilationCacheWithDir(r.cfg.CompileCacheDir)
+		if cacheErr != nil {
+			r.log.Warn("failed to create wazero compilation cache, continuing without cache",
+				zap.String("dir", r.cfg.CompileCacheDir),
+				zap.Error(cacheErr))
+		} else {
+			rtCfg = rtCfg.WithCompilationCache(cache)
+			r.log.Info("wazero compilation cache enabled", zap.String("dir", r.cfg.CompileCacheDir))
+		}
+	}
 	rt := wazero.NewRuntimeWithConfig(ctx, rtCfg)
 
 	// Compile module.

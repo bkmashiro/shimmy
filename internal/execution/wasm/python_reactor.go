@@ -476,39 +476,41 @@ _sys.meta_path.append(_ilm.PathFinder)
 # Inserted just before PathFinder so all valid finders (BuiltinImporter,
 # FrozenImporter, _WasivfsFinder) get first chance; only packages that
 # none of those finders recognise reach this check.
-_SANDBOX_UNAVAILABLE = {
-    'scipy':        'scipy requires compiled C extensions; use a Pyodide-based runtime instead.',
-    'pandas':       'pandas requires compiled C extensions; use standard Python or Pyodide.',
-    'matplotlib':   'matplotlib requires a display backend unavailable in WASI.',
-    'sklearn':      'scikit-learn requires compiled C extensions.',
-    'scikit_learn': 'scikit-learn requires compiled C extensions.',
-    'torch':        'PyTorch is not available in the WASI sandbox.',
-    'tensorflow':   'TensorFlow is not available in the WASI sandbox.',
-    'keras':        'Keras/TensorFlow is not available in the WASI sandbox.',
-    'PIL':          'Pillow requires compiled C extensions.',
-    'cv2':          'OpenCV requires compiled C extensions.',
-    'requests':     'Network access is disabled in the WASI sandbox.',
-    'httpx':        'Network access is disabled in the WASI sandbox.',
-    'aiohttp':      'Network access is disabled in the WASI sandbox.',
-    'sqlalchemy':   'SQLAlchemy is not available in the WASI sandbox.',
-    'psycopg2':     'psycopg2 requires compiled C extensions.',
-}
-_SANDBOX_AVAILABLE = 'Available packages: numpy, sympy, and the Python standard library (no network).'
-
 class _UnavailablePackageFinder:
+    # Store data as class attributes so they survive 'del _UnavailablePackageFinder'
+    # (the instance lives in sys.meta_path; self._UNAVAILABLE still works).
+    _UNAVAILABLE = {
+        'scipy':        'scipy requires compiled C extensions; use a Pyodide-based runtime instead.',
+        'pandas':       'pandas requires compiled C extensions; use standard Python or Pyodide.',
+        'matplotlib':   'matplotlib requires a display backend unavailable in WASI.',
+        'sklearn':      'scikit-learn requires compiled C extensions.',
+        'scikit_learn': 'scikit-learn requires compiled C extensions.',
+        'torch':        'PyTorch is not available in the WASI sandbox.',
+        'tensorflow':   'TensorFlow is not available in the WASI sandbox.',
+        'keras':        'Keras/TensorFlow is not available in the WASI sandbox.',
+        'PIL':          'Pillow requires compiled C extensions.',
+        'cv2':          'OpenCV requires compiled C extensions.',
+        'requests':     'Network access is disabled in the WASI sandbox.',
+        'httpx':        'Network access is disabled in the WASI sandbox.',
+        'aiohttp':      'Network access is disabled in the WASI sandbox.',
+        'sqlalchemy':   'SQLAlchemy is not available in the WASI sandbox.',
+        'psycopg2':     'psycopg2 requires compiled C extensions.',
+    }
+    _AVAILABLE = 'Available packages: numpy, sympy, and the Python standard library (no network).'
+
     def find_spec(self, fullname, path, target=None):
         root = fullname.split('.')[0]
-        msg = _SANDBOX_UNAVAILABLE.get(root)
+        msg = self._UNAVAILABLE.get(root)
         if msg:
             raise ImportError(
                 f"'{fullname}' is not available in the shimmy-wasm sandbox.\n"
                 f"Reason: {msg}\n"
-                f"{_SANDBOX_AVAILABLE}"
+                f"{self._AVAILABLE}"
             )
         return None
 
 _sys.meta_path.insert(-1, _UnavailablePackageFinder())
-del _SANDBOX_UNAVAILABLE, _SANDBOX_AVAILABLE, _UnavailablePackageFinder
+del _UnavailablePackageFinder
 
 # ── 3. Stub numpy test-only C extensions ─────────────────────────────────────
 # numpy/core/_add_newdocs.py imports test-only C extensions

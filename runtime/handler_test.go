@@ -525,13 +525,15 @@ func TestRunTimeHandler_Invalid_Preview_Incorrect_Args(t *testing.T) {
 	}
 
 	handler := setupHandlerWithStaticMock(t, mockResponse)
+	// response:null violates the schema constraint "not:{type:null}" on the
+	// response field, which should trigger a request validation error.
 	body := createRequestBody(t, map[string]any{
-		"response": "hello",
+		"response": nil,
 		"answer":   "world",
 	})
 
 	req := createRequest(http.MethodPost, "/preview", body, http.Header{
-		"Command": []string{"preview"},
+		"command": []string{"preview"},
 	})
 
 	resp := handler.Handle(context.Background(), req)

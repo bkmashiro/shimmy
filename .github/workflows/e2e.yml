@@ -402,13 +402,24 @@ jobs:
             if curl -sf http://localhost:18083/health > /dev/null 2>&1; then break; fi
             sleep 1
           done
-          # Send a request — scipy import fails, shimmy may return HTTP 500 because
-          # the structured error dict lacks is_correct (schema validation failure).
-          # The important invariant is that the SERVER SURVIVES the bad import and
-          # health is still OK afterward. Exact error format is covered by unit tests.
-          curl -s -X POST http://localhost:18083/ \
+          # Send a request — scipy import raises ModuleNotFoundError inside
+          # evaluation_function. py_reactor catches it and returns a structured
+          # error dict (error, error_type, lineno, traceback) which shimmy now
+          # passes schema validation and returns as HTTP 200.
+          RESP=$(curl -sf -X POST http://localhost:18083/ \
             -H 'Content-Type: application/json' \
-            -d '{"response":"x","answer":"x"}' || true
+            -d '{"response":"x","answer":"x"}')
+          echo "Response: $RESP"
+          echo "$RESP" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          result = d.get('result', {})
+          assert 'error' in result, f'expected result.error, got {d}'
+          et = result.get('error_type', '')
+          assert 'ModuleNotFoundError' in et or 'ImportError' in et, \
+              f'expected ModuleNotFoundError/ImportError, got error_type={et!r}'
+          print(f'PASS: scipy import returned structured error with error_type={et}')
+          "
           # The key check: server still alive after scipy import failure.
           curl -sf http://localhost:18083/health | python3 -c "
           import sys, json

@@ -143,7 +143,7 @@ Practical implication: you cannot cache expensive results between requests. If y
 
 ### Timeout
 
-Each request has a **30-second timeout** (configurable via `FUNCTION_WASM_TIMEOUT`). Scripts that enter an infinite loop are killed after this time and the student receives a timeout error. Keep evaluation logic well under 1 second for normal workloads.
+Each request has a **30-second timeout** (configurable via `FUNCTION_TIMEOUT`). Scripts that enter an infinite loop are killed after this time and the student receives a timeout error. Keep evaluation logic well under 1 second for normal workloads.
 
 ### No filesystem writes
 

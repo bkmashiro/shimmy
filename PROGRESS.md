@@ -19,12 +19,16 @@
 
 ### Eval Function Examples
 - `examples/eval-go/` — Go eval function (GOOS=wasip1 -buildmode=c-shared), reactor mode
+- `examples/eval-rust/` — Rust eval function (cargo wasm32-wasip1), alloc+evaluate ABI
+- `examples/eval-c/` — C eval function (WASI-SDK clang), jsmn JSON parser, alloc+evaluate ABI
+- `examples/eval-cpp/` — C++ eval function (WASI-SDK clang++)
 - `examples/eval-python/eval.py` — Python eval function (numeric comparison)
+- `examples/eval-numpy/eval.py` — Python eval function with NumPy (array comparison)
 - `examples/eval-pyodide/` — Pyodide/Node.js runner for scipy/pandas eval functions;
   uses existing `rpc` dispatcher + subprocess mode (`FUNCTION_INTERFACE=rpc`,
   `FUNCTION_COMMAND=node runner.js eval.py`); state isolation via `exec(source, {})`
   fresh namespace per request; no memory snapshot required
-- `examples/eval-js/` — **JavaScript eval functions via javy/QuickJS** (new):
+- `examples/eval-js/` — JavaScript eval functions via javy/QuickJS:
   - `eval.js` — user eval function contract (`evaluationFunction(response, answer, params)`)
   - `runner.js` — LSP-framed JSON-RPC 2.0 loop; embeds user source at build time;
     state isolation via fresh `Function()` scope per request
@@ -34,6 +38,9 @@
     `FUNCTION_COMMAND="wazero run runner.wasm"`); one wazero subprocess per pool slot
   - test: `internal/execution/wasm/dispatcher_javy_test.go` — `TestDispatcher_Send_JS`
     spawns the wazero subprocess and verifies end-to-end JSON-RPC framing and eval results
+- `examples/adversarial/` — adversarial test suite: cpu-bomb, mem-bomb, fork-exec,
+  env-read, fs-read-environ, fs-read-etc, fs-write-tmp, net-tcp, stack-bomb, large-output;
+  each verified blocked by the WASM sandbox in `adversarial_test.go`
 
 ### CI — userfaultfd Probe
 - `.github/workflows/uffd-probe.yml` — runs on Ubuntu VM (not container) to test whether
@@ -119,11 +126,6 @@ restore on large modules.
 
 ## Known Issues / Technical Debt
 
-- `echo.wasm` fixture stores bump-allocator pointer in WASM global (not linear
-  memory), so snapshot/restore doesn't reset it. Benchmark works around this
-  by recreating dispatcher every ~500 iterations. Real modules store state in
-  linear memory and are correctly restored.
-
 - asyncify approach for CPython-WASI investigated but abandoned: CPython's call
   stack is thousands of frames deep, causing goroutine stack overflow on rewind
   in wazero. Goroutine + io.Pipe is the practical alternative.
@@ -135,13 +137,12 @@ restore on large modules.
 
 ## Pending Work
 
-- [ ] Update interim report with benchmark data and architecture
-- [ ] Fix echo.wasm fixture (allocator state in linear memory, not global)
+- [x] Fix echo.wasm fixture — heap pointer now stored at linear memory offset 0 (4-byte LE i32),
+      correctly reset by snapshot/restore; `bench_test.go` no longer recreates the dispatcher
 - [x] userfaultfd dirty-page restore benchmark — `BenchmarkSnapshotRestore_FullMemcpy_3MB`
       measures restore cost at 3MB (54µs on this machine)
 - [x] userfaultfd full dirty-page restore — `UffdStrategy` implemented (experimental,
       `FUNCTION_WASM_USE_UFFD=true`); uses `unsafe.SliceData` on wazero linear memory
-- [ ] numpy integration test (mount wasi-wheels output into Python sandbox)
 - [x] Pyodide/Node.js fallback path (scipy route) — subprocess mode, existing shimmy
       (state isolation via fresh namespace `exec(source, {})` per request; no memory snapshot)
 - [x] JavaScript eval functions via javy/QuickJS — `examples/eval-js/`; subprocess mode
@@ -149,7 +150,8 @@ restore on large modules.
       state isolation via `Function()` scope per request; `TestDispatcher_Send_JS` passes
 - [x] On-disk compilation cache — `FUNCTION_WASM_COMPILE_CACHE`; both python_resident
       and python_reactor backends; CI caches via `actions/cache@v4` keyed on sha256 of wasm
-- [ ] Open PR feat/wasm-backend → main
+- [x] Open PR feat/wasm-backend → main — merged
+- [ ] numpy integration test (mount wasi-wheels output into Python sandbox and run test suite)
 
 ## Architecture Notes
 

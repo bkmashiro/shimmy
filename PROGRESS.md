@@ -151,7 +151,9 @@ restore on large modules.
 - [x] On-disk compilation cache — `FUNCTION_WASM_COMPILE_CACHE`; both python_resident
       and python_reactor backends; CI caches via `actions/cache@v4` keyed on sha256 of wasm
 - [x] Open PR feat/wasm-backend → main — merged
-- [ ] numpy integration test (mount wasi-wheels output into Python sandbox and run test suite)
+- [x] numpy integration test — `TestReactorPythonRunner_Numpy` in `python-wasm.yml` CI;
+      uses `python-reactor.wasm` (CPython 3.14 + numpy statically linked); covers
+      correctness, tolerance, shape-mismatch, RNG isolation
 
 ## Architecture Notes
 

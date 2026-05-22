@@ -274,8 +274,11 @@ Under the WASI sandbox enforced by this backend, the only mutable state a guest 
 | Environment variables | read-only | Only explicitly whitelisted keys visible |
 | Host process state | ❌ blocked | No shared memory, no signals |
 | WASM linear memory | ✅ restored | Full memcpy restore after every request |
+| WASM mutable globals | ⚠️ not restored | See note below |
 
 Because linear memory is the sole remaining state carrier and it is explicitly restored after each request, a well-behaved eval function that only reads its inputs and writes its response has exactly the same observable behaviour as a fresh cold-start invocation.
+
+> **Note — WASM mutable globals.** WASM modules can also carry state in mutable globals (declared with `(global $x (mut i32) ...)`). The snapshot/restore mechanism covers only linear memory; mutable globals are not snapshotted. In practice this is not a concern for any supported compilation target: Go (`GOOS=wasip1`), Rust (`wasm32-wasip1`), and C (WASI-SDK) all use globals only for the stack pointer (`__stack_pointer`), which is unconditionally saved and restored by function prologues/epilogues — so it is always consistent when `evaluate()` returns. A handcrafted `.wasm` binary could deliberately store cross-request state in a custom mutable global, but shimmy-wasm does not accept arbitrary `.wasm` uploads: all eval functions are compiled from source server-side. If that constraint ever changes, globals should be snapshotted alongside linear memory.
 
 **Temporary filesystem access:** If an eval function needs to write temporary files (e.g. for intermediate computation), mount a per-request scratch directory via `FUNCTION_WASM_ALLOWED_PATHS` pointing to a fresh `tmpfs` path, and clean it up after each request at the host level. The guest writing to that path is a controlled, bounded side effect that does not persist across requests provided the host cleans up the directory contents.
 

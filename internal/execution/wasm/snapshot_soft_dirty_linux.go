@@ -40,6 +40,12 @@ type SoftDirtyStrategy struct {
 // NewSoftDirtyStrategy creates a SoftDirtyStrategy for the given WASM module
 // memory. It validates that /proc/self/pagemap and /proc/self/clear_refs are
 // accessible. Call Take once after module initialisation.
+//
+// SoftDirtyStrategy relies on process-wide soft-dirty PTE bits. With multiple
+// WASM instances sharing the same process the bits from different instances
+// cannot be distinguished, so the strategy is only safe when MaxInstances == 1.
+// Pass maxInstances to enforce this guard; pass 1 if you have verified that
+// only a single instance exists.
 func NewSoftDirtyStrategy(mem api.Memory) (*SoftDirtyStrategy, error) {
 	if mem == nil {
 		return nil, fmt.Errorf("soft-dirty: nil api.Memory")

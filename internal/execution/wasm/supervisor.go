@@ -39,6 +39,11 @@ type wasmSupervisor struct {
 	// valid values. When non-empty it takes precedence over useUffd.
 	snapshotMode string
 
+	// healthy is true when the supervisor is in a known-good state and can be
+	// safely returned to the pool. It is set to false when restoreSnapshot fails,
+	// indicating the WASM module's memory state is undefined.
+	healthy bool
+
 	timeout time.Duration
 	log     *zap.Logger
 }
@@ -85,6 +90,7 @@ func (s *wasmSupervisor) Start(ctx context.Context) error {
 
 	s.mod = mod
 	s.adapter = newWasmAdapter(mod, s.log)
+	s.healthy = true
 
 	// Select snapshot strategy now that memory is available.
 	s.strategy = s.selectStrategy(mod.Memory())
@@ -125,10 +131,15 @@ func (s *wasmSupervisor) Send(
 
 	result, err := s.adapter.send(ctx, method, data, s.timeout)
 
-	// Always restore memory snapshot, even on error, to keep state clean for
-	// the next request.
+	// Restore memory snapshot to keep state clean for the next request.
+	// If restore fails, mark the supervisor unhealthy so the dispatcher
+	// discards it rather than returning it to the pool with undefined state.
 	if restoreErr := s.restoreSnapshot(); restoreErr != nil {
-		s.log.Error("failed to restore memory snapshot", zap.Error(restoreErr))
+		s.log.Error("failed to restore memory snapshot — marking supervisor unhealthy", zap.Error(restoreErr))
+		s.healthy = false
+		if err == nil {
+			err = fmt.Errorf("wasm: restore snapshot: %w", restoreErr)
+		}
 	}
 
 	return result, err

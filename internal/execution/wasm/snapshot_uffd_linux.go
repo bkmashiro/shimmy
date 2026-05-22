@@ -344,10 +344,12 @@ func NewUffdStrategy(mem api.Memory) (*UffdStrategy, error) {
 	pageSize := syscall.Getpagesize()
 	pageCount := int((uint64(size) + uint64(pageSize) - 1) / uint64(pageSize))
 
-	// Open uffd fd.
+	// Open uffd fd without O_NONBLOCK: faultLoop uses blocking syscall.Read,
+	// so the fd must be in blocking mode. O_NONBLOCK would cause Read to return
+	// EAGAIN immediately instead of waiting for the next fault event.
 	fd, _, errno := syscall.RawSyscall(
 		uffdSyscallNr,
-		uffdOCloexecStrategy|uffdONonblockStrategy,
+		uffdOCloexecStrategy,
 		0, 0,
 	)
 	if errno != 0 {
@@ -430,8 +432,8 @@ func (s *UffdStrategy) faultLoop() {
 	msgBuf := (*[unsafe.Sizeof(uffdMsg{})]byte)(unsafe.Pointer(&msg))
 
 	for {
-		// Block-read one uffd_msg. The fd is O_NONBLOCK so we use a blocking
-		// read via syscall.Read which calls the read(2) syscall directly.
+		// Block-read one uffd_msg. The fd is in blocking mode (no O_NONBLOCK),
+		// so syscall.Read will wait until a fault event arrives.
 		// When the fd is closed, Read returns an error and we exit.
 		n, err := syscall.Read(s.uffdFd, msgBuf[:msgSize])
 		if err != nil || n == 0 {
@@ -593,6 +595,16 @@ func (s *UffdStrategy) Close() error {
 	return retErr
 }
 
+// NewSnapshotStrategy returns a UffdProbeStrategy if userfaultfd WP mode is
+// available, otherwise falls back to FullMemcpyStrategy.
+func NewSnapshotStrategy() SnapshotStrategy {
+	s, err := NewUffdProbeStrategy()
+	if err != nil {
+		return NewFullMemcpyStrategy()
+	}
+	return s
+}
+
 // UffdAvailable reports whether the userfaultfd syscall is permitted in this
 // environment. Under Docker's default seccomp profile the syscall returns EPERM.
 func UffdAvailable() bool {
@@ -604,13 +616,3 @@ func UffdAvailable() bool {
 	return true
 }
 
-// NewSnapshotStrategy returns a UffdProbeStrategy if userfaultfd WP mode is
-// available, otherwise falls back to FullMemcpyStrategy. This is the
-// recommended constructor for production use.
-func NewSnapshotStrategy() SnapshotStrategy {
-	s, err := NewUffdProbeStrategy()
-	if err != nil {
-		return NewFullMemcpyStrategy()
-	}
-	return s
-}

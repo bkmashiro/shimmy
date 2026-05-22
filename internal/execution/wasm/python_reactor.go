@@ -331,6 +331,10 @@ func (r *ReactorPythonRunner) SendRequest(ctx context.Context, script, method st
 	// to their exact post-initialisation values. py_exec() will then run in a
 	// clean interpreter as if py_init() just completed.
 	if err := r.strategy.Restore(r.mod.Memory()); err != nil {
+		// Restore failure means the WASM module's memory state is undefined.
+		// Mark the runner closed so IsHealthy() returns false and the dispatcher
+		// discards rather than returning it to the pool.
+		r.closed = true
 		return nil, fmt.Errorf("reactor python: restore snapshot: %w", err)
 	}
 

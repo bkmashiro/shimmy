@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/log"
 	"net/http"
 	"strings"
 
@@ -200,7 +199,7 @@ func SendCommand(req Request, command Command, h *RuntimeHandler, ctx context.Co
 
 	// Parse the request data into a map
 	if err := json.Unmarshal(req.Body, &reqData); err != nil {
-		log.Debug("failed to unmarshal request data", zap.Error(err))
+		h.log.Debug("failed to unmarshal request data", zap.Error(err))
 		return nil, err
 	}
 
@@ -215,19 +214,19 @@ func SendCommand(req Request, command Command, h *RuntimeHandler, ctx context.Co
 	// Let the runtime handle the message
 	responseMsg, err := h.runtime.Handle(ctx, requestMsg)
 	if err != nil {
-		log.Error("failed to handle message", zap.Error(err))
+		h.log.Error("failed to handle message", zap.Error(err))
 		return nil, err
 	}
 
 	// Validate the response data against the response schema
 	if err = h.validate(validationTypeResponse, command, responseMsg); err != nil {
-		log.Error("failed to validate response data", zap.Error(err))
+		h.log.Error("failed to validate response data", zap.Error(err))
 		return nil, err
 	}
 
 	resData, err := json.Marshal(responseMsg)
 	if err != nil {
-		log.Error("failed to marshal response data", zap.Error(err))
+		h.log.Error("failed to marshal response data", zap.Error(err))
 		return nil, err
 	}
 
@@ -305,7 +304,7 @@ func FindFirstMatchingCase(params map[string]any, cases []interface{}, req Reque
 }
 
 func EvaluateCase(params map[string]any, caseData map[string]any, index int, req Request, command Command,
-	h *RuntimeHandler, ctx context.Context) CaseResult {
+	h *RuntimeHandler, ctx context.Context) (result CaseResult) {
 	// Check for required fields
 	if _, hasAnswer := caseData["answer"]; !hasAnswer {
 		return CaseResult{
@@ -335,13 +334,16 @@ func EvaluateCase(params map[string]any, caseData map[string]any, index int, req
 		}
 	}
 
-	// Try evaluation
+	// Recover from panics in the evaluation pipeline and return them as a
+	// CaseResult with a Warning so callers can continue processing other cases.
 	defer func() {
 		if r := recover(); r != nil {
-			// Catch panic as generic error
-			caseData["warning"] = &CaseWarning{
-				Case:    index,
-				Message: "An exception was raised while executing the evaluation function.",
+			h.log.Error("panic in EvaluateCase", zap.Any("recover", r))
+			result = CaseResult{
+				Warning: &CaseWarning{
+					Case:    index,
+					Message: fmt.Sprintf("An exception was raised while executing the evaluation function: %v", r),
+				},
 			}
 		}
 	}()
@@ -382,7 +384,7 @@ func EvaluateCase(params map[string]any, caseData map[string]any, index int, req
 
 	var respBody map[string]any
 	if err = json.Unmarshal(resData, &respBody); err != nil {
-		log.Error("failed to unmarshal response data", zap.Error(err))
+		h.log.Error("failed to unmarshal response data", zap.Error(err))
 		return CaseResult{
 			Warning: &CaseWarning{
 				Case:    index,
@@ -390,9 +392,9 @@ func EvaluateCase(params map[string]any, caseData map[string]any, index int, req
 			},
 		}
 	}
-	result, ok := respBody["result"].(map[string]interface{})
+	resultMap, ok := respBody["result"].(map[string]interface{})
 	if !ok {
-		log.Error("failed to unmarshal response data", zap.Error(err))
+		h.log.Error("response missing or invalid result field")
 		return CaseResult{
 			Warning: &CaseWarning{
 				Case:    index,
@@ -401,8 +403,8 @@ func EvaluateCase(params map[string]any, caseData map[string]any, index int, req
 		}
 	}
 
-	isCorrect, _ := result["is_correct"].(bool)
-	feedback, _ := result["feedback"].(string)
+	isCorrect, _ := resultMap["is_correct"].(bool)
+	feedback, _ := resultMap["feedback"].(string)
 
 	return CaseResult{
 		IsCorrect: isCorrect,

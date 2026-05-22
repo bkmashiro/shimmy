@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"time"
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
@@ -19,10 +20,12 @@ import (
 // instances). Requests are dispatched by acquiring a supervisor from the pool,
 // calling its Send, and returning it to the pool.
 type Dispatcher struct {
-	cfg  Config
-	rt   wazero.Runtime
-	pool chan *wasmSupervisor
-	log  *zap.Logger
+	cfg      Config
+	rt       wazero.Runtime
+	compiled wazero.CompiledModule
+	modCfg   wazero.ModuleConfig
+	pool     chan *wasmSupervisor
+	log      *zap.Logger
 }
 
 var _ dispatcher.Dispatcher = (*Dispatcher)(nil)
@@ -67,10 +70,26 @@ func (d *Dispatcher) Start(ctx context.Context) error {
 		return fmt.Errorf("wasm: read module file %q: %w", d.cfg.ModulePath, err)
 	}
 
-	// Build the runtime config with memory limit.
-	rtCfg := wazero.NewRuntimeConfig()
+	// Build the runtime config with memory limit and context-done interruption.
+	rtCfg := wazero.NewRuntimeConfig().
+		// WithCloseOnContextDone causes wazero to interrupt a running WASM module
+		// when the call context is cancelled or times out, preventing goroutine leaks.
+		WithCloseOnContextDone(true)
 	if d.cfg.MaxMemoryPages > 0 {
 		rtCfg = rtCfg.WithMemoryLimitPages(d.cfg.MaxMemoryPages)
+	}
+
+	// Wire in on-disk compilation cache when configured.
+	if d.cfg.CompileCacheDir != "" {
+		cache, err := wazero.NewCompilationCacheWithDir(d.cfg.CompileCacheDir)
+		if err != nil {
+			d.log.Warn("failed to create wazero compilation cache, continuing without cache",
+				zap.String("dir", d.cfg.CompileCacheDir),
+				zap.Error(err))
+		} else {
+			rtCfg = rtCfg.WithCompilationCache(cache)
+			d.log.Info("wazero compilation cache enabled", zap.String("dir", d.cfg.CompileCacheDir))
+		}
 	}
 
 	// Create a single wazero runtime shared by all instances.
@@ -91,6 +110,7 @@ func (d *Dispatcher) Start(ctx context.Context) error {
 		_ = rt.Close(ctx)
 		return fmt.Errorf("wasm: compile module: %w", err)
 	}
+	d.compiled = compiled
 
 	// Build a locked-down ModuleConfig: no filesystem, no env vars, no
 	// stdin/stdout/stderr, no args. Only allow nanosleep and wall/mono clocks
@@ -112,6 +132,19 @@ func (d *Dispatcher) Start(ctx context.Context) error {
 	for _, key := range d.cfg.AllowedEnv {
 		if val, ok := os.LookupEnv(key); ok {
 			modCfg = modCfg.WithEnv(key, val)
+		}
+	}
+	d.modCfg = modCfg
+
+	// Guard: soft-dirty and mprotect strategies use process-wide state and are
+	// only safe with a single WASM instance. Fail fast rather than silently
+	// producing corrupt snapshots when multiple instances share the process.
+	if maxInstances > 1 {
+		switch d.cfg.SnapshotMode {
+		case "soft-dirty":
+			return fmt.Errorf("wasm: snapshot mode %q is not safe with MaxInstances=%d > 1 (process-wide dirty bits cannot be attributed to individual instances); use \"memcpy\" or \"uffd\" instead", d.cfg.SnapshotMode, maxInstances)
+		case "mprotect":
+			return fmt.Errorf("wasm: snapshot mode %q is not safe with MaxInstances=%d > 1 (global SIGSEGV handler cannot distinguish instances); use \"memcpy\" or \"uffd\" instead", d.cfg.SnapshotMode, maxInstances)
 		}
 	}
 
@@ -153,15 +186,40 @@ func (d *Dispatcher) Send(
 
 	result, err := sv.Send(ctx, method, data)
 
-	// Always return the supervisor to the pool, regardless of errors.
-	// Memory is restored inside supervisor.Send, so the instance is clean.
-	d.pool <- sv
+	// Return the supervisor to the pool only if it is healthy.
+	// If the snapshot restore failed inside Send, sv.healthy is false and the
+	// supervisor's state is undefined — discard it and spawn a replacement so
+	// pool capacity is eventually restored.
+	if sv.healthy {
+		d.pool <- sv
+	} else {
+		d.log.Warn("wasm supervisor unhealthy after request — dropping from pool, spawning replacement")
+		go func() { _ = sv.Shutdown(context.Background()) }()
+		go d.spawnOne()
+	}
 
 	if err != nil {
 		return nil, fmt.Errorf("wasm: send: %w", err)
 	}
 
 	return result, nil
+}
+
+// spawnOne initialises a fresh wasmSupervisor and adds it to the pool.
+// Called in a goroutine when an unhealthy supervisor is discarded so that
+// pool capacity is eventually restored. Failures are logged but not fatal.
+func (d *Dispatcher) spawnOne() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	d.log.Info("wasm: initialising replacement supervisor")
+	sv := newWasmSupervisor(d.rt, d.compiled, d.modCfg, d.cfg.Timeout, d.cfg.UseUffd, d.cfg.SnapshotMode, d.log)
+	if err := sv.Start(ctx); err != nil {
+		d.log.Error("wasm: replacement supervisor init failed", zap.Error(err))
+		return
+	}
+	d.pool <- sv
+	d.log.Info("wasm: replacement supervisor ready")
 }
 
 // Shutdown closes all module instances and the wazero runtime.
@@ -180,20 +238,18 @@ func (d *Dispatcher) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-// drainPool closes all supervisors currently in the pool channel.
+// drainPool closes all supervisors in the pool channel.
+// It performs cap(d.pool) blocking receives to drain every slot, including
+// supervisors that are in-flight being returned by concurrent Send calls.
 func (d *Dispatcher) drainPool(ctx context.Context) {
 	if d.pool == nil {
 		return
 	}
 
-	for {
-		select {
-		case sv := <-d.pool:
-			if err := sv.Shutdown(ctx); err != nil {
-				d.log.Error("error shutting down wasm instance", zap.Error(err))
-			}
-		default:
-			return
+	for i := 0; i < cap(d.pool); i++ {
+		sv := <-d.pool
+		if err := sv.Shutdown(ctx); err != nil {
+			d.log.Error("error shutting down wasm instance", zap.Error(err))
 		}
 	}
 }

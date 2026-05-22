@@ -94,6 +94,9 @@ func (a *wasmAdapter) send(
 	}
 
 	reqPtr := allocRes[0]
+	if reqPtr == 0 {
+		return nil, fmt.Errorf("wasm: alloc returned NULL (out of memory)")
+	}
 
 	// 3. Write request bytes into guest memory.
 	mem := a.mod.Memory()
@@ -136,6 +139,13 @@ func (a *wasmAdapter) send(
 	resLen := binary.LittleEndian.Uint32(lenBytes)
 
 	// 6. Read the response JSON body.
+	// Validate bounds before reading to catch corrupt/malicious response pointers.
+	if uint64(resPtr)+4+uint64(resLen) > uint64(mem.Size()) {
+		return nil, fmt.Errorf(
+			"wasm: response out of bounds: resPtr=%d resLen=%d memSize=%d",
+			resPtr, resLen, mem.Size(),
+		)
+	}
 	resBytes, ok := mem.Read(resPtr+4, resLen)
 	if !ok {
 		return nil, fmt.Errorf(

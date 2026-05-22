@@ -49,7 +49,7 @@ func loadAndCall(t *testing.T, wasmPath string, timeout time.Duration) (attackRe
 
 	wasmBytes, err := os.ReadFile(wasmPath)
 	if err != nil {
-		t.Skipf("wasm artifact not found (%s), skipping: %v", wasmPath, err)
+		t.Fatalf("wasm artifact not found (%s): %v", wasmPath, err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)

@@ -246,3 +246,124 @@ func TestLargeOutput(t *testing.T) {
 	t.Logf("large-output: attack=%q blocked=%v detail len=%d",
 		res.Attack, res.Blocked, len(res.Detail))
 }
+
+// TestMemoryGrow verifies that incremental memory.grow calls are capped by
+// WithMemoryLimitPages. The module grows linear memory one WASM page (64 KB)
+// at a time until it panics (limit enforced) or reaches 1 GB (limit absent).
+func TestMemoryGrow(t *testing.T) {
+	res, err := loadAndCall(t, wasmPath("memory-grow"), 10*time.Second)
+	if err != nil {
+		// A trap / OOM panic from the Go runtime inside WASM is the expected
+		// outcome when the memory limit is enforced and the module didn't get
+		// a chance to write its response.
+		t.Logf("memory-grow: blocked via wasm trap/OOM (expected): %v", err)
+		return
+	}
+	if !res.Blocked {
+		t.Fatalf("memory-grow was NOT blocked: grew_pages may be unbounded — detail=%q", res.Detail)
+	}
+	t.Logf("memory-grow blocked after growing — detail=%q", res.Detail)
+}
+
+// TestConcurrentIsolation verifies that two wazero module instances compiled
+// from the same binary have fully independent linear memory. Each instance
+// writes a unique session ID into a module global, performs a busy-work loop
+// (to create a concurrent execution window), then reads the global back.
+//
+// If isolation is broken (shared linear memory), one instance would observe
+// the other's session ID. The test instantiates two modules in parallel
+// goroutines and asserts both report isolation=true.
+func TestConcurrentIsolation(t *testing.T) {
+	wasmBytes, err := os.ReadFile(wasmPath("concurrent-isolation"))
+	if err != nil {
+		t.Skipf("concurrent-isolation artifact not found, skipping: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	rtCfg := wazero.NewRuntimeConfig().
+		WithCloseOnContextDone(true).
+		WithMemoryLimitPages(1024)
+	rt := wazero.NewRuntimeWithConfig(ctx, rtCfg)
+	defer rt.Close(ctx)
+
+	wasi_snapshot_preview1.MustInstantiate(ctx, rt)
+
+	compiled, err := rt.CompileModule(ctx, wasmBytes)
+	if err != nil {
+		t.Fatalf("CompileModule: %v", err)
+	}
+
+	type instanceResult struct {
+		sessionID uint32
+		res       attackResult
+		err       error
+	}
+
+	const numInstances = 4
+	results := make([]instanceResult, numInstances)
+
+	// Launch N module instances concurrently, each with a distinct session ID.
+	done := make(chan struct{})
+	for i := 0; i < numInstances; i++ {
+		i := i
+		go func() {
+			defer func() {
+				if i == numInstances-1 {
+					close(done)
+				}
+			}()
+			sid := uint32(i + 1)
+
+			modCfg := wazero.NewModuleConfig().WithName("").WithStartFunctions("_initialize")
+			mod, modErr := rt.InstantiateModule(ctx, compiled, modCfg)
+			if modErr != nil {
+				results[i] = instanceResult{sessionID: sid, err: modErr}
+				return
+			}
+			defer mod.Close(ctx)
+
+			mem := mod.Memory()
+			allocFn := mod.ExportedFunction("alloc")
+			evalFn := mod.ExportedFunction("evaluate")
+
+			reqBytes, _ := json.Marshal(map[string]any{
+				"session_id": sid,
+				"iters":      200_000,
+			})
+			allocRes, _ := allocFn.Call(ctx, uint64(len(reqBytes)))
+			ptr := uint32(allocRes[0])
+			mem.Write(ptr, reqBytes)
+
+			evalRes, evalErr := evalFn.Call(ctx, uint64(ptr), uint64(len(reqBytes)))
+			if evalErr != nil {
+				results[i] = instanceResult{sessionID: sid, err: evalErr}
+				return
+			}
+
+			respPtr := uint32(evalRes[0])
+			lenBytes, _ := mem.Read(respPtr, 4)
+			respLen := binary.LittleEndian.Uint32(lenBytes)
+			body, _ := mem.Read(respPtr+4, respLen)
+
+			var ar attackResult
+			_ = json.Unmarshal(body, &ar)
+			results[i] = instanceResult{sessionID: sid, res: ar}
+		}()
+	}
+	<-done
+
+	for i, r := range results {
+		if r.err != nil {
+			t.Errorf("instance %d: unexpected error: %v", i, r.err)
+			continue
+		}
+		if !r.res.Blocked {
+			t.Errorf("instance %d (session=%d): ISOLATION FAILURE — detail=%q",
+				i, r.sessionID, r.res.Detail)
+		} else {
+			t.Logf("instance %d (session=%d): isolation OK — %s", i, r.sessionID, r.res.Detail)
+		}
+	}
+}

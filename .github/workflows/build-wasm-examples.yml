@@ -141,6 +141,14 @@ jobs:
         working-directory: examples/adversarial/large-output
         run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o eval.wasm .
 
+      - name: Build memory-grow
+        working-directory: examples/adversarial/memory-grow
+        run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o eval.wasm .
+
+      - name: Build concurrent-isolation
+        working-directory: examples/adversarial/concurrent-isolation
+        run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o eval.wasm .
+
       - name: Upload adversarial-mem-bomb.wasm
         uses: actions/upload-artifact@v4
         with:
@@ -200,6 +208,18 @@ jobs:
         with:
           name: adversarial-large-output.wasm
           path: examples/adversarial/large-output/eval.wasm
+
+      - name: Upload adversarial-memory-grow.wasm
+        uses: actions/upload-artifact@v4
+        with:
+          name: adversarial-memory-grow.wasm
+          path: examples/adversarial/memory-grow/eval.wasm
+
+      - name: Upload adversarial-concurrent-isolation.wasm
+        uses: actions/upload-artifact@v4
+        with:
+          name: adversarial-concurrent-isolation.wasm
+          path: examples/adversarial/concurrent-isolation/eval.wasm
 
   smoke-test:
     name: Smoke-test WASM examples
@@ -289,6 +309,18 @@ jobs:
         with:
           name: adversarial-large-output.wasm
           path: examples/adversarial/large-output
+
+      - name: Download adversarial-memory-grow.wasm
+        uses: actions/download-artifact@v4
+        with:
+          name: adversarial-memory-grow.wasm
+          path: examples/adversarial/memory-grow
+
+      - name: Download adversarial-concurrent-isolation.wasm
+        uses: actions/download-artifact@v4
+        with:
+          name: adversarial-concurrent-isolation.wasm
+          path: examples/adversarial/concurrent-isolation
 
       - name: Run smoke tests
         run: go test ./examples/... -v -timeout 120s

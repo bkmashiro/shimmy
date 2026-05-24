@@ -267,14 +267,25 @@ func (u *UffdProbeStrategy) Close() error {
 // UffdStrategy — real dirty-page tracking on WASM linear memory
 // ---------------------------------------------------------------------------
 
-// uffdMsg mirrors the kernel struct uffd_msg (linux/userfaultfd.h).
-// We only need the pagefault variant.
+// uffdMsg mirrors the kernel struct uffd_msg (linux/userfaultfd.h, __packed).
+// Layout (32 bytes total, same on all 64-bit arches):
+//
+//	 0:  event     uint8           — UFFD_EVENT_PAGEFAULT = 0x12
+//	 1:  _         [7]byte         — reserved1(1) + reserved2(2) + reserved3(4)
+//	 8:  flags     uint64          — arg.pagefault.flags (UFFD_PAGEFAULT_FLAG_WP etc.)
+//	16:  address   uint64          — arg.pagefault.address (faulting page address)
+//	24:  _pad      [8]byte         — arg.pagefault.feat.ptid(4) + padding(4)
+//
+// IMPORTANT: flags is at offset 8, address is at offset 16. Getting this
+// wrong causes the faultLoop to read the flags field as the address, which
+// produces a garbage address that is always outside the registered region,
+// so the fault is silently skipped and the faulting thread remains blocked.
 type uffdMsg struct {
 	event   uint8
-	_       [7]uint8 // reserved
-	address uint64
-	// The union has more fields but we only read event + pagefault.address.
-	_pad [16]uint8
+	_       [7]uint8 // reserved1(1) + reserved2(2) + reserved3(4)
+	flags   uint64   // arg.pagefault.flags — UFFD_PAGEFAULT_FLAG_WP = 1<<9
+	address uint64   // arg.pagefault.address — faulting page address
+	_pad    [8]uint8 // arg.pagefault.feat.ptid(4) + padding(4)
 }
 
 const (

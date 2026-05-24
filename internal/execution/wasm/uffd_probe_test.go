@@ -4,6 +4,9 @@
 package wasm
 
 import (
+	"fmt"
+	"os"
+	"strings"
 	"syscall"
 	"testing"
 	"unsafe"
@@ -192,4 +195,155 @@ func TestUserfaultfdProbe_FdOnly(t *testing.T) {
 	require.Zero(t, errno, "userfaultfd syscall failed: errno=%v", errno)
 	t.Log("userfaultfd: fd creation OK")
 	syscall.Close(int(fd))
+}
+
+// ---------------------------------------------------------------------------
+// TestUffdProbe_GoMakeSlice
+// ---------------------------------------------------------------------------
+
+// TestUffdProbe_GoMakeSlice specifically tests whether a large Go slice
+// allocated with make([]byte, N) is registerable with UFFDIO_REGISTER_MODE_WP.
+//
+// This is the critical question for wazero linear memory compatibility: wazero
+// allocates linear memory via make([]byte, N) in internal/wasm/memory.go, so
+// if this test succeeds, UffdStrategy should be able to register the WASM
+// linear memory with uffd.
+//
+// Background on wazero linear memory allocation:
+//   - wazero calls make([]byte, minBytes, capBytes) in NewMemoryInstance
+//   - For large allocations Go's runtime uses mmap(MAP_ANON|MAP_PRIVATE)
+//   - MAP_PRIVATE is required for UFFDIO_REGISTER_MODE_WP
+//   - The "MAP_SHARED" hypothesis in the original TODO.md appears to be
+//     incorrect — wazero does NOT use MAP_SHARED for linear memory
+//
+// If this test fails with EINVAL, the VMA backing the slice may:
+//   - Span multiple VMAs (Go heap arena boundary)
+//   - Be allocated from a range with VM_SHARED (unexpected for Go)
+//   - Have start address that is not page-aligned (log the offset)
+func TestUffdProbe_GoMakeSlice(t *testing.T) {
+	if !UffdAvailable() {
+		t.Skip("userfaultfd not available (seccomp or insufficient privileges)")
+	}
+
+	// Open uffd and perform API handshake with WP feature.
+	fd, errno := openUserfaultfd()
+	require.Zero(t, errno, "userfaultfd syscall failed")
+	defer syscall.Close(int(fd))
+
+	apiStruct := uffdioAPIStruct{
+		api:      uffdioAPI,
+		features: uffdFeatureWP,
+	}
+	require.Zero(t, ioctl(fd, ioctlUffdioAPI, uintptr(unsafe.Pointer(&apiStruct))),
+		"UFFDIO_API handshake failed")
+
+	if apiStruct.features&uffdFeatureWP == 0 {
+		t.Skip("UFFD_FEATURE_PAGEFAULT_FLAG_WP not available — skipping")
+	}
+
+	pageSize := syscall.Getpagesize()
+
+	// Test several sizes, including 26MB (CPython WASM heap size).
+	sizes := []struct {
+		label string
+		size  int
+	}{
+		{"64KB (1 WASM page)", 64 * 1024},
+		{"4MB (small WASM module)", 4 * 1024 * 1024},
+		{"26MB (CPython WASM heap)", 26 * 1024 * 1024},
+	}
+
+	for _, tc := range sizes {
+		t.Run(tc.label, func(t *testing.T) {
+			// Allocate via Go's make([]byte, N) — this is exactly what wazero does
+			// for WASM linear memory in internal/wasm/memory.go.
+			buf := make([]byte, tc.size)
+
+			// Get the raw pointer to the underlying array.
+			baseAddr := uintptr(unsafe.Pointer(unsafe.SliceData(buf)))
+
+			t.Logf("make([]byte, %d): base=0x%x", tc.size, baseAddr)
+
+			// Check page alignment.
+			if baseAddr%uintptr(pageSize) != 0 {
+				t.Logf("WARNING: base address is NOT page-aligned (offset=%d)",
+					baseAddr%uintptr(pageSize))
+				t.Logf("Adjusting to nearest page boundary for registration test")
+				// Align up for test (real wazero memory must be aligned).
+				aligned := (baseAddr + uintptr(pageSize) - 1) &^ (uintptr(pageSize) - 1)
+				regSize := uintptr(tc.size) - (aligned - baseAddr)
+				regSize = regSize &^ (uintptr(pageSize) - 1)
+				baseAddr = aligned
+				tc.size = int(regSize)
+			}
+
+			// Show the VMA backing the slice (from /proc/self/maps).
+			showVMAForAddr(t, baseAddr)
+
+			// Attempt UFFDIO_REGISTER_MODE_WP.
+			reg := uffdioRegister{
+				uffdioRange: uffdioRange{
+					start: uint64(baseAddr),
+					len:   uint64(tc.size),
+				},
+				mode: uffdioRegisterModeWP,
+			}
+
+			err := ioctl(fd, ioctlUffdioRegister, uintptr(unsafe.Pointer(&reg)))
+			if err != 0 {
+				t.Logf("UFFDIO_REGISTER_MODE_WP FAILED: errno=%v (%s)", err, err.Error())
+				t.Logf("This means wazero linear memory CANNOT be registered with uffd WP")
+				t.Logf("UffdStrategy will need a workaround (custom allocator or mprotect fallback)")
+				// Not fatal — this is a probe, not a hard requirement.
+				return
+			}
+
+			t.Logf("UFFDIO_REGISTER_MODE_WP: OK (ioctls=0x%x)", reg.ioctls)
+			t.Log("Go make([]byte) IS compatible with uffd WP — UffdStrategy should work")
+
+			// Unregister to clean up.
+			unregRange := uffdioRange{
+				start: uint64(baseAddr),
+				len:   uint64(tc.size),
+			}
+			_ = ioctl(fd, 0x8010aa01 /* UFFDIO_UNREGISTER */, uintptr(unsafe.Pointer(&unregRange)))
+
+			// Keep buf alive until after ioctl.
+			_ = buf
+		})
+	}
+}
+
+// showVMAForAddr logs the VMA line from /proc/self/maps that contains addr.
+func showVMAForAddr(t *testing.T, addr uintptr) {
+	t.Helper()
+	data, err := os.ReadFile("/proc/self/maps")
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if len(line) == 0 {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		parts := strings.SplitN(fields[0], "-", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		var start, end uint64
+		if _, err2 := fmt.Sscanf(parts[0], "%x", &start); err2 != nil {
+			continue
+		}
+		if _, err2 := fmt.Sscanf(parts[1], "%x", &end); err2 != nil {
+			continue
+		}
+		if uintptr(start) <= addr && addr < uintptr(end) {
+			t.Logf("VMA containing 0x%x: %s", addr, line)
+			return
+		}
+	}
+	t.Logf("VMA for 0x%x: not found in /proc/self/maps", addr)
 }

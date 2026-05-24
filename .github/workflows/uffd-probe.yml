@@ -44,6 +44,31 @@ jobs:
         # A non-zero exit code indicates a real problem (e.g. fd creation
         # failed on a VM kernel, which should not happen).
 
+      - name: Probe — Go make([]byte) compatibility with uffd WP
+        run: |
+          go test ./internal/execution/wasm/... \
+            -run TestUffdProbe_GoMakeSlice \
+            -v -count=1
+        # Critical diagnostic: verifies whether wazero's linear memory
+        # (allocated via make([]byte, N)) is registerable with
+        # UFFDIO_REGISTER_MODE_WP. A failure here means UffdStrategy needs
+        # a custom memory allocator workaround.
+
+      - name: UffdStrategy — dirty-page tracking on real WASM module
+        run: |
+          go test ./internal/execution/wasm/... \
+            -run TestUffdStrategy_DirtyPageTracking \
+            -v -count=1 -timeout=60s
+        # End-to-end test of UffdStrategy on a real wazero module (echo.wasm).
+        # Skips gracefully if uffd WP is unavailable.
+
+      - name: UffdStrategy — supervisor integration
+        run: |
+          go test ./internal/execution/wasm/... \
+            -run TestUffdStrategy_SupervisorIntegration \
+            -v -count=1 -timeout=60s
+        # Integration test: wasmSupervisor with UseUffd=true over 5 requests.
+
       - name: Benchmark — snapshot restore (full memcpy vs uffd, 64KB + 3MB)
         run: |
           go test ./internal/execution/wasm/... \

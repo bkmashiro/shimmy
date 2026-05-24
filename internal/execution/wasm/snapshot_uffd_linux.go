@@ -11,6 +11,12 @@ import (
 	"github.com/tetratelabs/wazero/api"
 )
 
+// pipeFd is a pair of fds created by Pipe2, used to wake up faultLoop.
+// wakeupR is the read end (polled by faultLoop); wakeupW is the write end
+// (written by Close to signal shutdown). Both are initialised to -1 so that
+// accidental closes of fd 0 are avoided.
+type pipeFd struct{ r, w int }
+
 // ---------------------------------------------------------------------------
 // UffdProbeStrategy — userfaultfd write-protect probe
 // ---------------------------------------------------------------------------
@@ -314,6 +320,7 @@ const (
 // runtime, so the registration remains valid for the lifetime of the module.
 type UffdStrategy struct {
 	uffdFd    int
+	wakeup    pipeFd // wakeupR polled by faultLoop; wakeupW written by Close
 	basePtr   unsafe.Pointer
 	memSize   uint32
 	pageSize  int
@@ -324,7 +331,6 @@ type UffdStrategy struct {
 	dirty    []bool // dirty[i] = true if page i was written since last Take
 
 	closeOnce sync.Once
-	stopCh    chan struct{} // closed to stop faultLoop
 	doneCh    chan struct{} // closed when faultLoop exits
 }
 
@@ -354,22 +360,33 @@ func NewUffdStrategy(mem api.Memory) (*UffdStrategy, error) {
 	pageSize := syscall.Getpagesize()
 	pageCount := int((uint64(size) + uint64(pageSize) - 1) / uint64(pageSize))
 
-	// Open uffd fd without O_NONBLOCK: faultLoop uses blocking syscall.Read,
-	// so the fd must be in blocking mode. O_NONBLOCK would cause Read to return
-	// EAGAIN immediately instead of waiting for the next fault event.
+	// Open uffd fd. We use O_NONBLOCK so that syscall.Read in faultLoop returns
+	// EAGAIN when no events are queued, allowing the poll() loop to check the
+	// wakeup pipe. The poll() itself blocks without consuming CPU.
 	fd, _, errno := syscall.RawSyscall(
 		uffdSyscallNr,
-		uffdOCloexecStrategy,
+		uffdOCloexecStrategy|uffdONonblockStrategy,
 		0, 0,
 	)
 	if errno != 0 {
 		return nil, fmt.Errorf("uffd: userfaultfd syscall: %w", errno)
 	}
 
+	// Create a self-pipe used to wake up faultLoop on Close.
+	// O_CLOEXEC: don't leak into child processes.
+	// O_NONBLOCK: Write from Close never blocks.
+	var pipeFds [2]int
+	if err := syscall.Pipe2(pipeFds[:], syscall.O_CLOEXEC|syscall.O_NONBLOCK); err != nil {
+		syscall.Close(int(fd)) //nolint:errcheck
+		return nil, fmt.Errorf("uffd: wakeup pipe: %w", err)
+	}
+
 	cleanup := true
 	defer func() {
 		if cleanup {
-			syscall.Close(int(fd)) //nolint:errcheck
+			syscall.Close(int(fd))       //nolint:errcheck
+			syscall.Close(pipeFds[0])    //nolint:errcheck
+			syscall.Close(pipeFds[1])    //nolint:errcheck
 		}
 	}()
 
@@ -411,29 +428,32 @@ func NewUffdStrategy(mem api.Memory) (*UffdStrategy, error) {
 
 	s := &UffdStrategy{
 		uffdFd:    int(fd),
+		wakeup:    pipeFd{r: pipeFds[0], w: pipeFds[1]},
 		basePtr:   basePtr,
 		memSize:   size,
 		pageSize:  pageSize,
 		pageCount: pageCount,
 		snapshot:  make([]byte, size),
 		dirty:     make([]bool, pageCount),
-		stopCh:    make(chan struct{}),
 		doneCh:    make(chan struct{}),
 	}
 
-	cleanup = false // fd ownership transferred to s
+	cleanup = false // fd and pipe ownership transferred to s
 
 	go s.faultLoop()
 
 	return s, nil
 }
 
-// faultLoop runs in a dedicated goroutine. It blocks reading uffd_msg structs
-// from the uffd fd. For each write-protect fault it:
+// faultLoop runs in a dedicated goroutine. It uses poll(2) to wait for either
+// a uffd fault event (uffdFd becomes readable) or a shutdown signal (wakeupR
+// becomes readable when Close writes to wakeupW). This avoids relying on
+// close(uffdFd) to interrupt a blocking read, which is unreliable in Go's
+// runtime across kernel versions.
+//
+// For each write-protect fault it:
 //  1. Marks the faulting page as dirty.
 //  2. Disarms WP for that page so the faulting thread can proceed.
-//
-// The loop exits when the fd is closed (read returns an error).
 func (s *UffdStrategy) faultLoop() {
 	defer close(s.doneCh)
 
@@ -441,35 +461,56 @@ func (s *UffdStrategy) faultLoop() {
 	msgSize := unsafe.Sizeof(msg)
 	msgBuf := (*[unsafe.Sizeof(uffdMsg{})]byte)(unsafe.Pointer(&msg))
 
+	// pollFds[0] = uffd fd (fault events); pollFds[1] = wakeup pipe read end.
+	pollFds := []syscall.PollFd{
+		{Fd: int32(s.uffdFd), Events: syscall.POLLIN},
+		{Fd: int32(s.wakeup.r), Events: syscall.POLLIN},
+	}
+
 	for {
-		// Block-read one uffd_msg. The fd is in blocking mode (no O_NONBLOCK),
-		// so syscall.Read will wait until a fault event arrives.
-		// When the fd is closed, Read returns an error and we exit.
-		n, err := syscall.Read(s.uffdFd, msgBuf[:msgSize])
-		if err != nil || n == 0 {
-			// fd closed or error — exit cleanly.
+		// Block in poll until a uffd event arrives or Close signals shutdown.
+		_, err := syscall.Poll(pollFds, -1) // -1 = no timeout
+		if err == syscall.EINTR {
+			continue // retry on signal interruption
+		}
+		if err != nil {
+			return // unexpected poll error — exit
+		}
+
+		// Wakeup pipe readable → Close has been called, exit cleanly.
+		if pollFds[1].Revents != 0 {
 			return
 		}
-		if uint(n) < uint(msgSize) {
-			// Short read — shouldn't happen on uffd but be defensive.
+
+		// uffd fd not ready (spurious wakeup or error on uffd fd).
+		if pollFds[0].Revents&syscall.POLLIN == 0 {
+			if pollFds[0].Revents != 0 {
+				return // POLLERR / POLLHUP on uffd fd — exit
+			}
 			continue
 		}
 
+		// Read the uffd_msg (non-blocking because POLLIN fired).
+		n, err := syscall.Read(s.uffdFd, msgBuf[:msgSize])
+		if err != nil || n == 0 {
+			return // fd error or EOF — exit
+		}
+		if uint(n) < uint(msgSize) {
+			continue // short read — defensive
+		}
+
 		if msg.event != uffdEventPagefault {
-			// Not a pagefault event — skip (e.g. fork/remap events).
-			continue
+			continue // non-pagefault event (fork/remap) — skip
 		}
 
 		faultAddr := uintptr(msg.address)
 		base := uintptr(s.basePtr)
 
 		if faultAddr < base || faultAddr >= base+uintptr(s.memSize) {
-			// Fault outside our region — shouldn't happen, skip.
-			continue
+			continue // fault outside our region — skip
 		}
 
 		pageIdx := int((faultAddr - base) / uintptr(s.pageSize))
-		// Align faultAddr down to page boundary.
 		pageBase := base + uintptr(pageIdx)*uintptr(s.pageSize)
 
 		// Mark page dirty.
@@ -578,29 +619,53 @@ func (s *UffdStrategy) Restore(mem api.Memory) error {
 	return nil
 }
 
-// Close implements SnapshotStrategy. It disarms write-protection, stops the
-// fault-handler goroutine by closing the uffd fd, and waits for it to exit.
+// Close implements SnapshotStrategy. It disarms write-protection, signals the
+// fault-handler goroutine to stop via the wakeup pipe, waits for it to exit,
+// and then closes all file descriptors.
+//
+// Shutdown order matters:
+//  1. Disarm WP so that any thread blocked on a WP fault can proceed (prevents
+//     a deadlock where the faulting thread is waiting for faultLoop, which is
+//     waiting for us to signal it).
+//  2. Write one byte to wakeup.w — faultLoop's poll() unblocks on wakeup.r.
+//  3. Wait for doneCh — faultLoop has exited and will no longer read uffdFd.
+//  4. Close uffdFd and both pipe ends — safe to do now.
 func (s *UffdStrategy) Close() error {
 	var retErr error
 	s.closeOnce.Do(func() {
-		// Disarm WP on the entire region so the memory is usable after close.
+		// Step 1: Disarm WP on the entire region. This releases any goroutine
+		// that may be blocked inside the kernel waiting for uffd to serve a WP
+		// fault — without this, faultLoop could be deadlocked while trying to
+		// disarm WP for a fault that arrived just before we signalled shutdown.
 		wp := uffdioWPStrategy{
 			uffdioRangeStrategy: uffdioRangeStrategy{
 				start: uint64(uintptr(s.basePtr)),
 				len:   uint64(s.memSize),
 			},
-			mode: 0,
+			mode: 0, // clear WP — disarm entire region
 		}
 		ioctlUffd(uintptr(s.uffdFd), ioctlUffdioWPStrategy, uintptr(unsafe.Pointer(&wp))) //nolint:errcheck
 
-		// Closing the fd causes faultLoop's Read to return an error, stopping it.
+		// Step 2: Signal faultLoop via the wakeup pipe. faultLoop polls both
+		// uffdFd and wakeup.r; writing here makes wakeup.r readable and causes
+		// poll() to return with Revents set on pollFds[1], so faultLoop exits.
+		// O_NONBLOCK on the pipe means this write never blocks.
+		syscall.Write(s.wakeup.w, []byte{1}) //nolint:errcheck
+
+		// Step 3: Wait for faultLoop to acknowledge the shutdown. doneCh is
+		// closed by faultLoop's deferred close(s.doneCh) just before it returns.
+		<-s.doneCh
+
+		// Step 4: Close all file descriptors now that faultLoop has exited.
 		if err := syscall.Close(s.uffdFd); err != nil {
 			retErr = fmt.Errorf("uffd: close fd: %w", err)
 		}
 		s.uffdFd = -1
 
-		// Wait for faultLoop to exit.
-		<-s.doneCh
+		syscall.Close(s.wakeup.w) //nolint:errcheck
+		s.wakeup.w = -1
+		syscall.Close(s.wakeup.r) //nolint:errcheck
+		s.wakeup.r = -1
 	})
 	return retErr
 }

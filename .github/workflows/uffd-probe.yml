@@ -75,12 +75,18 @@ jobs:
             -v -count=1 -timeout=60s
         # Integration test: wasmSupervisor with UseUffd=true over 5 requests.
 
-      - name: Benchmark — snapshot restore (full memcpy vs uffd, 64KB + 3MB)
+      - name: Benchmark — snapshot restore (full memcpy vs uffd, 64KB + 3MB + 26MB)
         run: |
           go test ./internal/execution/wasm/... \
             -bench=BenchmarkSnapshotRestore \
             -benchtime=3s -count=1 -run=^$ \
             -v 2>&1 | tee bench-results.txt
+        # Includes:
+        #   BenchmarkSnapshotRestore_FullMemcpy        (echo.wasm, ~64KB)
+        #   BenchmarkSnapshotRestore_FullMemcpy_3MB    (3MB baseline)
+        #   BenchmarkSnapshotRestore_Uffd_3MB          (3MB, 10% dirty, Restore-only timed)
+        #   BenchmarkSnapshotRestore_FullMemcpy_26MB   (26MB baseline = CPython heap)
+        #   BenchmarkSnapshotRestore_Uffd_26MB         (26MB, 10% dirty, Restore-only timed)
 
       - name: Upload benchmark results
         if: always()

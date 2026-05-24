@@ -345,20 +345,12 @@ func BenchmarkSnapshotRestore_FullMemcpy_3MB(b *testing.B) {
 	}
 }
 
-// BenchmarkSnapshotRestore_Uffd_3MB benchmarks UffdStrategy at a realistic
-// module size (3 MB). Only dirty pages (~10% simulated) are restored.
-// The benchmark is skipped if uffd+WP is unavailable (Docker seccomp).
-//
-// Compare with BenchmarkSnapshotRestore_FullMemcpy_3MB to see the advantage
-// of dirty-page tracking: only ~10% of pages are written back per iteration.
-func BenchmarkSnapshotRestore_Uffd_3MB(b *testing.B) {
-	if !userfaultfdAvailable() {
-		b.Skip("userfaultfd syscall not available (seccomp or insufficient privileges)")
-	}
-
-	const targetMB = 3
-	const wasm64KBPages = targetMB * 1024 / 64 // 48 pages → 3 MB
-
+// benchUffdSetup is shared setup for UffdStrategy benchmarks. It creates a
+// minimal WASM module with the given number of 64 KB WASM pages, registers
+// UffdStrategy, calls Take, and returns the strategy and a pre-computed list
+// of ~10% dirty page indices.
+func benchUffdSetup(b *testing.B, wasm64KBPages int) (*UffdStrategy, []int) {
+	b.Helper()
 	wasmBin := buildMinimalMemoryModule(b, wasm64KBPages)
 
 	ctx := context.Background()
@@ -366,71 +358,153 @@ func BenchmarkSnapshotRestore_Uffd_3MB(b *testing.B) {
 	b.Cleanup(func() { _ = rt.Close(ctx) })
 
 	compiled, err := rt.CompileModule(ctx, wasmBin)
-	require.NoError(b, err, "compile minimal 3MB module")
+	require.NoError(b, err, "compile module")
 	b.Cleanup(func() { _ = compiled.Close(ctx) })
 
-	modCfg := wazero.NewModuleConfig().WithName("")
-	mod, err := rt.InstantiateModule(ctx, compiled, modCfg)
-	require.NoError(b, err, "instantiate minimal 3MB module")
+	mod, err := rt.InstantiateModule(ctx, compiled, wazero.NewModuleConfig().WithName(""))
+	require.NoError(b, err, "instantiate module")
 	b.Cleanup(func() { _ = mod.Close(ctx) })
 
 	mem := mod.Memory()
-	require.NotNil(b, mem, "module must have linear memory")
+	require.NotNil(b, mem)
 
 	strategy, err := NewUffdStrategy(mem)
 	if err != nil {
 		b.Skipf("NewUffdStrategy failed (uffd+WP unavailable): %v", err)
 	}
 	b.Cleanup(func() { _ = strategy.Close() })
-
-	require.NoError(b, strategy.Take(mem), "take initial snapshot")
+	require.NoError(b, strategy.Take(mem))
 
 	memSize := int(mem.Size())
 	pageSize := strategy.pageSize
 	numPages := memSize / pageSize
-
-	// Pre-select ~10% of pages to simulate as dirty each iteration.
 	dirtyPages := make([]int, 0, numPages/10+1)
 	for p := 0; p < numPages; p += 10 {
 		dirtyPages = append(dirtyPages, p)
 	}
 
-	b.SetBytes(int64(memSize))
+	return strategy, dirtyPages
+}
+
+// simulateDirtyWrites marks dirtyPages in the strategy's bitmap and disarms WP
+// on each page so Restore can write to them. This simulates what would happen
+// during normal WASM execution (WP faults handled by faultLoop). Must be called
+// with the timer stopped.
+func simulateDirtyWrites(strategy *UffdStrategy, dirtyPages []int) {
+	pageSize := strategy.pageSize
+	memSize := int(strategy.memSize)
+
+	strategy.mu.Lock()
+	for _, pg := range dirtyPages {
+		if pg < len(strategy.dirty) {
+			strategy.dirty[pg] = true
+		}
+	}
+	strategy.mu.Unlock()
+
+	for _, pg := range dirtyPages {
+		off := pg * pageSize
+		end := off + pageSize
+		if end > memSize {
+			end = memSize
+		}
+		wp := uffdioWPStrategy{
+			uffdioRangeStrategy: uffdioRangeStrategy{
+				start: uint64(uintptr(strategy.basePtr)) + uint64(off),
+				len:   uint64(end - off),
+			},
+			mode: 0, // disarm WP so Restore can write
+		}
+		ioctlUffd(uintptr(strategy.uffdFd), ioctlUffdioWPStrategy, uintptr(unsafe.Pointer(&wp))) //nolint:errcheck
+	}
+}
+
+// BenchmarkSnapshotRestore_Uffd_3MB benchmarks UffdStrategy.Restore at 3 MB
+// with ~10% dirty pages. The dirty-page simulation (disarm WP + mark bits) is
+// excluded from the timed section via b.StopTimer/b.StartTimer so the measured
+// time reflects only the actual Restore cost: copy dirty pages + 1 ioctl.
+//
+// Compare with BenchmarkSnapshotRestore_FullMemcpy_3MB.
+func BenchmarkSnapshotRestore_Uffd_3MB(b *testing.B) {
+	if !userfaultfdAvailable() {
+		b.Skip("userfaultfd syscall not available (seccomp or insufficient privileges)")
+	}
+	const wasm64KBPages = 3 * 1024 / 64 // 48 pages = 3 MB
+	strategy, dirtyPages := benchUffdSetup(b, wasm64KBPages)
+
+	b.SetBytes(int64(strategy.memSize))
 	b.ReportAllocs()
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		// Simulate writes on dirty pages: disarm WP, write, faultLoop re-arms.
-		// For benchmark isolation we directly mark pages dirty and do the write.
-		strategy.mu.Lock()
-		for _, pg := range dirtyPages {
-			if pg < len(strategy.dirty) {
-				strategy.dirty[pg] = true
-			}
-		}
-		strategy.mu.Unlock()
+		b.StopTimer()
+		simulateDirtyWrites(strategy, dirtyPages)
+		b.StartTimer()
 
-		// Disarm WP for dirty pages so we can write without faults.
-		for _, pg := range dirtyPages {
-			off := uint32(pg * pageSize)
-			end := off + uint32(pageSize)
-			if end > uint32(memSize) {
-				end = uint32(memSize)
-			}
-			wp := uffdioWPStrategy{
-				uffdioRangeStrategy: uffdioRangeStrategy{
-					start: uint64(uintptr(strategy.basePtr)) + uint64(off),
-					len:   uint64(end - off),
-				},
-				mode: 0, // disarm
-			}
-			ioctlUffd(uintptr(strategy.uffdFd), ioctlUffdioWPStrategy, uintptr(unsafe.Pointer(&wp))) //nolint:errcheck
-			// Write zeros to the page to simulate guest activity.
-			mem.Write(off, make([]byte, end-off)) //nolint:errcheck
+		if err := strategy.Restore(nil); err != nil {
+			b.Fatalf("Restore failed: %v", err)
 		}
+	}
+}
 
-		// Restore — only dirty pages.
+// BenchmarkSnapshotRestore_FullMemcpy_26MB benchmarks FullMemcpyStrategy at
+// 26 MB — the approximate size of the CPython WASM linear memory used by
+// reactor-python. This is the baseline to beat with UffdStrategy.
+func BenchmarkSnapshotRestore_FullMemcpy_26MB(b *testing.B) {
+	const wasm64KBPages = 26 * 1024 / 64 // 416 pages = 26 MB
+	wasmBin := buildMinimalMemoryModule(b, wasm64KBPages)
+
+	ctx := context.Background()
+	rt := wazero.NewRuntime(ctx)
+	b.Cleanup(func() { _ = rt.Close(ctx) })
+
+	compiled, err := rt.CompileModule(ctx, wasmBin)
+	require.NoError(b, err)
+	b.Cleanup(func() { _ = compiled.Close(ctx) })
+
+	mod, err := rt.InstantiateModule(ctx, compiled, wazero.NewModuleConfig().WithName(""))
+	require.NoError(b, err)
+	b.Cleanup(func() { _ = mod.Close(ctx) })
+
+	mem := mod.Memory()
+	require.NotNil(b, mem)
+
+	strategy := NewFullMemcpyStrategy()
+	require.NoError(b, strategy.Take(mem))
+
+	b.SetBytes(int64(mem.Size()))
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
 		if err := strategy.Restore(mem); err != nil {
+			b.Fatalf("Restore failed: %v", err)
+		}
+	}
+}
+
+// BenchmarkSnapshotRestore_Uffd_26MB benchmarks UffdStrategy.Restore at 26 MB
+// with ~10% dirty pages (~670 pages out of 6656). This is the target workload
+// for reactor-python (CPython WASM heap). Only the Restore call is timed.
+//
+// Compare with BenchmarkSnapshotRestore_FullMemcpy_26MB.
+func BenchmarkSnapshotRestore_Uffd_26MB(b *testing.B) {
+	if !userfaultfdAvailable() {
+		b.Skip("userfaultfd syscall not available (seccomp or insufficient privileges)")
+	}
+	const wasm64KBPages = 26 * 1024 / 64 // 416 pages = 26 MB
+	strategy, dirtyPages := benchUffdSetup(b, wasm64KBPages)
+
+	b.SetBytes(int64(strategy.memSize))
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		simulateDirtyWrites(strategy, dirtyPages)
+		b.StartTimer()
+
+		if err := strategy.Restore(nil); err != nil {
 			b.Fatalf("Restore failed: %v", err)
 		}
 	}

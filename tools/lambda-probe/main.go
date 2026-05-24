@@ -176,6 +176,115 @@ func probeUserfaultfdFd() {
 	pass("userfaultfd_fd", "fd created and closed")
 }
 
+// ---- userfaultfd WP probes -------------------------------------------------
+
+// userfaultfd ioctl layout constants (x86-64 / arm64 ABI)
+const (
+	uffdioAPIReq      = 0xc018aa3f // UFFDIO_API
+	uffdioRegisterReq = 0xc020aa00 // UFFDIO_REGISTER
+	uffdFeatureWP     = uint64(1 << 2) // UFFD_FEATURE_PAGEFAULT_FLAG_WP
+	uffdModeWP        = uint64(1 << 1) // UFFDIO_REGISTER_MODE_WP
+)
+
+type uffdioAPIStruct struct {
+	api      uint64
+	features uint64
+	ioctls   uint64
+}
+
+type uffdioRange struct {
+	start uint64
+	len   uint64
+}
+
+type uffdioRegister struct {
+	uffdioRange
+	mode   uint64
+	ioctls uint64
+}
+
+func sysIoctl(fd uintptr, req uint, arg uintptr) syscall.Errno {
+	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, fd, uintptr(req), arg)
+	return errno
+}
+
+func openUffd() (uintptr, syscall.Errno) {
+	var nr uintptr
+	switch runtime.GOARCH {
+	case "amd64":
+		nr = 323
+	case "arm64":
+		nr = 282
+	default:
+		return 0, syscall.ENOSYS
+	}
+	fd, _, errno := syscall.RawSyscall(nr, syscall.O_CLOEXEC|syscall.O_NONBLOCK, 0, 0)
+	return fd, errno
+}
+
+// 5b. UFFDIO_API handshake — check whether kernel advertises UFFD_FEATURE_PAGEFAULT_FLAG_WP
+func probeUffdWPApi() (fdOut uintptr, ok bool) {
+	fd, errno := openUffd()
+	if errno != 0 {
+		fail("uffd_wp_api", "userfaultfd syscall failed: "+errno.Error())
+		return 0, false
+	}
+
+	apiStruct := uffdioAPIStruct{api: 0xaa, features: uffdFeatureWP}
+	if err := sysIoctl(fd, uffdioAPIReq, uintptr(unsafe.Pointer(&apiStruct))); err != 0 {
+		syscall.Close(int(fd))
+		fail("uffd_wp_api", "UFFDIO_API ioctl failed: "+err.Error())
+		return 0, false
+	}
+
+	detail := fmt.Sprintf("features=0x%x ioctls=0x%x wp_advertised=%v",
+		apiStruct.features, apiStruct.ioctls, apiStruct.features&uffdFeatureWP != 0)
+
+	if apiStruct.features&uffdFeatureWP == 0 {
+		syscall.Close(int(fd))
+		fail("uffd_wp_api", "UFFD_FEATURE_PAGEFAULT_FLAG_WP not advertised — "+detail)
+		return 0, false
+	}
+	pass("uffd_wp_api", detail)
+	return fd, true
+}
+
+// 5c. UFFDIO_REGISTER_MODE_WP on a MAP_PRIVATE anonymous region
+func probeUffdWPRegister() {
+	fd, ok := probeUffdWPApi()
+	if !ok {
+		// already emitted failure in probeUffdWPApi
+		fail("uffd_wp_register", "skipped — WP not advertised by kernel")
+		return
+	}
+	defer syscall.Close(int(fd))
+
+	pageSize := uintptr(syscall.Getpagesize())
+	size := pageSize * 16 // 64 KB
+
+	addr, _, merr := syscall.RawSyscall6(
+		syscall.SYS_MMAP, 0, size,
+		syscall.PROT_READ|syscall.PROT_WRITE,
+		syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS,
+		^uintptr(0), 0,
+	)
+	if merr != 0 {
+		fail("uffd_wp_register", "mmap failed: "+merr.Error())
+		return
+	}
+	defer syscall.RawSyscall(syscall.SYS_MUNMAP, addr, size, 0) //nolint:errcheck
+
+	reg := uffdioRegister{
+		uffdioRange: uffdioRange{start: uint64(addr), len: uint64(size)},
+		mode:        uffdModeWP,
+	}
+	if err := sysIoctl(fd, uffdioRegisterReq, uintptr(unsafe.Pointer(&reg))); err != 0 {
+		fail("uffd_wp_register", fmt.Sprintf("UFFDIO_REGISTER_MODE_WP failed: errno=%v (%s)", err, err.Error()))
+		return
+	}
+	pass("uffd_wp_register", fmt.Sprintf("addr=0x%x size=%d region_ioctls=0x%x — WP register OK", addr, size, reg.ioctls))
+}
+
 // 6. /proc/self/smaps_rollup readable (memory stats, nice-to-have)
 func probeSmaps() {
 	b, err := os.ReadFile("/proc/self/smaps_rollup")
@@ -288,6 +397,7 @@ func main() {
 	probeSoftDirtyRoundTrip()
 	probeUnprivilegedUffdSysctl()
 	probeUserfaultfdFd()
+	probeUffdWPRegister()
 	probeSmaps()
 	probeMmapMinAddr()
 	probeMmapZero()

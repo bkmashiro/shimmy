@@ -66,11 +66,50 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 		return d, nil
 
 	case supervisor.ReactorPythonIO:
+		scriptPath := os.Getenv("FUNCTION_WASM_PYTHON_SCRIPT")
+
+		// Auto-route: if the eval script imports scipy, pandas, or other
+		// packages that require Fortran/Emscripten runtimes, transparently
+		// fall back to the Pyodide-in-Node.js backend which supports the full
+		// scientific Python stack.  Pure-Python and NumPy scripts continue to
+		// use the faster CPython-WASI reactor path.
+		if scriptPath != "" {
+			heavy, err := wasm.ScriptFileNeedsHeavyRuntime(scriptPath)
+			if err != nil {
+				params.Log.Warn("import scan failed, using reactor-python",
+					zap.String("script", scriptPath),
+					zap.Error(err))
+			} else if heavy {
+				params.Log.Info("import scan: heavy deps detected, routing to Pyodide",
+					zap.String("script", scriptPath))
+
+				runnerPath := os.Getenv("FUNCTION_PYODIDE_RUNNER")
+				if runnerPath == "" {
+					runnerPath = "runner.js"
+				}
+				pyodideSupervisorCfg := params.Config.Supervisor
+				pyodideSupervisorCfg.IO.Interface = supervisor.RpcIO
+				pyodideSupervisorCfg.IO.Rpc.Transport = supervisor.StdioTransport
+				pyodideSupervisorCfg.StartParams.Cmd = "node"
+				pyodideSupervisorCfg.StartParams.Args = []string{runnerPath, scriptPath}
+
+				return dispatcher.NewDedicatedDispatcher(
+					dispatcher.DedicatedDispatcherParams{
+						Config: dispatcher.DedicatedDispatcherConfig{
+							Supervisor: pyodideSupervisorCfg,
+						},
+						Context: params.Context,
+						Log:     params.Log,
+					},
+				)
+			}
+		}
+
 		cfg := wasm.Config{
 			ModulePath:       params.Config.Supervisor.StartParams.Cmd,
 			MaxInstances:     params.Config.MaxWorkers,
 			Timeout:          params.Config.Supervisor.SendParams.Timeout,
-			PythonScriptPath: os.Getenv("FUNCTION_WASM_PYTHON_SCRIPT"),
+			PythonScriptPath: scriptPath,
 		}
 
 		d := wasm.NewReactorPythonDispatcher(cfg, params.Log)

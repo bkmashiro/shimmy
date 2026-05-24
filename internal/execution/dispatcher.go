@@ -68,12 +68,19 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 	case supervisor.ReactorPythonIO:
 		scriptPath := os.Getenv("FUNCTION_WASM_PYTHON_SCRIPT")
 
-		// Auto-route: if the eval script imports scipy, pandas, or other
-		// packages that require Fortran/Emscripten runtimes, transparently
-		// fall back to the Pyodide-in-Node.js backend which supports the full
-		// scientific Python stack.  Pure-Python and NumPy scripts continue to
-		// use the faster CPython-WASI reactor path.
-		if scriptPath != "" {
+		// Auto-route: if FUNCTION_WASM_PYTHON_AUTO_ROUTE=1 is set AND the eval
+		// script imports scipy, pandas, or other packages that require
+		// Fortran/Emscripten runtimes, transparently fall back to the
+		// Pyodide-in-Node.js backend which supports the full scientific Python
+		// stack.  Pure-Python and NumPy scripts continue to use the faster
+		// CPython-WASI reactor path.
+		//
+		// Auto-routing is opt-in (disabled by default) to preserve backward
+		// compatibility: without the env var, the reactor-python backend handles
+		// unavailable packages gracefully via _UnavailablePackageFinder, which
+		// is the correct behaviour for environments without Node.js.
+		autoRoute := os.Getenv("FUNCTION_WASM_PYTHON_AUTO_ROUTE") == "1"
+		if autoRoute && scriptPath != "" {
 			heavy, err := wasm.ScriptFileNeedsHeavyRuntime(scriptPath)
 			if err != nil {
 				params.Log.Warn("import scan failed, using reactor-python",

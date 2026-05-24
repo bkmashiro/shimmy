@@ -82,6 +82,7 @@ func TestNewDispatcher_ReactorPython_HeavyDepsRoutesToPyodide(t *testing.T) {
 	script := writeTempScript(t, "import scipy\nimport numpy as np\n\ndef evaluation_function(r, a, p):\n    return True\n")
 
 	t.Setenv("FUNCTION_WASM_PYTHON_SCRIPT", script)
+	t.Setenv("FUNCTION_WASM_PYTHON_AUTO_ROUTE", "1")
 	// Use a clearly non-existent runner so the node invocation fails fast.
 	t.Setenv("FUNCTION_PYODIDE_RUNNER", filepath.Join(t.TempDir(), "runner.js"))
 
@@ -122,6 +123,7 @@ func TestNewDispatcher_ReactorPython_NoHeavyDeps_EmptyModulePath(t *testing.T) {
 	script := writeTempScript(t, "import numpy as np\n\ndef evaluation_function(r, a, p):\n    return r == a\n")
 
 	t.Setenv("FUNCTION_WASM_PYTHON_SCRIPT", script)
+	t.Setenv("FUNCTION_WASM_PYTHON_AUTO_ROUTE", "") // auto-route disabled — must NOT go to Pyodide
 	// Ensure FUNCTION_PYODIDE_RUNNER is cleared — it won't be reached anyway.
 	t.Setenv("FUNCTION_PYODIDE_RUNNER", "")
 

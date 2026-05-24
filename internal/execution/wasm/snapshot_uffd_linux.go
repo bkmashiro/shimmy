@@ -21,23 +21,17 @@ import (
 // test mmap region registered in WP mode to prove the mechanism works end-to-
 // end.
 //
-// For the actual Take / Restore operations it currently falls back to
-// FullMemcpyStrategy. The reason is a wazero-internal limitation: wazero's
-// api.Memory does not expose the raw pointer or file descriptor backing its
-// linear-memory []byte, so we cannot register the WASM memory region directly
-// with uffd. A full dirty-page restore implementation would require one of:
+// For the actual Take / Restore operations it delegates to FullMemcpyStrategy.
+// UffdProbeStrategy is only used as an availability probe and in the default
+// NewSnapshotStrategy() factory. For real dirty-page tracking, the supervisor
+// uses UffdStrategy directly via selectStrategy(mem).
 //
-//   - wazero experimental API that exposes the backing mmap address (not yet
-//     upstream as of wazero v1.x)
-//   - A custom wazero MemoryDefinition that allocates linear memory via our
-//     own mmap and passes the fd/addr to UffdProbeStrategy
-//   - An mprotect-based approach using unsafe.SliceData on the []byte returned
-//     by api.Memory.Read (works today but is not officially supported)
-//
-// Until one of those paths is available, UffdProbeStrategy serves as:
-//  1. A CI probe confirming uffd+WP works on the target kernel.
-//  2. A scaffold that already holds the uffd fd and knows dirty pages — once
-//     the memory address is accessible it can be wired up with minimal changes.
+// Note: the original design concern about "wazero not exposing raw memory
+// pointer" has been resolved: wazero's api.Memory.Read(0, size) returns a
+// direct slice into the backing buffer (not a copy), so unsafe.SliceData gives
+// the base address. For a make([]byte, N) large allocation, Go uses
+// mmap(MAP_ANON|MAP_PRIVATE), which is compatible with UFFDIO_REGISTER_MODE_WP.
+// UffdStrategy exploits this to register wazero linear memory directly.
 //
 // Fallback: if New() returns an error the caller should use FullMemcpyStrategy.
 
@@ -295,10 +289,15 @@ const (
 // cost for large modules where only a small fraction of pages are written per
 // request.
 //
-// The raw pointer into WASM linear memory is obtained via mem.Read(0, size)
-// which, on wazero/linux, returns a slice that directly points into the
-// mmap(MAP_ANONYMOUS) backing the linear memory. We use unsafe.SliceData to
-// extract the base address and register it with uffd.
+// How it obtains the raw WASM memory pointer:
+//   - wazero's api.Memory.Read(0, size) returns m.Buffer[0:size] — a direct
+//     slice into the backing store, not a copy.
+//   - unsafe.SliceData on that slice gives the address of m.Buffer[0].
+//   - wazero allocates linear memory via make([]byte, N) in NewMemoryInstance.
+//   - For large N, Go's runtime uses mmap(MAP_ANON|MAP_PRIVATE) internally.
+//   - MAP_PRIVATE satisfies the kernel's requirement for UFFDIO_REGISTER_MODE_WP.
+//   - Therefore UFFDIO_REGISTER succeeds on wazero linear memory without any
+//     wazero fork or custom allocator.
 //
 // Memory growth is prevented by configuring WithMemoryLimitPages in the wazero
 // runtime, so the registration remains valid for the lifetime of the module.

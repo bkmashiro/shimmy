@@ -2,51 +2,48 @@
 
 ## #1 — Uffd 真正跑起来（dirty-page restore）
 
-**状态：** 代码完整，但目前 `UffdStrategy` 被 supervisor 选中时实际上无法注册
-WASM 线性内存，退回 FullMemcpy。原因见下。
+**状态：** 实现完整，CI 验证进行中。
 
 **目标：** `Take` 只做 memcpy，`Restore` 只复制脏页（~10% dirty → ~10x restore加速），
 对 reactor-python 的 ~26 MB CPython 堆意义最大。
 
-**根本问题：wazero MAP_SHARED**
+**实现路径：已走通（UffdStrategy + 直接注册 wazero 线性内存）**
 
-wazero 在 Linux 上用 `mmap(MAP_ANONYMOUS | MAP_SHARED)` 分配线性内存。
-`UFFDIO_REGISTER_MODE_WP` 要求映射是 `MAP_PRIVATE`（内核拒绝 MAP_SHARED）。
-所以即使 `unsafe.SliceData(mem.Read(0, size))` 能拿到正确的基址，
-`UFFDIO_REGISTER` ioctl 也会返回 `EINVAL`。
+`UffdStrategy`（`snapshot_uffd_linux.go`）已完整实现：
+- `Take`：memcpy 到 snapshot，re-arm WP 整个区域，清 dirty 位图
+- `Restore`：只 memcpy 脏页，re-arm WP，清 dirty 位图
+- `faultLoop`：阻塞读 uffd_msg，WP fault → 标记脏页，disarm WP，让 WASM 继续写
 
-**三条可行路径（按可行性排序）：**
+**为何能直接注册 wazero 线性内存：**
 
-### 路径 A：patch wazero，改 MAP_PRIVATE（推荐）
+之前 TODO 里的"MAP_SHARED"假设**不正确**。经过代码调查：
 
-- 改 `wazero/internal/platform/mmap_linux.go`，把 `MAP_SHARED` 换成 `MAP_PRIVATE`
-- 对 wazero 语义无破坏（WASM 线性内存本来就是单进程私有的）
-- 改动 < 5 行，可以提 upstream PR
-- 改了之后现有 `NewUffdStrategy` 里的 `UFFDIO_REGISTER` 就能成功
+1. `wazero/internal/wasm/memory.go` 里 `NewMemoryInstance` 用 `make([]byte, N)` 分配线性内存
+2. `api.Memory.Read(0, size)` 返回的是 `m.Buffer[0:size]`——直接指向 backing store，不做拷贝
+3. `unsafe.SliceData(buf)` 拿到 `m.Buffer[0]` 的地址
+4. Go runtime 对大型 `make([]byte, N)` 使用 `mmap(MAP_ANON|MAP_PRIVATE)`
+5. `MAP_PRIVATE` 满足 `UFFDIO_REGISTER_MODE_WP` 的内核要求（`VM_SHARED` 的才会 EINVAL）
 
-**实验步骤：**
-1. fork wazero，改 mmap_linux.go
-2. `go.mod` replace 指向本地 fork
-3. 跑 `TestUffdStrategy_EndToEnd` 和 `TestUffdStrategy_SupervisorIntegration`
-4. 如果测试过，benchmark 对比 FullMemcpy vs Uffd at 26MB/10% dirty
+因此**不需要 fork wazero**，也不需要自定义 allocator。
 
-### 路径 B：自己 mmap，绕过 wazero 内存分配
+**已完成：**
+- `UffdStrategy` 完整实现（faultLoop, Take, Restore, Close）
+- `supervisor_linux.go` `selectStrategy("uffd")` 路径已接入 `NewUffdStrategy(mem)`
+- 新增 `TestUffdProbe_GoMakeSlice`：专门测 `make([]byte, N)` 能否注册 uffd WP
+- `uffd-probe.yml` CI 新增：`TestUffdStrategy_DirtyPageTracking` + `SupervisorIntegration`
 
-- 在 `NewUffdStrategy` 里额外 `mmap(MAP_PRIVATE)` 一块同等大小的区域
-- 把 WASM 线性内存内容 memcpy 进去，注册这块区域到 uffd
-- Restore 时把脏页从这块区域写回 WASM 线性内存
-- 问题：两块内存不同步，WASM 写的是原始地址，uffd 监控的是副本地址，无法捕获写事件
+**待 CI 确认（`feat/wasm-backend` 分支，`uffd-probe.yml`）：**
+- `TestUffdProbe_GoMakeSlice` pass → Go 大 slice 确实是 MAP_PRIVATE，uffd WP 兼容
+- `TestUffdStrategy_DirtyPageTracking` pass → end-to-end 验证
+- `TestUffdStrategy_SupervisorIntegration` pass → 线上用法验证
 
-→ 方案不可行，跳过。
+**如果 CI 失败：**
+可能原因：
+1. Go heap arena 边界导致地址范围跨 VMA（unlikely for large alloc）
+2. 地址未 page-align（unlikely for large alloc）
+3. 其他内核限制
 
-### 路径 C：mprotect 替代（已有实现，但进程级限制）
-
-- `MprotectStrategy` 已完整实现，对单实例有效
-- 多实例时 SIGSEGV handler 进程共享，无法区分来自哪个实例 → 已有多实例 guard
-
-→ 对单实例部署可用，不是 uffd 的替代。
-
-**计划：先走路径 A。**
+备用方案：用 `experimental.MemoryAllocator` 自定义分配器，直接 `mmap(MAP_PRIVATE)` 返回已知地址，走 wazero 的 allocator 接口。代码改动 < 50 行。
 
 ---
 

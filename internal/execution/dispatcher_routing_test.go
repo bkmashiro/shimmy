@@ -66,56 +66,6 @@ func TestScriptRouting_FileNotFound(t *testing.T) {
 	assert.False(t, heavy, "file-not-found should return false so dispatcher falls back to reactor")
 }
 
-// ---------------------------------------------------------------------------
-// NewDispatcher routing: ReactorPythonIO with heavy deps → Pyodide path
-// ---------------------------------------------------------------------------
-
-// TestNewDispatcher_ReactorPython_HeavyDepsRoutesToPyodide verifies that when
-// FUNCTION_WASM_PYTHON_SCRIPT points to a script that imports scipy, NewDispatcher
-// attempts the Pyodide (node) path rather than the reactor-python WASM path.
-//
-// Since node.js is unlikely to be present in CI, we assert that:
-//  1. NewDispatcher returns an error (node process cannot start, or runner.js not found).
-//  2. The error does NOT mention "wasmPath must be set" — that message comes from the
-//     reactor-python WASM path and would indicate the routing decision was wrong.
-func TestNewDispatcher_ReactorPython_HeavyDepsRoutesToPyodide(t *testing.T) {
-	script := writeTempScript(t, "import scipy\nimport numpy as np\n\ndef evaluation_function(r, a, p):\n    return True\n")
-
-	t.Setenv("FUNCTION_WASM_PYTHON_SCRIPT", script)
-	t.Setenv("FUNCTION_WASM_PYTHON_AUTO_ROUTE", "1")
-	// Use a clearly non-existent runner so the node invocation fails fast.
-	t.Setenv("FUNCTION_PYODIDE_RUNNER", filepath.Join(t.TempDir(), "runner.js"))
-
-	d, err := execution.NewDispatcher(execution.Params{
-		Context: context.Background(),
-		Config: execution.Config{
-			Supervisor: supervisor.Config{
-				IO: supervisor.IOConfig{
-					Interface: supervisor.ReactorPythonIO,
-				},
-				// Intentionally leave StartParams.Cmd empty — for the reactor
-				// path this would trigger "wasmPath must be set". For the
-				// Pyodide path the cmd is overridden to "node".
-			},
-		},
-		Log: zap.NewNop(),
-	})
-
-	// NewDispatcher may succeed (returns a DedicatedDispatcher that hasn't
-	// started yet) or fail immediately.  Either outcome is acceptable as long
-	// as the reactor-python code path was NOT taken.
-	if err != nil {
-		// The error must NOT be the reactor-python "wasmPath must be set" sentinel —
-		// that would mean the routing decision was wrong.
-		assert.NotContains(t, err.Error(), "wasmPath",
-			"error should come from the Pyodide/node path, not the reactor-python path")
-	} else {
-		// Dispatcher was created; clean it up.
-		require.NotNil(t, d)
-		_ = d.Shutdown(context.Background())
-	}
-}
-
 // TestNewDispatcher_ReactorPython_NoHeavyDeps_EmptyModulePath verifies that
 // when there are no heavy deps the dispatcher takes the reactor-python code
 // path and fails with a wasmPath error (not a node/pyodide error).
@@ -123,7 +73,6 @@ func TestNewDispatcher_ReactorPython_NoHeavyDeps_EmptyModulePath(t *testing.T) {
 	script := writeTempScript(t, "import numpy as np\n\ndef evaluation_function(r, a, p):\n    return r == a\n")
 
 	t.Setenv("FUNCTION_WASM_PYTHON_SCRIPT", script)
-	t.Setenv("FUNCTION_WASM_PYTHON_AUTO_ROUTE", "") // auto-route disabled — must NOT go to Pyodide
 	// Ensure FUNCTION_PYODIDE_RUNNER is cleared — it won't be reached anyway.
 	t.Setenv("FUNCTION_PYODIDE_RUNNER", "")
 

@@ -56,7 +56,7 @@ const (
 
 	ioctlUffdioAPIStrategy      = 0xc018aa3f // UFFDIO_API
 	ioctlUffdioRegisterStrategy = 0xc020aa00 // UFFDIO_REGISTER
-	ioctlUffdioWPStrategy       = 0xc010aa06 // UFFDIO_WRITEPROTECT
+	ioctlUffdioWPStrategy       = 0xc018aa06 // UFFDIO_WRITEPROTECT — _IOWR(0xAA,6,struct uffdio_writeprotect{range[16]+mode[8]=24=0x18})
 
 	uffdOCloexecStrategy  = 0x80000 // O_CLOEXEC
 	uffdONonblockStrategy = 0x800   // O_NONBLOCK

@@ -9,6 +9,7 @@ import (
 	"unsafe"
 
 	"github.com/tetratelabs/wazero/api"
+	"golang.org/x/sys/unix"
 )
 
 // pipeFd is a pair of fds created by Pipe2, used to wake up faultLoop.
@@ -462,14 +463,14 @@ func (s *UffdStrategy) faultLoop() {
 	msgBuf := (*[unsafe.Sizeof(uffdMsg{})]byte)(unsafe.Pointer(&msg))
 
 	// pollFds[0] = uffd fd (fault events); pollFds[1] = wakeup pipe read end.
-	pollFds := []syscall.PollFd{
-		{Fd: int32(s.uffdFd), Events: syscall.POLLIN},
-		{Fd: int32(s.wakeup.r), Events: syscall.POLLIN},
+	pollFds := []unix.PollFd{
+		{Fd: int32(s.uffdFd), Events: unix.POLLIN},
+		{Fd: int32(s.wakeup.r), Events: unix.POLLIN},
 	}
 
 	for {
 		// Block in poll until a uffd event arrives or Close signals shutdown.
-		_, err := syscall.Poll(pollFds, -1) // -1 = no timeout
+		_, err := unix.Poll(pollFds, -1) // -1 = no timeout
 		if err == syscall.EINTR {
 			continue // retry on signal interruption
 		}
@@ -483,7 +484,7 @@ func (s *UffdStrategy) faultLoop() {
 		}
 
 		// uffd fd not ready (spurious wakeup or error on uffd fd).
-		if pollFds[0].Revents&syscall.POLLIN == 0 {
+		if pollFds[0].Revents&unix.POLLIN == 0 {
 			if pollFds[0].Revents != 0 {
 				return // POLLERR / POLLHUP on uffd fd — exit
 			}

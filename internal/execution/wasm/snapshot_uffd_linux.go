@@ -567,16 +567,28 @@ func (s *UffdStrategy) Take(mem api.Memory) error {
 	return nil
 }
 
-// Restore implements SnapshotStrategy. It writes snapshot data back to only
-// the pages that were dirtied since the last Take, then re-arms WP on those
-// pages and clears the dirty bitset.
-func (s *UffdStrategy) Restore(mem api.Memory) error {
-	if mem == nil || s.snapshot == nil {
+// Restore implements SnapshotStrategy. It copies snapshot data back to only
+// the pages that were dirtied since the last Take, then re-arms write-
+// protection on the entire region with a single ioctl and clears the dirty
+// bitset.
+//
+// Performance design:
+//   - Dirty pages have WP disarmed (faultLoop cleared it on each WP fault), so
+//     writing to them via unsafe.Slice + copy does NOT trigger further faults.
+//   - A single UFFDIO_WRITEPROTECT ioctl re-arms the full region. Pages that
+//     were never dirtied are already WP-armed; calling UFFDIO_WRITEPROTECT again
+//     is idempotent (the kernel sets the same PTE bit). This replaces one ioctl
+//     per dirty page with one ioctl total — critical at 10% dirty (77 → 1 call
+//     for a 3 MB module).
+//   - Direct unsafe.Slice + copy bypasses wazero's per-call bounds check,
+//     saving one function call per dirty page.
+func (s *UffdStrategy) Restore(_ api.Memory) error {
+	if s.snapshot == nil {
 		return nil
 	}
 
 	s.mu.Lock()
-	// Collect dirty page indices under the lock, then release.
+	// Collect dirty page indices and clear the bitset atomically under the lock.
 	var dirtyPages []int
 	for i, d := range s.dirty {
 		if d {
@@ -591,30 +603,32 @@ func (s *UffdStrategy) Restore(mem api.Memory) error {
 	}
 
 	pageSize := s.pageSize
+	// Direct slice over the WASM linear memory — safe because dirty pages have
+	// WP disarmed (faultLoop called UFFDIO_WRITEPROTECT with mode=0 for each),
+	// so no WP fault fires for the pages we write.
+	dst := unsafe.Slice((*byte)(s.basePtr), s.memSize)
 
 	for _, pg := range dirtyPages {
-		off := uint32(pg * pageSize)
-		end := off + uint32(pageSize)
-		if end > s.memSize {
-			end = s.memSize
+		off := pg * pageSize
+		end := off + pageSize
+		if end > int(s.memSize) {
+			end = int(s.memSize)
 		}
+		copy(dst[off:end], s.snapshot[off:end])
+	}
 
-		// Restore page from snapshot using mem.Write (goes through wazero bounds check).
-		if !mem.Write(off, s.snapshot[off:end]) {
-			return fmt.Errorf("uffd: Restore: mem.Write failed at offset %d", off)
-		}
-
-		// Re-arm WP on this page.
-		wp := uffdioWPStrategy{
-			uffdioRangeStrategy: uffdioRangeStrategy{
-				start: uint64(uintptr(s.basePtr)) + uint64(off),
-				len:   uint64(end - off),
-			},
-			mode: uffdioWPModeWP,
-		}
-		if err := ioctlUffd(uintptr(s.uffdFd), ioctlUffdioWPStrategy, uintptr(unsafe.Pointer(&wp))); err != 0 {
-			return fmt.Errorf("uffd: Restore: re-arm WP for page %d: %w", pg, err)
-		}
+	// Re-arm WP on the entire region with a single ioctl. Non-dirty pages
+	// are already WP-armed; re-arming is idempotent. Dirty pages were disarmed
+	// by faultLoop and are re-armed here. This is O(1) regardless of dirty count.
+	wp := uffdioWPStrategy{
+		uffdioRangeStrategy: uffdioRangeStrategy{
+			start: uint64(uintptr(s.basePtr)),
+			len:   uint64(s.memSize),
+		},
+		mode: uffdioWPModeWP,
+	}
+	if err := ioctlUffd(uintptr(s.uffdFd), ioctlUffdioWPStrategy, uintptr(unsafe.Pointer(&wp))); err != 0 {
+		return fmt.Errorf("uffd: Restore: re-arm WP: %w", err)
 	}
 
 	return nil

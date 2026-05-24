@@ -269,14 +269,9 @@ func (r *ReactorPythonRunner) Init(ctx context.Context) error {
 			zap.Error(err))
 	}
 
-	// Create snapshot strategy based on config.
-	s, err := r.newSnapshotStrategy(mod.Memory())
-	if err != nil {
-		r.log.Warn("requested snapshot strategy unavailable, falling back to memcpy",
-			zap.Error(err))
-		s = NewFullMemcpyStrategy()
-	}
-	r.strategy = s
+	// Create snapshot strategy based on config. selectSnapshotStrategy handles
+	// fallback to memcpy internally when the requested strategy is unavailable.
+	r.strategy = r.newSnapshotStrategy(mod.Memory())
 	if err := r.strategy.Take(mod.Memory()); err != nil {
 		_ = r.closeAll(ctx)
 		return fmt.Errorf("reactor python: take snapshot: %w", err)
@@ -476,8 +471,10 @@ class _WasivfsFinder:
     @staticmethod
     def _exists(path):
         try:
-            open(path, 'rb').close()
-            return True
+            # M-7 fix: use with-statement to guarantee fd is closed even
+            # under non-refcount GC (PyPy) or gc.disable().
+            with open(path, 'rb'):
+                return True
         except OSError:
             return False
 
@@ -541,6 +538,7 @@ class _UnavailablePackageFinder:
         'aiohttp':      'Network access is disabled in the WASI sandbox.',
         'sqlalchemy':   'SQLAlchemy is not available in the WASI sandbox.',
         'psycopg2':     'psycopg2 requires compiled C extensions.',
+        'seaborn':      'seaborn depends on matplotlib and statsmodels; use Pyodide instead.',
     }
     _AVAILABLE = 'Available packages: numpy, sympy, and the Python standard library (no network).'
 
@@ -734,7 +732,9 @@ del _np_seed, _np_rand, _np_randn, _np_rng, _pyr
 _main._base_modules = frozenset(_sys.modules.keys())
 
 def evaluation_function(r, a, p=None):
-    return {'is_correct': True, 'feedback': 'phase1:stubs-ready'}
+    # M-6 fix: return an error instead of a false positive if a request
+    # arrives before phase 2 overwrites this stub.
+    return {'error': 'phase1:stubs-ready — evaluation not yet available'}
 `
 
 // initSysPathPhase2 pre-warms numpy by importing it so the snapshot captures
@@ -866,21 +866,10 @@ func (r *ReactorPythonRunner) Shutdown(ctx context.Context) error {
 	return r.closeAll(ctx)
 }
 
-// newSnapshotStrategy creates the SnapshotStrategy requested by r.cfg.SnapshotMode.
-// Returns an error if the strategy is unavailable; the caller should fall back
-// to NewFullMemcpyStrategy().
-func (r *ReactorPythonRunner) newSnapshotStrategy(mem api.Memory) (SnapshotStrategy, error) {
-	switch r.cfg.SnapshotMode {
-	case "soft-dirty":
-		return NewSoftDirtyStrategy(mem)
-	case "mprotect":
-		return NewMprotectStrategy(mem)
-	case "uffd":
-		return NewUffdStrategy(mem)
-	default:
-		// "memcpy" or "" — always-available baseline.
-		return NewFullMemcpyStrategy(), nil
-	}
+// newSnapshotStrategy delegates to the shared selectSnapshotStrategy factory.
+// The factory handles fallback to FullMemcpyStrategy internally.
+func (r *ReactorPythonRunner) newSnapshotStrategy(mem api.Memory) SnapshotStrategy {
+	return selectSnapshotStrategy(r.cfg.SnapshotMode, mem, r.log)
 }
 
 // ── Dispatcher ───────────────────────────────────────────────────────────────
@@ -928,6 +917,12 @@ func (d *ReactorPythonDispatcher) Start(ctx context.Context) error {
 	}
 	if poolSize > 4 {
 		poolSize = 4 // each runner uses ~100 MB; cap conservatively
+	}
+
+	// Guard: snapshot modes that use process-wide state are only safe with a
+	// single instance.
+	if err := d.cfg.validateSnapshotMode(poolSize); err != nil {
+		return fmt.Errorf("reactor-python: %w", err)
 	}
 
 	d.log.Info("starting reactor-python dispatcher",
@@ -1049,15 +1044,5 @@ func (d *ReactorPythonDispatcher) spawnReplacement() {
 // Shutdown drains the pool and shuts down each runner.
 func (d *ReactorPythonDispatcher) Shutdown(ctx context.Context) error {
 	d.log.Debug("shutting down reactor-python dispatcher")
-	if d.pool == nil {
-		return nil
-	}
-	var firstErr error
-	for i := 0; i < cap(d.pool); i++ {
-		runner := <-d.pool
-		if err := runner.Shutdown(ctx); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	return firstErr
+	return drainPool(ctx, d.pool, d.log)
 }

@@ -181,18 +181,5 @@ func (d *PythonDispatcher) Send(ctx context.Context, method string, params map[s
 // Shutdown drains the pool and shuts down each runner.
 func (d *PythonDispatcher) Shutdown(ctx context.Context) error {
 	d.log.Debug("shutting down python-wasm dispatcher")
-
-	if d.pool == nil {
-		return nil
-	}
-
-	var firstErr error
-	for i := 0; i < cap(d.pool); i++ {
-		runner := <-d.pool
-		if err := runner.Shutdown(ctx); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-
-	return firstErr
+	return drainPool(ctx, d.pool, d.log)
 }

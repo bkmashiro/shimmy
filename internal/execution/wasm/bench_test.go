@@ -144,7 +144,7 @@ func BenchmarkSnapshotRestore_FullMemcpy(b *testing.B) {
 		WithSysWalltime().
 		WithSysNanotime()
 
-	sv := newWasmSupervisor(rt, compiled, modCfg, 5*time.Second, false, "", zap.NewNop())
+	sv := newWasmSupervisor(rt, compiled, modCfg, 5*time.Second, "", zap.NewNop())
 	require.NoError(b, sv.Start(ctx))
 	b.Cleanup(func() { _ = sv.Shutdown(ctx) })
 

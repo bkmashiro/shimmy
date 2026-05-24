@@ -46,14 +46,18 @@ type requestEnvelope struct {
 // wasmAdapter performs a single evaluate call against a live wazero api.Module.
 // It is stateless and safe to call from one goroutine at a time.
 type wasmAdapter struct {
-	mod api.Module
-	log *zap.Logger
+	mod     api.Module
+	log     *zap.Logger
+	allocFn api.Function // cached exported "alloc" function (M-4 fix)
+	evalFn  api.Function // cached exported "evaluate" function (M-4 fix)
 }
 
 func newWasmAdapter(mod api.Module, log *zap.Logger) *wasmAdapter {
 	return &wasmAdapter{
-		mod: mod,
-		log: log.Named("adapter_wasm"),
+		mod:     mod,
+		log:     log.Named("adapter_wasm"),
+		allocFn: mod.ExportedFunction("alloc"),
+		evalFn:  mod.ExportedFunction("evaluate"),
 	}
 }
 
@@ -82,13 +86,12 @@ func (a *wasmAdapter) send(
 
 	reqLen := uint64(len(reqBytes))
 
-	// 2. Allocate guest memory for the request.
-	allocFn := a.mod.ExportedFunction("alloc")
-	if allocFn == nil {
+	// 2. Allocate guest memory for the request (cached lookup — M-4 fix).
+	if a.allocFn == nil {
 		return nil, fmt.Errorf("wasm: guest module does not export 'alloc'")
 	}
 
-	allocRes, err := allocFn.Call(ctx, reqLen)
+	allocRes, err := a.allocFn.Call(ctx, reqLen)
 	if err != nil {
 		return nil, fmt.Errorf("wasm: alloc(%d): %w", reqLen, err)
 	}
@@ -111,9 +114,8 @@ func (a *wasmAdapter) send(
 		)
 	}
 
-	// 4. Call evaluate.
-	evalFn := a.mod.ExportedFunction("evaluate")
-	if evalFn == nil {
+	// 4. Call evaluate (cached lookup — M-4 fix).
+	if a.evalFn == nil {
 		return nil, fmt.Errorf("wasm: guest module does not export 'evaluate'")
 	}
 
@@ -123,7 +125,7 @@ func (a *wasmAdapter) send(
 		zap.Uint64("req_len", reqLen),
 	)
 
-	evalRes, err := evalFn.Call(ctx, reqPtr, reqLen)
+	evalRes, err := a.evalFn.Call(ctx, reqPtr, reqLen)
 	if err != nil {
 		return nil, fmt.Errorf("wasm: evaluate: %w", err)
 	}

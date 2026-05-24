@@ -55,10 +55,13 @@ var heavyDepRE = buildHeavyDepPattern()
 // an import of a package that requires the Pyodide (Emscripten) runtime.
 // It uses a simple static regexp scan — no AST parsing.
 //
-// False negatives: dynamic imports such as __import__("scipy") are not caught.
+// Known false negatives (not detected by the regexp):
+//   - Dynamic imports: __import__("scipy"), importlib.import_module("scipy")
+//   - Parenthesised from-imports: from (\n    scipy\n) import stats
+//
 // This is intentional: the overhead of false negatives (wrong backend) is low
 // because reactor-python will simply fail and the error message will guide the
-// operator to set the right IO interface manually.
+// operator to set the right IO interface manually via FUNCTION_INTERFACE.
 func ScriptNeedsHeavyRuntime(src string) bool {
 	return heavyDepRE.MatchString(src)
 }

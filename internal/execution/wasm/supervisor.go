@@ -26,17 +26,12 @@ type wasmSupervisor struct {
 	adapter *wasmAdapter
 
 	// strategy implements the snapshot/restore mechanism. The default is
-	// FullMemcpyStrategy; on Linux with userfaultfd available and useUffd=true,
-	// UffdStrategy is used for dirty-page tracking.
+	// FullMemcpyStrategy; on Linux with the appropriate kernel features,
+	// UffdStrategy, MprotectStrategy, or SoftDirtyStrategy may be used.
 	strategy SnapshotStrategy
 
-	// useUffd controls whether to attempt UffdStrategy on Start.
-	// When true and uffd is unavailable, falls back to FullMemcpyStrategy.
-	// Deprecated: prefer snapshotMode.
-	useUffd bool
-
 	// snapshotMode selects the snapshot strategy. See Config.SnapshotMode for
-	// valid values. When non-empty it takes precedence over useUffd.
+	// valid values. Resolved from Config.UseUffd by Config.applyDefaults().
 	snapshotMode string
 
 	// healthy is true when the supervisor is in a known-good state and can be
@@ -53,7 +48,6 @@ func newWasmSupervisor(
 	compiled wazero.CompiledModule,
 	modCfg wazero.ModuleConfig,
 	timeout time.Duration,
-	useUffd bool,
 	snapshotMode string,
 	log *zap.Logger,
 ) *wasmSupervisor {
@@ -61,7 +55,6 @@ func newWasmSupervisor(
 		runtime:      rt,
 		compiled:     compiled,
 		modCfg:       modCfg,
-		useUffd:      useUffd,
 		snapshotMode: snapshotMode,
 		timeout:      timeout,
 		log:          log.Named("supervisor_wasm"),
@@ -143,6 +136,14 @@ func (s *wasmSupervisor) Send(
 	}
 
 	return result, err
+}
+
+// IsHealthy reports whether the supervisor is in a known-good state.
+// Safe to call without holding s.mu (acquires the lock internally). (I-3 fix)
+func (s *wasmSupervisor) IsHealthy() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.healthy
 }
 
 // Shutdown closes the module instance and releases resources.

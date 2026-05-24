@@ -366,6 +366,11 @@ func (r *ResidentPythonRunner) SendRequest(ctx context.Context, script, method, 
 			return nil, fmt.Errorf("resident python: write request: %w", werr)
 		}
 	case <-writeCtx.Done():
+		// Close the pipe to unblock the write goroutine that may be stuck
+		// on a full pipe buffer, preventing a goroutine leak. The runner is
+		// no longer usable after this. (C-5 fix)
+		_ = r.stdinWriter.Close()
+		r.healthy.Store(false)
 		return nil, fmt.Errorf("resident python: context cancelled during write: %w", ctx.Err())
 	case <-r.exitCh:
 		return nil, r.wrapRunErr("WASM exited during request write")
@@ -483,12 +488,15 @@ func (r *ResidentPythonRunner) Shutdown(ctx context.Context) error {
 	}
 
 	// Wait for WASM goroutine to exit (it will close rt when done).
+	// Use NewTimer instead of time.After to avoid timer leak. (I-6 fix)
+	timer := time.NewTimer(10 * time.Second)
+	defer timer.Stop()
 	select {
 	case <-r.exitCh:
 	case <-ctx.Done():
-		r.log.Warn("timeout waiting for WASM goroutine to finish")
-	case <-time.After(10 * time.Second):
-		r.log.Warn("timeout waiting for WASM goroutine to finish")
+		r.log.Warn("Shutdown: parent context expired")
+	case <-timer.C:
+		r.log.Warn("Shutdown: 10s timeout waiting for WASM goroutine")
 	}
 
 	if r.stdoutReader != nil {

@@ -35,30 +35,28 @@ type Params struct {
 }
 
 func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
-	switch params.Config.Supervisor.IO.Interface {
-	case supervisor.WasmIO:
-		cfg := wasm.Config{
+	// wasmBaseConfig builds the Config fields shared by all WASM-backed
+	// dispatchers (Wasm, PythonWasm, ReactorPython).
+	wasmBaseConfig := func() wasm.Config {
+		return wasm.Config{
 			ModulePath:   params.Config.Supervisor.StartParams.Cmd,
 			MaxInstances: params.Config.MaxWorkers,
 			Timeout:      params.Config.Supervisor.SendParams.Timeout,
 		}
+	}
 
+	switch params.Config.Supervisor.IO.Interface {
+	case supervisor.WasmIO:
+		cfg := wasmBaseConfig()
 		d := wasm.NewDispatcher(cfg, params.Log)
-
 		if err := d.Start(params.Context); err != nil {
 			return nil, err
 		}
-
 		return d, nil
 
 	case supervisor.PythonWasmIO:
-		cfg := wasm.Config{
-			ModulePath:       params.Config.Supervisor.StartParams.Cmd,
-			MaxInstances:     params.Config.MaxWorkers,
-			Timeout:          params.Config.Supervisor.SendParams.Timeout,
-			PythonScriptPath: os.Getenv("FUNCTION_WASM_PYTHON_SCRIPT"),
-		}
-
+		cfg := wasmBaseConfig()
+		cfg.PythonScriptPath = os.Getenv("FUNCTION_WASM_PYTHON_SCRIPT")
 		d := wasm.NewPythonDispatcher(cfg, params.Log)
 		if err := d.Start(params.Context); err != nil {
 			return nil, err
@@ -66,15 +64,8 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 		return d, nil
 
 	case supervisor.ReactorPythonIO:
-		scriptPath := os.Getenv("FUNCTION_WASM_PYTHON_SCRIPT")
-
-		cfg := wasm.Config{
-			ModulePath:       params.Config.Supervisor.StartParams.Cmd,
-			MaxInstances:     params.Config.MaxWorkers,
-			Timeout:          params.Config.Supervisor.SendParams.Timeout,
-			PythonScriptPath: scriptPath,
-		}
-
+		cfg := wasmBaseConfig()
+		cfg.PythonScriptPath = os.Getenv("FUNCTION_WASM_PYTHON_SCRIPT")
 		d := wasm.NewReactorPythonDispatcher(cfg, params.Log)
 		if err := d.Start(params.Context); err != nil {
 			return nil, err

@@ -1,6 +1,7 @@
 package wasm
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -75,6 +76,8 @@ type Config struct {
 }
 
 // applyDefaults fills in zero-value fields with sensible defaults.
+// It also resolves the deprecated UseUffd bool into SnapshotMode so that
+// downstream code only needs to check SnapshotMode.
 func (c *Config) applyDefaults() {
 	if c.Timeout == 0 {
 		c.Timeout = 30 * time.Second
@@ -82,6 +85,27 @@ func (c *Config) applyDefaults() {
 	if c.MaxMemoryPages == 0 {
 		c.MaxMemoryPages = 256 // 16 MB
 	}
+	// Resolve deprecated UseUffd → SnapshotMode so downstream code never
+	// needs to check both fields.
+	if c.SnapshotMode == "" && c.UseUffd {
+		c.SnapshotMode = "uffd"
+	}
+}
+
+// validateSnapshotMode checks that the configured snapshot mode is compatible
+// with the pool size. Modes that use process-wide state (soft-dirty, mprotect)
+// are only safe with a single instance.
+func (c *Config) validateSnapshotMode(poolSize int) error {
+	if poolSize <= 1 {
+		return nil
+	}
+	switch c.SnapshotMode {
+	case "soft-dirty":
+		return fmt.Errorf("snapshot mode %q is not safe with pool_size=%d > 1 (process-wide dirty bits cannot be attributed to individual instances); use \"memcpy\" or \"uffd\" instead", c.SnapshotMode, poolSize)
+	case "mprotect":
+		return fmt.Errorf("snapshot mode %q is not safe with pool_size=%d > 1 (global SIGSEGV handler cannot distinguish instances); use \"memcpy\" or \"uffd\" instead", c.SnapshotMode, poolSize)
+	}
+	return nil
 }
 
 // applyEnv reads sandbox fields from FUNCTION_WASM_* environment variables.

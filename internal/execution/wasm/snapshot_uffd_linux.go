@@ -4,6 +4,7 @@ package wasm
 
 import (
 	"fmt"
+	"runtime"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -113,7 +114,7 @@ func ioctlUffd(fd uintptr, req uint, arg uintptr) syscall.Errno {
 // UffdProbeStrategy holds a live uffd fd and a test mmap region registered
 // with WP mode to confirm the mechanism is operational.
 type UffdProbeStrategy struct {
-	uffdFd     int
+	uffdFd     int // initialised to -1; see NewUffdProbeStrategy
 	testRegion uintptr
 	testSize   uintptr
 
@@ -253,7 +254,9 @@ func (u *UffdProbeStrategy) Close() error {
 		u.testRegion = 0
 	}
 
-	if u.uffdFd >= 0 {
+	// Check > 0 (not >= 0) to avoid accidentally closing fd 0 (stdin) if
+	// Close is called on a zero-value struct. (I-1 fix)
+	if u.uffdFd > 0 {
 		if err := syscall.Close(u.uffdFd); err != nil {
 			errs = append(errs, fmt.Errorf("uffd: close fd: %w", err))
 		}
@@ -295,6 +298,11 @@ type uffdMsg struct {
 	_pad    [8]uint8 // arg.pagefault.feat.ptid(4) + padding(4)
 }
 
+// Compile-time assertion: uffdMsg must be exactly 32 bytes to match the kernel
+// struct uffd_msg layout. A non-zero value means the struct is the wrong size.
+// (M-1 fix)
+var _ [0]byte = [unsafe.Sizeof(uffdMsg{}) - 32]byte{}
+
 const (
 	uffdEventPagefault = 0x12 // UFFD_EVENT_PAGEFAULT
 	uffdPagfaultFlagWP = 1 << 9 // UFFD_PAGEFAULT_FLAG_WP
@@ -331,6 +339,11 @@ type UffdStrategy struct {
 	mu       sync.Mutex
 	dirty    []bool // dirty[i] = true if page i was written since last Take
 
+	// pinner keeps the WASM linear memory backing array pinned so the GC
+	// cannot move it while kernel ioctl registrations reference the address.
+	// (C-1 fix: unsafe.SliceData pointer must remain stable for uffd.)
+	pinner runtime.Pinner
+
 	closeOnce sync.Once
 	doneCh    chan struct{} // closed when faultLoop exits
 }
@@ -358,6 +371,13 @@ func NewUffdStrategy(mem api.Memory) (*UffdStrategy, error) {
 	}
 	basePtr := unsafe.Pointer(unsafe.SliceData(buf))
 
+	// Pin the backing array so the GC cannot move it while kernel ioctl
+	// registrations (UFFDIO_REGISTER, UFFDIO_WRITEPROTECT) reference the
+	// address. The pin is held for the lifetime of the strategy and released
+	// in Close. (C-1 fix)
+	var pinner runtime.Pinner
+	pinner.Pin(unsafe.SliceData(buf))
+
 	pageSize := syscall.Getpagesize()
 	pageCount := int((uint64(size) + uint64(pageSize) - 1) / uint64(pageSize))
 
@@ -370,6 +390,7 @@ func NewUffdStrategy(mem api.Memory) (*UffdStrategy, error) {
 		0, 0,
 	)
 	if errno != 0 {
+		pinner.Unpin()
 		return nil, fmt.Errorf("uffd: userfaultfd syscall: %w", errno)
 	}
 
@@ -379,6 +400,7 @@ func NewUffdStrategy(mem api.Memory) (*UffdStrategy, error) {
 	var pipeFds [2]int
 	if err := syscall.Pipe2(pipeFds[:], syscall.O_CLOEXEC|syscall.O_NONBLOCK); err != nil {
 		syscall.Close(int(fd)) //nolint:errcheck
+		pinner.Unpin()
 		return nil, fmt.Errorf("uffd: wakeup pipe: %w", err)
 	}
 
@@ -388,6 +410,7 @@ func NewUffdStrategy(mem api.Memory) (*UffdStrategy, error) {
 			syscall.Close(int(fd))       //nolint:errcheck
 			syscall.Close(pipeFds[0])    //nolint:errcheck
 			syscall.Close(pipeFds[1])    //nolint:errcheck
+			pinner.Unpin()
 		}
 	}()
 
@@ -436,6 +459,7 @@ func NewUffdStrategy(mem api.Memory) (*UffdStrategy, error) {
 		pageCount: pageCount,
 		snapshot:  make([]byte, size),
 		dirty:     make([]bool, pageCount),
+		pinner:    pinner,
 		doneCh:    make(chan struct{}),
 	}
 
@@ -493,6 +517,11 @@ func (s *UffdStrategy) faultLoop() {
 
 		// Read the uffd_msg (non-blocking because POLLIN fired).
 		n, err := syscall.Read(s.uffdFd, msgBuf[:msgSize])
+		if err == syscall.EAGAIN {
+			// Spurious wakeup or race between two faults in the same poll
+			// cycle — retry. (I-2 fix)
+			continue
+		}
 		if err != nil || n == 0 {
 			return // fd error or EOF — exit
 		}
@@ -588,7 +617,7 @@ func (s *UffdStrategy) Restore(_ api.Memory) error {
 	}
 
 	s.mu.Lock()
-	// Collect dirty page indices and clear the bitset atomically under the lock.
+	// Collect dirty page indices and clear the bitset under the lock.
 	var dirtyPages []int
 	for i, d := range s.dirty {
 		if d {
@@ -596,16 +625,17 @@ func (s *UffdStrategy) Restore(_ api.Memory) error {
 			s.dirty[i] = false
 		}
 	}
-	s.mu.Unlock()
 
 	if len(dirtyPages) == 0 {
+		s.mu.Unlock()
 		return nil
 	}
 
 	pageSize := s.pageSize
-	// Direct slice over the WASM linear memory — safe because dirty pages have
-	// WP disarmed (faultLoop called UFFDIO_WRITEPROTECT with mode=0 for each),
-	// so no WP fault fires for the pages we write.
+	// Copy snapshot data back while still holding mu. This prevents the race
+	// where faultLoop marks a page dirty and then disarms WP after we've
+	// already cleared the dirty list but before we've finished copying,
+	// which could cause a write to be permanently lost. (C-2 fix)
 	dst := unsafe.Slice((*byte)(s.basePtr), s.memSize)
 
 	for _, pg := range dirtyPages {
@@ -616,6 +646,7 @@ func (s *UffdStrategy) Restore(_ api.Memory) error {
 		}
 		copy(dst[off:end], s.snapshot[off:end])
 	}
+	s.mu.Unlock()
 
 	// Re-arm WP on the entire region with a single ioctl. Non-dirty pages
 	// are already WP-armed; re-arming is idempotent. Dirty pages were disarmed
@@ -681,6 +712,9 @@ func (s *UffdStrategy) Close() error {
 		s.wakeup.w = -1
 		syscall.Close(s.wakeup.r) //nolint:errcheck
 		s.wakeup.r = -1
+
+		// Release the GC pin on the WASM memory backing array. (C-1 fix)
+		s.pinner.Unpin()
 	})
 	return retErr
 }

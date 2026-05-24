@@ -10,6 +10,15 @@ import (
 // restored. The default implementation (FullMemcpyStrategy) copies the entire
 // memory region on every restore. Future strategies may track dirty pages to
 // reduce restore cost for large modules.
+//
+// Contract (I-4 fix — document ordering and concurrency expectations):
+//   - Take must be called at least once before Restore.
+//   - Take may be called multiple times; each call overwrites the previous
+//     snapshot.
+//   - Calling Restore without a prior Take is a no-op (returns nil) but
+//     logically meaningless.
+//   - Implementations are NOT safe for concurrent calls to Take / Restore.
+//     The caller (wasmSupervisor) must serialise access.
 type SnapshotStrategy interface {
 	// Take captures the current state of the WASM linear memory.
 	// It is called once after module initialisation.

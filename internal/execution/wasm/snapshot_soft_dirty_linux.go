@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"runtime"
 	"syscall"
 	"unsafe"
 
@@ -35,6 +36,10 @@ type SoftDirtyStrategy struct {
 	pageSize  int
 	pageCount int
 	snapshot  []byte
+	// pinner keeps the WASM linear memory backing array pinned so the GC
+	// cannot move it while pagemap offset calculations reference the address.
+	// (C-1 fix)
+	pinner runtime.Pinner
 }
 
 // NewSoftDirtyStrategy creates a SoftDirtyStrategy for the given WASM module
@@ -61,15 +66,22 @@ func NewSoftDirtyStrategy(mem api.Memory) (*SoftDirtyStrategy, error) {
 	}
 	basePtr := unsafe.Pointer(unsafe.SliceData(buf))
 
+	// Pin the backing array so the GC cannot move it while pagemap offset
+	// calculations reference the address. (C-1 fix)
+	var pinner runtime.Pinner
+	pinner.Pin(unsafe.SliceData(buf))
+
 	// Validate /proc/self/pagemap is readable.
 	pmf, err := os.Open("/proc/self/pagemap")
 	if err != nil {
+		pinner.Unpin()
 		return nil, fmt.Errorf("soft-dirty: open /proc/self/pagemap: %w", err)
 	}
 	pmf.Close()
 
 	// Validate /proc/self/clear_refs is writable.
 	if err := os.WriteFile("/proc/self/clear_refs", []byte("4"), 0); err != nil {
+		pinner.Unpin()
 		return nil, fmt.Errorf("soft-dirty: write /proc/self/clear_refs: %w", err)
 	}
 
@@ -82,6 +94,7 @@ func NewSoftDirtyStrategy(mem api.Memory) (*SoftDirtyStrategy, error) {
 		pageSize:  pageSize,
 		pageCount: pageCount,
 		snapshot:  make([]byte, size),
+		pinner:    pinner,
 	}, nil
 }
 
@@ -133,6 +146,7 @@ func (s *SoftDirtyStrategy) Restore(mem api.Memory) error {
 // Close implements SnapshotStrategy. SoftDirtyStrategy holds no OS resources.
 func (s *SoftDirtyStrategy) Close() error {
 	s.snapshot = nil
+	s.pinner.Unpin() // C-1 fix: release GC pin
 	return nil
 }
 

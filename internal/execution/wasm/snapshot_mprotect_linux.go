@@ -147,7 +147,10 @@ import "C"
 
 import (
 	"fmt"
+	"math/bits"
+	"runtime"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"unsafe"
 
@@ -156,6 +159,11 @@ import (
 
 // mprotectMu guards NewMprotectStrategy / Close so only one instance is active.
 var mprotectMu sync.Mutex
+
+// mprotectActiveCount tracks the number of live MprotectStrategy instances.
+// Only one may be active at a time because the C layer uses global state.
+// (C-3 fix)
+var mprotectActiveCount atomic.Int32
 
 // MprotectStrategy implements SnapshotStrategy via mprotect write-protection
 // and SIGSEGV-based dirty page tracking.
@@ -169,6 +177,9 @@ type MprotectStrategy struct {
 	pageSize  int
 	pageCount int
 	snapshot  []byte
+	// pinner keeps the WASM linear memory backing array pinned so the GC
+	// cannot move it while the C signal handler references the address. (C-1 fix)
+	pinner runtime.Pinner
 }
 
 // NewMprotectStrategy creates a MprotectStrategy for the given WASM module
@@ -188,8 +199,21 @@ func NewMprotectStrategy(mem api.Memory) (*MprotectStrategy, error) {
 	}
 	basePtr := unsafe.Pointer(unsafe.SliceData(buf))
 
+	// Pin the backing array so the GC cannot move it while the C signal
+	// handler references the address. (C-1 fix)
+	var pinner runtime.Pinner
+	pinner.Pin(unsafe.SliceData(buf))
+
 	pageSize := syscall.Getpagesize()
 	pageCount := int((uint64(size) + uint64(pageSize) - 1) / uint64(pageSize))
+
+	// Reject a second concurrent instance — the C layer uses global state
+	// (g_base, g_dirty_words) that would be overwritten. (C-3 fix)
+	if mprotectActiveCount.Add(1) > 1 {
+		mprotectActiveCount.Add(-1)
+		pinner.Unpin()
+		return nil, fmt.Errorf("mprotect: only one active instance is supported (global C state); close the existing instance first")
+	}
 
 	mprotectMu.Lock()
 	defer mprotectMu.Unlock()
@@ -201,6 +225,8 @@ func NewMprotectStrategy(mem api.Memory) (*MprotectStrategy, error) {
 		C.int(pageCount),
 	)
 	if ret != 0 {
+		mprotectActiveCount.Add(-1)
+		pinner.Unpin()
 		return nil, fmt.Errorf("mprotect: sigaction install failed (ret=%d)", int(ret))
 	}
 
@@ -210,6 +236,7 @@ func NewMprotectStrategy(mem api.Memory) (*MprotectStrategy, error) {
 		pageSize:  pageSize,
 		pageCount: pageCount,
 		snapshot:  make([]byte, size),
+		pinner:    pinner,
 	}, nil
 }
 
@@ -245,6 +272,18 @@ func (s *MprotectStrategy) Restore(mem api.Memory) error {
 	// Pause fault tracking while we restore.
 	C.mprotect_set_active(0)
 
+	// Ensure we always restore RW access and re-activate tracking even on
+	// error, otherwise subsequent SIGSEGV faults hit the Go runtime. (I-5 fix)
+	var restoreErr error
+	defer func() {
+		// Make region writable so future accesses don't crash if we failed
+		// mid-restore.
+		if restoreErr != nil {
+			C.mprotect_rw(C.uint64_t(uintptr(s.basePtr)), C.uint64_t(s.memSize))
+		}
+		C.mprotect_set_active(1)
+	}()
+
 	// Collect dirty pages from C bitmap.
 	nwords := int(C.dirty_nwords())
 	pageSize := s.pageSize
@@ -269,17 +308,18 @@ func (s *MprotectStrategy) Restore(mem api.Memory) error {
 			}
 			// Dirty pages are already PROT_READ|PROT_WRITE (lifted in handler).
 			if !mem.Write(off, s.snapshot[off:end]) {
-				return fmt.Errorf("mprotect: Restore: mem.Write failed at offset %d", off)
+				restoreErr = fmt.Errorf("mprotect: Restore: mem.Write failed at offset %d", off)
+				return restoreErr
 			}
 		}
 	}
 
 	// Re-protect entire region and reset bitmap.
 	if ret := C.mprotect_ro(C.uint64_t(uintptr(s.basePtr)), C.uint64_t(s.memSize)); ret != 0 {
-		return fmt.Errorf("mprotect: Restore: re-protect failed")
+		restoreErr = fmt.Errorf("mprotect: Restore: re-protect failed")
+		return restoreErr
 	}
 	C.clear_dirty_bitmap()
-	C.mprotect_set_active(1)
 	return nil
 }
 
@@ -289,18 +329,10 @@ func (s *MprotectStrategy) DirtyPageCount() int {
 	count := 0
 	for w := 0; w < nwords; w++ {
 		word := uint64(C.read_dirty_word(C.int(w)))
-		count += int(popcount64(word))
+		// M-3 fix: use hardware POPCNT instruction via math/bits.
+		count += bits.OnesCount64(word)
 	}
 	return count
-}
-
-func popcount64(x uint64) int {
-	n := 0
-	for x != 0 {
-		n += int(x & 1)
-		x >>= 1
-	}
-	return n
 }
 
 // forceDirtyNPages pre-sets dirty state for benchmarks.
@@ -329,5 +361,7 @@ func (s *MprotectStrategy) Close() error {
 	C.mprotect_set_active(0)
 	C.mprotect_remove()
 	C.mprotect_rw(C.uint64_t(uintptr(s.basePtr)), C.uint64_t(s.memSize))
+	s.pinner.Unpin() // C-1 fix: release GC pin
+	mprotectActiveCount.Add(-1) // C-3 fix: allow a new instance
 	return nil
 }

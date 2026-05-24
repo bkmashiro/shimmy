@@ -136,27 +136,21 @@ func (d *Dispatcher) Start(ctx context.Context) error {
 	}
 	d.modCfg = modCfg
 
-	// Guard: soft-dirty and mprotect strategies use process-wide state and are
-	// only safe with a single WASM instance. Fail fast rather than silently
-	// producing corrupt snapshots when multiple instances share the process.
-	if maxInstances > 1 {
-		switch d.cfg.SnapshotMode {
-		case "soft-dirty":
-			return fmt.Errorf("wasm: snapshot mode %q is not safe with MaxInstances=%d > 1 (process-wide dirty bits cannot be attributed to individual instances); use \"memcpy\" or \"uffd\" instead", d.cfg.SnapshotMode, maxInstances)
-		case "mprotect":
-			return fmt.Errorf("wasm: snapshot mode %q is not safe with MaxInstances=%d > 1 (global SIGSEGV handler cannot distinguish instances); use \"memcpy\" or \"uffd\" instead", d.cfg.SnapshotMode, maxInstances)
-		}
+	// Guard: snapshot modes that use process-wide state are only safe with a
+	// single WASM instance.
+	if err := d.cfg.validateSnapshotMode(maxInstances); err != nil {
+		return fmt.Errorf("wasm: %w", err)
 	}
 
 	// Build the pool.
 	d.pool = make(chan *wasmSupervisor, maxInstances)
 
 	for i := 0; i < maxInstances; i++ {
-		sv := newWasmSupervisor(rt, compiled, modCfg, d.cfg.Timeout, d.cfg.UseUffd, d.cfg.SnapshotMode, d.log)
+		sv := newWasmSupervisor(rt, compiled, modCfg, d.cfg.Timeout, d.cfg.SnapshotMode, d.log)
 
 		if err := sv.Start(ctx); err != nil {
 			// Clean up already-started supervisors.
-			d.drainPool(ctx)
+			drainPool(ctx, d.pool, d.log)
 			_ = rt.Close(ctx)
 			return fmt.Errorf("wasm: start instance %d: %w", i, err)
 		}
@@ -190,7 +184,7 @@ func (d *Dispatcher) Send(
 	// If the snapshot restore failed inside Send, sv.healthy is false and the
 	// supervisor's state is undefined — discard it and spawn a replacement so
 	// pool capacity is eventually restored.
-	if sv.healthy {
+	if sv.IsHealthy() {
 		d.pool <- sv
 	} else {
 		d.log.Warn("wasm supervisor unhealthy after request — dropping from pool, spawning replacement")
@@ -213,7 +207,7 @@ func (d *Dispatcher) spawnOne() {
 	defer cancel()
 
 	d.log.Info("wasm: initialising replacement supervisor")
-	sv := newWasmSupervisor(d.rt, d.compiled, d.modCfg, d.cfg.Timeout, d.cfg.UseUffd, d.cfg.SnapshotMode, d.log)
+	sv := newWasmSupervisor(d.rt, d.compiled, d.modCfg, d.cfg.Timeout, d.cfg.SnapshotMode, d.log)
 	if err := sv.Start(ctx); err != nil {
 		d.log.Error("wasm: replacement supervisor init failed", zap.Error(err))
 		return
@@ -226,7 +220,7 @@ func (d *Dispatcher) spawnOne() {
 func (d *Dispatcher) Shutdown(ctx context.Context) error {
 	d.log.Debug("shutting down wasm dispatcher")
 
-	d.drainPool(ctx)
+	drainPool(ctx, d.pool, d.log)
 
 	if d.rt != nil {
 		if err := d.rt.Close(ctx); err != nil {
@@ -236,20 +230,4 @@ func (d *Dispatcher) Shutdown(ctx context.Context) error {
 	}
 
 	return nil
-}
-
-// drainPool closes all supervisors in the pool channel.
-// It performs cap(d.pool) blocking receives to drain every slot, including
-// supervisors that are in-flight being returned by concurrent Send calls.
-func (d *Dispatcher) drainPool(ctx context.Context) {
-	if d.pool == nil {
-		return
-	}
-
-	for i := 0; i < cap(d.pool); i++ {
-		sv := <-d.pool
-		if err := sv.Shutdown(ctx); err != nil {
-			d.log.Error("error shutting down wasm instance", zap.Error(err))
-		}
-	}
 }

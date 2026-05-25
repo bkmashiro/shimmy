@@ -225,7 +225,7 @@ jobs:
     name: Build eval-js (javy/QuickJS → wasm32-wasi)
     runs-on: ubuntu-latest
     env:
-      JAVY_VERSION: "4.0.0"
+      JAVY_VERSION: "8.1.1"
     steps:
       - uses: actions/checkout@v4
 

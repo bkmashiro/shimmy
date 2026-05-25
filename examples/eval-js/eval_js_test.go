@@ -15,21 +15,20 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 )
 
+// wasmPath returns the path to runner.wasm relative to the test's working
+// directory. go test always sets CWD to the package directory, so this is
+// always the runner.wasm sitting next to the test source file. Using a
+// relative path avoids the pitfall of runtime.Caller returning a trimmed or
+// module-relative path that does not resolve on the host filesystem.
 func wasmPath(t *testing.T) string {
 	t.Helper()
-	_, filename, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	return filepath.Join(filepath.Dir(filename), "runner.wasm")
+	return "runner.wasm"
 }
 
 func wazeroPath(t *testing.T) (string, bool) {

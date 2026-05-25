@@ -330,7 +330,11 @@ func TestConcurrentIsolation(t *testing.T) {
 				"session_id": sid,
 				"iters":      200_000,
 			})
-			allocRes, _ := allocFn.Call(ctx, uint64(len(reqBytes)))
+			allocRes, allocErr := allocFn.Call(ctx, uint64(len(reqBytes)))
+			if allocErr != nil {
+				results[i] = instanceResult{sessionID: sid, err: allocErr}
+				return
+			}
 			ptr := uint32(allocRes[0])
 			mem.Write(ptr, reqBytes)
 

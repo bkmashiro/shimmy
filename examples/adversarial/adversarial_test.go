@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -305,15 +306,12 @@ func TestConcurrentIsolation(t *testing.T) {
 	results := make([]instanceResult, numInstances)
 
 	// Launch N module instances concurrently, each with a distinct session ID.
-	done := make(chan struct{})
+	var wg sync.WaitGroup
 	for i := 0; i < numInstances; i++ {
 		i := i
+		wg.Add(1)
 		go func() {
-			defer func() {
-				if i == numInstances-1 {
-					close(done)
-				}
-			}()
+			defer wg.Done()
 			sid := uint32(i + 1)
 
 			modCfg := wazero.NewModuleConfig().WithName("").WithStartFunctions("_initialize")
@@ -352,7 +350,7 @@ func TestConcurrentIsolation(t *testing.T) {
 			results[i] = instanceResult{sessionID: sid, res: ar}
 		}()
 	}
-	<-done
+	wg.Wait()
 
 	for i, r := range results {
 		if r.err != nil {

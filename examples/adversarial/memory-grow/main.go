@@ -47,11 +47,17 @@ func evaluate(reqPtr int32, reqLen int32) int32 {
 				blocked = true
 			}
 		}()
+		// Keep all chunks alive so the GC cannot reclaim them — otherwise the
+		// Go runtime inside WASM recycles pages between iterations and the
+		// memory.grow limit is never actually reached.
+		live := make([][]byte, 0, 16384)
 		for i := 0; i < 16384; i++ { // 16384 × 64KB = 1 GB
 			chunk := make([]byte, 65536)
 			chunk[0] = byte(i & 0xff)
+			live = append(live, chunk)
 			grewPages++
 		}
+		_ = live
 	}()
 
 	detail := "grew_pages before limit"

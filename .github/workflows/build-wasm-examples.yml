@@ -221,16 +221,50 @@ jobs:
           name: adversarial-concurrent-isolation.wasm
           path: examples/adversarial/concurrent-isolation/eval.wasm
 
-  smoke-test:
-    name: Smoke-test WASM examples
+  build-js:
+    name: Build eval-js (javy/QuickJS → wasm32-wasi)
     runs-on: ubuntu-latest
-    needs: [build-rust, build-c-cpp, build-adversarial]
+    env:
+      JAVY_VERSION: "4.0.0"
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
           go-version-file: ./go.mod
+
+      - name: Install javy
+        run: |
+          curl -fsSL https://github.com/bytecodealliance/javy/releases/download/v${{ env.JAVY_VERSION }}/javy-x86_64-linux-v${{ env.JAVY_VERSION }}.gz \
+            | gunzip > /usr/local/bin/javy
+          chmod +x /usr/local/bin/javy
+
+      - name: Install wazero CLI
+        run: go install github.com/tetratelabs/wazero/cmd/wazero@latest
+
+      - name: Build runner.wasm
+        working-directory: examples/eval-js
+        run: ./build-runner.sh
+
+      - name: Upload eval-js-runner.wasm
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-js-runner.wasm
+          path: examples/eval-js/runner.wasm
+
+  smoke-test:
+    name: Smoke-test WASM examples
+    runs-on: ubuntu-latest
+    needs: [build-rust, build-c-cpp, build-adversarial, build-js]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ./go.mod
+
+      - name: Install wazero CLI
+        run: go install github.com/tetratelabs/wazero/cmd/wazero@latest
 
       - name: Download eval-rust.wasm
         uses: actions/download-artifact@v4
@@ -321,6 +355,12 @@ jobs:
         with:
           name: adversarial-concurrent-isolation.wasm
           path: examples/adversarial/concurrent-isolation
+
+      - name: Download eval-js-runner.wasm
+        uses: actions/download-artifact@v4
+        with:
+          name: eval-js-runner.wasm
+          path: examples/eval-js
 
       - name: Run smoke tests
         run: go test ./examples/... -v -timeout 120s

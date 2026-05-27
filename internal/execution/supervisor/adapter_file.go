@@ -88,10 +88,20 @@ func (a *fileAdapter) Send(
 		return nil, fmt.Errorf("error creating temp dir: %w", err)
 	}
 
+	// allow sandboxed workers running as an unprivileged user to enter the dir
+	if err := os.Chmod(tmpPath, 0755); err != nil {
+		return nil, fmt.Errorf("error setting temp dir permissions: %w", err)
+	}
+
 	// create temp files for request and response data
 	reqFile, err := os.CreateTemp(tmpPath, "request-data-*")
 	if err != nil {
 		return nil, fmt.Errorf("error creating temp file: %w", err)
+	}
+
+	// allow sandboxed workers (running as nobody) to read the request file
+	if err := os.Chmod(reqFile.Name(), 0644); err != nil {
+		return nil, fmt.Errorf("error setting request file permissions: %w", err)
 	}
 	defer func() {
 		if err := os.Remove(reqFile.Name()); err != nil {
@@ -102,6 +112,11 @@ func (a *fileAdapter) Send(
 	resFile, err := os.CreateTemp(tmpPath, "response-data-*")
 	if err != nil {
 		return nil, fmt.Errorf("error creating temp file: %w", err)
+	}
+
+	// allow sandboxed workers (running as nobody) to write the response file
+	if err := os.Chmod(resFile.Name(), 0622); err != nil {
+		return nil, fmt.Errorf("error setting response file permissions: %w", err)
 	}
 
 	defer func() {

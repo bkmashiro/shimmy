@@ -57,4 +57,8 @@ type Config struct {
 	// SendParams are the parameters to pass to the worker when
 	// sending a message.
 	SendParams SendConfig `conf:"send"`
+
+	// Sandbox holds the nsjail sandbox configuration. When Sandbox.Enabled
+	// is false (the default), behaviour is identical to an unsandboxed worker.
+	Sandbox worker.SandboxConfig `conf:"sandbox"`
 }

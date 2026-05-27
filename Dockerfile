@@ -18,7 +18,64 @@ ARG COMMIT
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH VERSION=$VERSION COMMIT=$COMMIT \
     make build
 
-FROM scratch
+# Build nsjail from source. This stage is Linux/amd64 only; nsjail is a
+# Linux kernel feature and does not cross-compile for other OS targets.
+FROM ubuntu:24.04 AS nsjail-builder
 
-# add binary to empty scratch image
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    autoconf \
+    bison \
+    ca-certificates \
+    flex \
+    gcc \
+    g++ \
+    git \
+    libcap-dev \
+    libnl-route-3-dev \
+    libprotobuf-dev \
+    libtool \
+    make \
+    pkg-config \
+    protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --depth=1 https://github.com/google/nsjail.git /nsjail-src
+WORKDIR /nsjail-src
+RUN make -j$(nproc)
+
+# Test-only stage: golang base image (Debian bookworm) + nsjail built from source.
+# Go is pre-installed; all nsjail build deps are in Debian main — no universe needed.
+# Used by `make test-sandbox`; not referenced by the production image.
+FROM golang:1.24 AS test-sandbox
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    autoconf \
+    bison \
+    ca-certificates \
+    flex \
+    libcap-dev \
+    libnl-route-3-dev \
+    libprotobuf-dev \
+    libtool \
+    pkg-config \
+    protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+RUN git clone --depth=1 https://github.com/google/nsjail.git /nsjail-src && \
+    make -C /nsjail-src -j$(nproc) && \
+    cp /nsjail-src/nsjail /usr/sbin/nsjail
+
+# Runtime image. Cannot use scratch because nsjail requires shared libraries
+# (libcap, libprotobuf, libnl). Image size grows from ~8 MB to ~90-120 MB.
+# When --sandbox is not used, shimmy behaves identically to the scratch image.
+FROM ubuntu:24.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libprotobuf32t64 \
+    libnl-route-3-200 \
+    libcap2 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=nsjail-builder /nsjail-src/nsjail /usr/sbin/nsjail
 COPY --from=builder /app/bin/shimmy /shimmy
+
+ENTRYPOINT ["/shimmy"]

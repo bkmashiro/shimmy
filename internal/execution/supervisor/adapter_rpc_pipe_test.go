@@ -107,6 +107,27 @@ func TestHeaderPrefixPipe_MultipleMessages(t *testing.T) {
 	assert.Equal(t, msg2, readBuf[:n])
 }
 
+func TestHeaderPrefixPipe_RejectsOversizedContentLength(t *testing.T) {
+	buf := newRwc()
+	pipe := &headerPrefixPipe{stdio: buf}
+
+	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", maxContentLength+1)
+	buf.(*rwc).Buffer.Write([]byte(header))
+
+	_, err := pipe.Read(make([]byte, 512))
+	assert.ErrorContains(t, err, "Content-Length out of range")
+}
+
+func TestHeaderPrefixPipe_RejectsNegativeContentLength(t *testing.T) {
+	buf := newRwc()
+	pipe := &headerPrefixPipe{stdio: buf}
+
+	buf.(*rwc).Buffer.Write([]byte("Content-Length: -1\r\n\r\n"))
+
+	_, err := pipe.Read(make([]byte, 512))
+	assert.ErrorContains(t, err, "Content-Length out of range")
+}
+
 func TestHeaderPrefixPipe_SkipsStrayOutputBeforeContentLength(t *testing.T) {
 	buf := newRwc()
 	pipe := &headerPrefixPipe{stdio: buf}

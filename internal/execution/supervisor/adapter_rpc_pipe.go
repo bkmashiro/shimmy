@@ -9,6 +9,8 @@ import (
 	"sync"
 )
 
+const maxContentLength = 64 * 1024 * 1024 // 64 MB
+
 // headerPrefixPipe wraps another io.ReadWriteCloser and adds LSP-style headers
 type headerPrefixPipe struct {
 	stdio  io.ReadWriteCloser
@@ -66,6 +68,9 @@ func (h *headerPrefixPipe) Read(p []byte) (int, error) {
 		v, err := strconv.Atoi(strings.TrimSpace(parts[1]))
 		if err != nil {
 			return 0, fmt.Errorf("invalid Content-Length value: %s", parts[1])
+		}
+		if v < 0 || v > maxContentLength {
+			return 0, fmt.Errorf("Content-Length out of range: %d", v)
 		}
 		contentLength = v
 		break

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -11,6 +12,8 @@ import (
 	"github.com/lambda-feedback/shimmy/config"
 	"github.com/lambda-feedback/shimmy/runtime"
 )
+
+const muEdVersionHeader = "X-Api-Version"
 
 type MuEdHandlerParams struct {
 	fx.In
@@ -43,6 +46,32 @@ func writeJSONError(w http.ResponseWriter, msg string, status int) {
 	json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": msg}}) //nolint:errcheck
 }
 
+// checkMuEdVersion validates the X-Api-Version request header.
+// Returns (resolvedVersion, true) on success, or writes a 406 and returns ("", false).
+func (h *MuEdHandler) checkMuEdVersion(w http.ResponseWriter, r *http.Request) (string, bool) {
+	requested := r.Header.Get(muEdVersionHeader)
+	if requested != "" && !runtime.MuEdIsVersionSupported(requested) {
+		body, _ := json.Marshal(map[string]any{
+			"title": "API version not supported",
+			"message": fmt.Sprintf(
+				"The requested API version '%s' is not supported. Supported versions are: %v.",
+				requested, runtime.SupportedMuEdVersions,
+			),
+			"code": "VERSION_NOT_SUPPORTED",
+			"details": map[string]any{
+				"requestedVersion":  requested,
+				"supportedVersions": runtime.SupportedMuEdVersions,
+			},
+		})
+		w.Header().Set(muEdVersionHeader, runtime.MuEdResolveVersion(requested))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotAcceptable)
+		w.Write(body) //nolint:errcheck
+		return "", false
+	}
+	return runtime.MuEdResolveVersion(requested), true
+}
+
 func (h *MuEdHandler) checkAuth(w http.ResponseWriter, r *http.Request) bool {
 	if h.config.Auth.Key != "" && r.Header.Get("api-key") != h.config.Auth.Key {
 		h.log.Debug("unauthorized request", zap.String("path", r.URL.Path))
@@ -55,6 +84,11 @@ func (h *MuEdHandler) checkAuth(w http.ResponseWriter, r *http.Request) bool {
 // ServeEvaluate handles POST /evaluate.
 func (h *MuEdHandler) ServeEvaluate(w http.ResponseWriter, r *http.Request) {
 	if !h.checkAuth(w, r) {
+		return
+	}
+
+	version, ok := h.checkMuEdVersion(w, r)
+	if !ok {
 		return
 	}
 
@@ -142,6 +176,7 @@ func (h *MuEdHandler) ServeEvaluate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(muEdVersionHeader, version)
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(feedback) //nolint:errcheck
 }
@@ -149,6 +184,11 @@ func (h *MuEdHandler) ServeEvaluate(w http.ResponseWriter, r *http.Request) {
 // ServeHealth handles GET /evaluate/health.
 func (h *MuEdHandler) ServeHealth(w http.ResponseWriter, r *http.Request) {
 	if !h.checkAuth(w, r) {
+		return
+	}
+
+	version, ok := h.checkMuEdVersion(w, r)
+	if !ok {
 		return
 	}
 
@@ -166,18 +206,16 @@ func (h *MuEdHandler) ServeHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, ok := resp["result"].(map[string]any)
+	legacyResult, ok := resp["result"].(map[string]any)
 	if !ok {
 		http.Error(w, "invalid health response", http.StatusInternalServerError)
 		return
 	}
 
-	status := "DEGRADED"
-	if testsPassed, _ := result["tests_passed"].(bool); testsPassed {
-		status = "OK"
-	}
+	result := runtime.MuEdToHealthResponse(legacyResult)
 
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(muEdVersionHeader, version)
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]any{"status": status}) //nolint:errcheck
+	json.NewEncoder(w).Encode(result) //nolint:errcheck
 }

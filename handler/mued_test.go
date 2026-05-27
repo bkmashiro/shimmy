@@ -99,6 +99,7 @@ func TestMuEdServeEvaluate_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, res.StatusCode)
 	assert.Equal(t, "application/json", res.Header.Get("Content-Type"))
+	assert.Equal(t, "0.1.0", res.Header.Get("X-Api-Version"))
 
 	var feedback []map[string]any
 	require.NoError(t, json.Unmarshal(body, &feedback))
@@ -277,10 +278,16 @@ func TestMuEdServeHealth_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, res.StatusCode)
 	assert.Equal(t, "application/json", res.Header.Get("Content-Type"))
+	assert.Equal(t, "0.1.0", res.Header.Get("X-Api-Version"))
 
 	var result map[string]any
 	require.NoError(t, json.Unmarshal(raw, &result))
 	assert.Equal(t, "OK", result["status"])
+	caps, ok := result["capabilities"].(map[string]any)
+	require.True(t, ok)
+	versions, ok := caps["supportedAPIVersions"].([]any)
+	require.True(t, ok)
+	assert.Contains(t, versions, "0.1.0")
 
 	mockRuntime.AssertExpectations(t)
 }
@@ -322,4 +329,110 @@ func TestMuEdServeHealth_RuntimeError(t *testing.T) {
 
 	assert.Equal(t, http.StatusInternalServerError, w.Result().StatusCode)
 	mockRuntime.AssertExpectations(t)
+}
+
+// --- Version header tests (ServeEvaluate) ---
+
+func TestMuEdServeEvaluate_AbsentVersionHeader(t *testing.T) {
+	mockHandler := new(MockHandler)
+	mockHandler.On("Handle", mock.Anything, mock.Anything).
+		Return(evalHandlerResponse(true, "ok"))
+
+	req := httptest.NewRequest(http.MethodPost, "/evaluate", bytes.NewReader(mathEvalBody(t)))
+	w := httptest.NewRecorder()
+
+	newMuEdHandler(mockHandler, nil, "").ServeEvaluate(w, req)
+
+	res := w.Result()
+	assert.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Equal(t, "0.1.0", res.Header.Get("X-Api-Version"))
+}
+
+func TestMuEdServeEvaluate_SupportedVersionHeader(t *testing.T) {
+	mockHandler := new(MockHandler)
+	mockHandler.On("Handle", mock.Anything, mock.Anything).
+		Return(evalHandlerResponse(true, "ok"))
+
+	req := httptest.NewRequest(http.MethodPost, "/evaluate", bytes.NewReader(mathEvalBody(t)))
+	req.Header.Set("X-Api-Version", "0.1.0")
+	w := httptest.NewRecorder()
+
+	newMuEdHandler(mockHandler, nil, "").ServeEvaluate(w, req)
+
+	res := w.Result()
+	assert.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Equal(t, "0.1.0", res.Header.Get("X-Api-Version"))
+}
+
+func TestMuEdServeEvaluate_UnsupportedVersionHeader(t *testing.T) {
+	mockHandler := new(MockHandler)
+
+	req := httptest.NewRequest(http.MethodPost, "/evaluate", bytes.NewReader(mathEvalBody(t)))
+	req.Header.Set("X-Api-Version", "99.0.0")
+	w := httptest.NewRecorder()
+
+	newMuEdHandler(mockHandler, nil, "").ServeEvaluate(w, req)
+
+	res := w.Result()
+	defer res.Body.Close()
+	raw, _ := io.ReadAll(res.Body)
+
+	assert.Equal(t, http.StatusNotAcceptable, res.StatusCode)
+	assert.Equal(t, "0.1.0", res.Header.Get("X-Api-Version"))
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(raw, &body))
+	assert.Equal(t, "VERSION_NOT_SUPPORTED", body["code"])
+	details, ok := body["details"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "99.0.0", details["requestedVersion"])
+
+	mockHandler.AssertNotCalled(t, "Handle", mock.Anything, mock.Anything)
+}
+
+// --- Version header tests (ServeHealth) ---
+
+func TestMuEdServeHealth_AbsentVersionHeader(t *testing.T) {
+	healthResult := map[string]any{"tests_passed": true, "successes": []any{}, "failures": []any{}, "errors": []any{}}
+	mockRuntime := new(MockRuntime)
+	mockRuntime.On("Handle", mock.Anything, runtime.EvaluationRequest{
+		Command: runtime.CommandHealth,
+		Data:    map[string]any{},
+	}).Return(runtime.EvaluationResponse{
+		"command": "healthcheck",
+		"result":  healthResult,
+	}, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/evaluate/health", nil)
+	w := httptest.NewRecorder()
+
+	newMuEdHandler(nil, mockRuntime, "").ServeHealth(w, req)
+
+	res := w.Result()
+	assert.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Equal(t, "0.1.0", res.Header.Get("X-Api-Version"))
+	mockRuntime.AssertExpectations(t)
+}
+
+func TestMuEdServeHealth_UnsupportedVersionHeader(t *testing.T) {
+	mockRuntime := new(MockRuntime)
+
+	req := httptest.NewRequest(http.MethodGet, "/evaluate/health", nil)
+	req.Header.Set("X-Api-Version", "99.0.0")
+	w := httptest.NewRecorder()
+
+	newMuEdHandler(nil, mockRuntime, "").ServeHealth(w, req)
+
+	res := w.Result()
+	defer res.Body.Close()
+	raw, _ := io.ReadAll(res.Body)
+
+	assert.Equal(t, http.StatusNotAcceptable, res.StatusCode)
+	assert.Equal(t, "0.1.0", res.Header.Get("X-Api-Version"))
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(raw, &body))
+	assert.Equal(t, "VERSION_NOT_SUPPORTED", body["code"])
+
+	mockRuntime.AssertNotCalled(t, "Handle", mock.Anything, mock.Anything)
 }

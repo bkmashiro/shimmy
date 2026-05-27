@@ -1,0 +1,2050 @@
+openapi: 3.1.0
+info:
+  title: µEd API - Educational Microservices
+  version: 0.1.0
+  contact:
+    name: µEd API Maintainers
+  description: |
+    The µEd API ("microservices for education") is a specification for interoperable educational services. <br><br> Currently defined endpoints:<br> - **Evaluate Task**: automatic feedback and grading for student submissions. <br> - **Chat**: conversational interactions around tasks, submissions, or general
+      learning questions.
+tags:
+  - name: evaluate
+    description: Endpoints for evaluating student submissions and generating feedback.
+  - name: chat
+    description: Conversational endpoints for educational dialogue.
+paths:
+  /evaluate:
+    post:
+      summary: Evaluate a submission and generate feedback
+      operationId: evaluateSubmission
+      description: |
+        Generates a list of feedback items for a given student submission. The request can optionally include the task context, user information, criteria to evaluate on, pre-submission feedback options, configuration, and a callback URL for asynchronous result delivery.
+      tags:
+        - evaluate
+      parameters:
+        - $ref: '#/components/parameters/Authorization'
+        - $ref: '#/components/parameters/X-Request-Id'
+        - $ref: '#/components/parameters/X-Api-Version'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EvaluateRequest'
+            examples:
+              simpleTextSubmission:
+                summary: Simple text submission without user or criteria
+                value:
+                  submission:
+                    submissionId: sub-123
+                    taskId: task-42
+                    type: TEXT
+                    format: plain
+                    content:
+                      text: Explain what polymorphism is in object-oriented programming.
+                    submittedAt: '2025-12-16T09:30:00Z'
+                    version: 1
+                  configuration: null
+              preSubmissionFeedbackExample:
+                summary: Pre-submission feedback (non-final)
+                value:
+                  submission:
+                    submissionId: sub-777
+                    taskId: task-42
+                    type: TEXT
+                    format: plain
+                    content:
+                      text: My short answer...
+                  preSubmissionFeedback:
+                    enabled: true
+                  configuration:
+                    llm:
+                      model: gpt-5.2
+                      temperature: 0.4
+              asyncCallbackExample:
+                summary: Asynchronous processing via callback URL
+                value:
+                  submission:
+                    submissionId: sub-async-001
+                    taskId: task-42
+                    type: TEXT
+                    format: plain
+                    content:
+                      text: Detailed essay answer that may require longer processing.
+                    submittedAt: '2025-12-16T09:45:00Z'
+                    version: 1
+                  callbackUrl: https://learning-platform.example.com/hooks/evaluate-result
+              withTaskAndExtras:
+                summary: With task context, user, criteria and configuration
+                value:
+                  task:
+                    taskId: task-12
+                    title: Explain polymorphism
+                    content:
+                      text: Define polymorphism and give at least one example in Java.
+                    learningObjectives:
+                      - Explain the concept of polymorphism.
+                      - Provide an example of subtype polymorphism in Java.
+                    referenceSolution:
+                      text: |
+                        Polymorphism allows the same method call to result in different behavior depending on the object's runtime type. For example, a variable of type Shape can reference a Circle or Rectangle, and calling draw() will invoke the appropriate implementation.
+                    context:
+                      constraints: Answer in 3-6 sentences.
+                      language: en
+                  submission:
+                    submissionId: sub-456
+                    taskId: task-12
+                    type: TEXT
+                    format: plain
+                    content:
+                      text: |
+                        Polymorphism means that an object can take many forms, for example subclasses implementing methods differently.
+                    submittedAt: '2025-12-16T10:00:00Z'
+                    version: 2
+                  user:
+                    userId: user-789
+                    type: LEARNER
+                    detailPreference: DETAILED
+                    tonePreference: FRIENDLY
+                    languagePreference: en
+                  criteria:
+                    - criterionId: crit-1
+                      name: Correctness
+                      context: The explanation of polymorphism is conceptually correct.
+                      maxPoints: 10
+                    - criterionId: crit-2
+                      name: Clarity
+                      context: The explanation is clear, well-structured, and easy to understand.
+                      maxPoints: 5
+                  preSubmissionFeedback:
+                    enabled: false
+                  configuration:
+                    llm:
+                      model: gpt-5.2
+                      temperature: 0.2
+                      maxTokens: 800
+                      credentials:
+                        type: JWT
+                        key: Some-Key
+                    enforceRubricStrictness: true
+              codeSubmissionExample:
+                summary: Code submission (Python)
+                value:
+                  submission:
+                    submissionId: sub-code-001
+                    taskId: task-python-101
+                    type: CODE
+                    format: python
+                    content:
+                      code: |
+                        def fibonacci(n):
+                            if n <= 1:
+                                return n
+                            return fibonacci(n-1) + fibonacci(n-2)
+
+                        # Test the function
+                        for i in range(10):
+                            print(fibonacci(i))
+                    submittedAt: '2025-12-16T11:00:00Z'
+                    version: 1
+              codeMultiFileExample:
+                summary: Code submission with multiple files
+                value:
+                  submission:
+                    submissionId: sub-code-002
+                    taskId: task-java-201
+                    type: CODE
+                    format: java
+                    content:
+                      files:
+                        - path: src/Main.java
+                          content: |
+                            public class Main {
+                                public static void main(String[] args) {
+                                    Calculator calc = new Calculator();
+                                    System.out.println(calc.add(2, 3));
+                                }
+                            }
+                        - path: src/Calculator.java
+                          content: |
+                            public class Calculator {
+                                public int add(int a, int b) {
+                                    return a + b;
+                                }
+                            }
+                      entryPoint: src/Main.java
+                    submittedAt: '2025-12-16T11:30:00Z'
+                    version: 1
+              codeSympyExample:
+                summary: Math submission (SymPy/Python)
+                value:
+                  submission:
+                    submissionId: sub-math-002
+                    taskId: task-algebra-101
+                    type: CODE
+                    format: sympy
+                    content:
+                      expression: solve(x**2 - 4, x)
+                      imports:
+                        - from sympy import symbols, solve
+                        - x = symbols('x')
+                    submittedAt: '2025-12-16T12:30:00Z'
+                    version: 1
+              mathInlineLatexExample:
+                summary: Inline math submission (Inline LaTeX)
+                value:
+                  submission:
+                    submissionId: sub-math-001
+                    taskId: task-calculus-101
+                    type: MATH
+                    format: latex
+                    content:
+                      expression: \int_{0}^{\infty} e^{-x^2} dx = \frac{\sqrt{\pi}}{2}
+                    submittedAt: '2025-12-16T12:00:00Z'
+                    version: 1
+              mathMathMLExample:
+                summary: Math submission (MathML)
+                value:
+                  submission:
+                    submissionId: sub-math-003
+                    taskId: task-geometry-101
+                    type: MATH
+                    format: mathml
+                    content:
+                      expression: |
+                        <math xmlns="http://www.w3.org/1998/Math/MathML">
+                          <mrow>
+                            <mi>a</mi>
+                            <mo>=</mo>
+                            <msqrt>
+                              <mrow>
+                                <msup><mi>b</mi><mn>2</mn></msup>
+                                <mo>+</mo>
+                                <msup><mi>c</mi><mn>2</mn></msup>
+                              </mrow>
+                            </msqrt>
+                          </mrow>
+                        </math>
+                    submittedAt: '2025-12-16T13:00:00Z'
+                    version: 1
+              modelUmlExample:
+                summary: Model submission (UML class diagram - PlantUML)
+                value:
+                  submission:
+                    submissionId: sub-model-001
+                    taskId: task-oop-design-101
+                    type: MODEL
+                    format: uml
+                    content:
+                      model: |
+                        @startuml
+                        abstract class Animal {
+                          +name: String
+                          +speak(): String
+                        }
+
+                        class Dog extends Animal {
+                          +speak(): String
+                        }
+
+                        class Cat extends Animal {
+                          +speak(): String
+                        }
+                        @enduml
+                      notation: plantuml
+                      diagramType: class
+                    submittedAt: '2025-12-16T14:00:00Z'
+                    version: 1
+              modelErExample:
+                summary: Model submission (ER diagram - JSON structure)
+                value:
+                  submission:
+                    submissionId: sub-model-002
+                    taskId: task-database-101
+                    type: MODEL
+                    format: er
+                    content:
+                      model:
+                        entities:
+                          - name: Student
+                            attributes:
+                              - name: student_id
+                                type: INTEGER
+                                primaryKey: true
+                              - name: name
+                                type: VARCHAR(100)
+                              - name: email
+                                type: VARCHAR(255)
+                          - name: Course
+                            attributes:
+                              - name: course_id
+                                type: INTEGER
+                                primaryKey: true
+                              - name: title
+                                type: VARCHAR(200)
+                        relationships:
+                          - name: enrolls_in
+                            from: Student
+                            to: Course
+                            cardinality: many-to-many
+                      notation: json
+                    submittedAt: '2025-12-16T14:30:00Z'
+                    version: 1
+              modelBpmnExample:
+                summary: Model submission (BPMN process)
+                value:
+                  submission:
+                    submissionId: sub-model-003
+                    taskId: task-process-101
+                    type: MODEL
+                    format: bpmn
+                    content:
+                      model: |
+                        <?xml version="1.0" encoding="UTF-8"?>
+                        <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL">
+                          <bpmn:process id="OrderProcess">
+                            <bpmn:startEvent id="Start"/>
+                            <bpmn:task id="ReceiveOrder" name="Receive Order"/>
+                            <bpmn:task id="ProcessPayment" name="Process Payment"/>
+                            <bpmn:task id="ShipOrder" name="Ship Order"/>
+                            <bpmn:endEvent id="End"/>
+                          </bpmn:process>
+                        </bpmn:definitions>
+                      notation: bpmn-xml
+                    submittedAt: '2025-12-16T15:00:00Z'
+                    version: 1
+              textMarkdownExample:
+                summary: Text submission (Markdown with formatting)
+                value:
+                  submission:
+                    submissionId: sub-text-002
+                    taskId: task-essay-101
+                    type: TEXT
+                    format: markdown
+                    content:
+                      markdown: |
+                        # Introduction to Polymorphism
+
+                        Polymorphism is a fundamental concept in **object-oriented programming** that allows objects to be treated as instances of their parent class.
+
+                        ## Key Points
+
+                        1. **Subtype polymorphism**: Different classes can be used interchangeably
+                        2. **Method overriding**: Subclasses provide specific implementations
+                    submittedAt: '2025-12-16T15:30:00Z'
+                    version: 1
+      responses:
+        '200':
+          description: Successfully generated feedback.
+          headers:
+            X-Request-Id:
+              description: Request id for tracing this request across services.
+              schema:
+                type: string
+            X-Api-Version:
+              description: The API version that was used to serve this response.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Feedback'
+              examples:
+                exampleResponse:
+                  summary: Example feedback response
+                  value:
+                    - feedbackId: fb-1
+                      title: Clarify your definition
+                      message: Your explanation of polymorphism is generally correct, but it would help to distinguish between subtype polymorphism and parametric polymorphism.
+                      suggestedAction: Add one or two concrete examples of polymorphism in Java, e.g., method overriding.
+                      awardedPoints: 2.5
+                      criterion:
+                        criterionId: crit-1
+                        name: Correctness
+                        context: The solution produces correct results for the specified problem.
+                        maxPoints: 10
+                      target:
+                        artefactType: TEXT
+                        format: plain
+                        locator:
+                          type: span
+                          startIndex: 0
+                          endIndex: 120
+                    - feedbackId: fb-2
+                      title: Overall structure
+                      message: The overall structure of your answer is clear and easy to follow.
+        '202':
+          $ref: '#/components/responses/202-Accepted'
+        '400':
+          $ref: '#/components/responses/400-BadRequest'
+        '403':
+          $ref: '#/components/responses/403-Forbidden'
+        '406':
+          $ref: '#/components/responses/406-VersionNotSupported'
+        '500':
+          $ref: '#/components/responses/500-InternalError'
+        '501':
+          $ref: '#/components/responses/501-NotImplemented'
+  /evaluate/health:
+    get:
+      summary: Health and capabilities of the evaluate service
+      operationId: getEvaluateHealth
+      description: |
+        Returns health information and capabilities of the evaluate service. Clients can use this endpoint to discover whether the service supports optional features such as pre-submission feedback, formative feedback, and summative feedback.
+      tags:
+        - evaluate
+      parameters:
+        - $ref: '#/components/parameters/X-Request-Id'
+        - $ref: '#/components/parameters/X-Api-Version'
+      responses:
+        '200':
+          description: Evaluate service is reachable and reporting capabilities.
+          headers:
+            X-Request-Id:
+              description: Request id for tracing this request across services.
+              schema:
+                type: string
+            X-Api-Version:
+              description: The API version that was used to serve this response.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvaluateHealthResponse'
+              examples:
+                exampleHealth:
+                  summary: Example healthy service with capabilities
+                  value:
+                    status: OK
+                    message: Service healthy
+                    version: 1.0.0
+                    capabilities:
+                      supportsEvaluate: true
+                      supportsPreSubmissionFeedback: false
+                      supportsFormativeFeedback: true
+                      supportsSummativeFeedback: true
+                      supportsDataPolicy: PARTIAL
+                      supportedArtefactProfiles:
+                        - type: TEXT
+                          supportedFormats:
+                            - plain
+                            - markdown
+                        - type: CODE
+                          supportedFormats:
+                            - python
+                            - java
+                            - javascript
+                        - type: MATH
+                          supportedFormats:
+                            - latex
+                            - mathml
+                      supportedLanguages:
+                        - en
+                        - de
+                      supportedVersions:
+                        - 0.1.0
+        '406':
+          $ref: '#/components/responses/406-VersionNotSupported'
+        '501':
+          description: The server does not implement the health endpoint for evaluate.
+          $ref: '#/components/responses/501-NotImplemented'
+        '503':
+          $ref: '#/components/responses/503-ServiceUnavailable'
+  /chat:
+    post:
+      summary: Chat about tasks, submissions, or learning topics
+      operationId: chat
+      description: |
+        Conversational endpoint for educational chat use cases. A conversation can be grounded in a specific course, task or submission and may use user information to adapt tone and detail. Typical use cases include: asking follow-up questions on feedback, requesting hints, or clarifying concepts.
+      tags:
+        - chat
+      parameters:
+        - $ref: '#/components/parameters/Authorization'
+        - $ref: '#/components/parameters/X-Request-Id'
+        - $ref: '#/components/parameters/X-Api-Version'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+            examples:
+              minimalChat:
+                summary: Minimal chat request
+                value:
+                  messages:
+                    - role: USER
+                      content: Can you explain polymorphism?
+                  configuration: null
+              chatWithLlmConfig:
+                summary: Chat request with optional LLM configuration
+                value:
+                  conversationId: conv-1001
+                  user:
+                    userId: user-456
+                    type: LEARNER
+                    detailPreference: MEDIUM
+                    tonePreference: FRIENDLY
+                    languagePreference: en
+                  messages:
+                    - role: USER
+                      content: Give me a hint for my answer about polymorphism.
+                  context:
+                    task:
+                      taskId: task-12
+                      title: Explain polymorphism
+                      content:
+                        text: Define polymorphism and give at least one example in Java.
+                  configuration:
+                    type: Java Assistant
+                    llm:
+                      model: gpt-5.2
+                      temperature: 0.7
+                      stream: false
+                      credentials:
+                        type: JWT
+                        key: Some-Key
+              chatWithContext:
+                summary: Chat request with complex educational context
+                value:
+                  messages:
+                    - role: USER
+                      content: What should I do for this part?
+                  user:
+                    userId: user-321
+                    type: LEARNER
+                    detailPreference: DETAILED
+                    tonePreference: NEUTRAL
+                    languagePreference: en
+                    taskProgress:
+                      currentQuestionId: question-321
+                      timeSpentOnQuestion: 30 minutes
+                      currentPart:
+                        partId: part-1
+                        timeSpentOnPart: 10 minutes
+                        submission:
+                          type: TEXT
+                          content:
+                            text: outputs= ["Woof!", "Meow!"]
+                          feedback:
+                            - feedbackId: fb-101
+                              message: Incomplete answer, explain why these outputs occur.
+                  context:
+                    module:
+                      moduleId: module-456
+                      title: Introduction to Object-Oriented Programming (OOP)
+                    set:
+                      setId: set-789
+                      title: Fundamentals
+                    question:
+                      questionId: question-321
+                      title: Understanding Polymorphism
+                      content: |
+                        Answer the questions for the following example of polymorphism in Python.
+                        ```python class Animal:
+                            def speak(self):
+                                pass
+
+                        class Dog(Animal):
+                            def speak(self):
+                                return "Woof!"
+
+                        class Cat(Animal):
+                            def speak(self):
+                                return "Meow!"
+
+                        animals = [Dog(), Cat()] for animal in animals:
+                            print(animal.speak())
+                        ```
+                      estimatedTime: 15-25 minutes
+                      parts:
+                        - partId: part-1
+                          content: |
+                            Looking at the code example, identify which method is being overridden and explain how this demonstrates polymorphism. What output would the code produce and why?
+                        - partId: part-2
+                          content: |
+                            Write a new class called `Bird` that inherits from `Animal` and overrides the `speak()` method to return "Tweet!". Then add an instance of `Bird` to the animals list.
+                          referenceSolution:
+                            code: |
+                              class Bird(Animal):
+                                  def speak(self):
+                                      return "Tweet!"
+
+                              animals = [Dog(), Cat(), Bird()]
+                              for animal in animals:
+                                  print(animal.speak())
+                  configuration:
+                    type: CS Assistant
+                    llm:
+                      model: gpt-5.2
+                      temperature: 0.5
+      responses:
+        '200':
+          description: Successful chat response.
+          headers:
+            X-Request-Id:
+              description: Request id for tracing this request across services.
+              schema:
+                type: string
+            X-Api-Version:
+              description: The API version that was used to serve this response.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+              examples:
+                minimalChatResponse:
+                  summary: Minimal chat response
+                  value:
+                    output:
+                      role: ASSISTANT
+                      content: |
+                        Polymorphism is a core concept in object-oriented programming that allows objects of different classes to be treated as objects of a common superclass. It enables a single interface to represent different underlying forms (data types). For example, in Java, you can have a superclass `Animal` with a method `speak()`, and subclasses like `Dog` and `Cat` that provide their own implementations of `speak()`. When you call `speak()` on an `Animal` reference, the appropriate subclass method is invoked based on the actual object type at runtime.
+                    metadata: null
+                chatWithLlmConfigResponse:
+                  summary: Chat response with LLM configuration
+                  value:
+                    output:
+                      role: ASSISTANT
+                      content: |
+                        Here's a hint for your answer about polymorphism: Focus on how polymorphism allows methods to do different things based on the object that it is acting upon, even when accessed through a common interface. You might want to mention method overriding and how it enables this behavior in object-oriented programming.
+                    metadata:
+                      responseTimeMs: 1800
+                      type: Java Assistant
+                      createdAt: '2025-12-10T11:15:00Z'
+                      llm:
+                        model: gpt-5.2
+                        temperature: 0.7
+                        outputTokens: 78
+                chatWithContextResponse:
+                  summary: Chat response with context
+                  value:
+                    output:
+                      role: ASSISTANT
+                      content: |
+                        In the provided code example, the `speak()` method is being overridden in the `Dog` and `Cat` subclasses of the `Animal` superclass. This demonstrates polymorphism because when we call `speak()` on each animal in the `animals` list, the method that gets executed depends on the actual object type (either `Dog` or `Cat`), not the reference type (`Animal`). The output of the code would be:
+                        ``` Woof! Meow! ```
+                        This happens because each subclass provides its own implementation of the `speak()` method, and at runtime, the correct method is called based on the object's type.
+                    metadata:
+                      responseTimeMs: 2000
+                      type: CS Assistant
+                      createdAt: '2025-12-10T11:15:00Z'
+                      llm:
+                        model: gpt-5.2
+                        temperature: 0.5
+                        outputTokens: 143
+        '400':
+          $ref: '#/components/responses/400-BadRequest-2'
+        '403':
+          $ref: '#/components/responses/403-Forbidden'
+        '406':
+          $ref: '#/components/responses/406-VersionNotSupported'
+        '500':
+          $ref: '#/components/responses/500-InternalError-2'
+        '501':
+          $ref: '#/components/responses/501-NotImplemented-2'
+  /chat/health:
+    get:
+      summary: Health and capabilities of the chat service
+      operationId: getChatHealth
+      description: |
+        Returns health information and capabilities of the chat service. Clients can use this endpoint to discover whether the service supports optional features such as user preferences or streaming responses.
+      tags:
+        - chat
+      parameters:
+        - $ref: '#/components/parameters/X-Request-Id'
+        - $ref: '#/components/parameters/X-Api-Version'
+      responses:
+        '200':
+          description: Chat service is reachable and reporting capabilities.
+          headers:
+            X-Request-Id:
+              description: Request id for tracing this request across services.
+              schema:
+                type: string
+            X-Api-Version:
+              description: The API version that was used to serve this response.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatHealthResponse'
+              examples:
+                exampleHealth:
+                  summary: Example healthy service with capabilities
+                  value:
+                    status: OK
+                    statusMessage: Service healthy
+                    version: 1.0.0
+                    capabilities:
+                      supportsChat: true
+                      supportsUserPreferences: true
+                      supportsStreaming: true
+                      supportsDataPolicy: NOT_SUPPORTED
+                      supportedLanguages:
+                        - en
+                        - de
+                      supportedModels:
+                        - gpt-4o
+                        - llama-3
+                      supportedVersions:
+                        - 0.1.0
+        '406':
+          $ref: '#/components/responses/406-VersionNotSupported'
+        '501':
+          description: The server does not implement the health endpoint for chat.
+          $ref: '#/components/responses/501-NotImplemented-2'
+        '503':
+          $ref: '#/components/responses/503-ServiceUnavailable-2'
+components:
+  parameters:
+    Authorization:
+      in: header
+      name: Authorization
+      schema:
+        type: string
+      required: false
+      description: Optional authorization header.
+    X-Request-Id:
+      in: header
+      name: X-Request-Id
+      description: Request id for tracing this request across services.
+      schema:
+        type: string
+    X-Api-Version:
+      in: header
+      name: X-Api-Version
+      description: |
+        The µEd API version the client is targeting (e.g. "0.1.0"). If omitted, the server will use the latest version it supports. If the requested version cannot be served, the server returns 406 Version Not Supported.
+      required: false
+      schema:
+        type: string
+        example: 0.1.0
+  schemas:
+    Task:
+      type: object
+      description: |
+        Task context including the content, learning objectives, optional reference solution, optional context information, and optional metadata.
+      required:
+        - title
+      properties:
+        taskId:
+          type: string
+          description: Optional unique identifier for the task.
+        title:
+          type: string
+          description: Short title or label for the task.
+        content:
+          type:
+            - object
+            - 'null'
+          description: Optional content shown to the learner (structure is task-specific).
+          additionalProperties: true
+        context:
+          type:
+            - object
+            - 'null'
+          description: Optional educational context (e.g., course material).
+          additionalProperties: true
+        learningObjectives:
+          type:
+            - array
+            - 'null'
+          description: Optional list of learning objectives addressed by this task.
+          items:
+            type: string
+        referenceSolution:
+          type:
+            - object
+            - 'null'
+          description: Optional reference or example solution (structure is task-specific).
+          additionalProperties: true
+        metadata:
+          type:
+            - object
+            - 'null'
+          description: Optional metadata such as difficulty, topic, tags, etc.
+          additionalProperties: true
+    ArtefactType:
+      type: string
+      description: |
+        High-level type of artefact. Use the 'format' field to specify the exact format (e.g., programming language for CODE, notation for MATH).
+      enum:
+        - TEXT
+        - CODE
+        - MODEL
+        - MATH
+        - OTHER
+    Submission:
+      type: object
+      description: |
+        A student's submission for a task. The structure of 'content' is intentionally generic and task-specific.
+      required:
+        - type
+        - content
+      properties:
+        submissionId:
+          type: string
+          description: Optional unique identifier of the submission.
+        taskId:
+          type:
+            - string
+            - 'null'
+          description: Optional identifier of the task this submission belongs to.
+        type:
+          $ref: '#/components/schemas/ArtefactType'
+        format:
+          type:
+            - string
+            - 'null'
+          description: |
+            Optional format specifier providing additional detail about the artefact. For TEXT: plain_text, markdown, html, rich_text, etc. For CODE: programming language (e.g., python, java, javascript, wolfram, matlab). For MATH: latex, mathml, sympy, wolfram, asciimath, etc. For MODEL: uml, er, bpmn, petri_net, state_machine, etc. Use lowercase values and snakecase. Services should document which formats they support.
+        content:
+          type: object
+          additionalProperties: true
+          description: |
+            Logical representation of the submission content. The expected structure depends on the artefact type: - TEXT: { text: string } or { markdown: string } - CODE: { code: string } or { files: [{ path: string, content: string }], entryPoint?: string } - MATH: { expression: string } - MODEL: { model: string | object, notation?: string }
+        submittedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: Optional timestamp when the submission was created.
+        version:
+          type:
+            - integer
+            - 'null'
+          format: int32
+          description: Optional version number (e.g., resubmissions).
+    UserType:
+      type: string
+      description: Type of user interacting with the API.
+      enum:
+        - LEARNER
+        - TEACHER
+        - EDU_ADMIN
+        - SYS_ADMIN
+        - OTHER
+    Detail:
+      type: string
+      description: Level of detail preferred in responses or feedback.
+      enum:
+        - BRIEF
+        - MEDIUM
+        - DETAILED
+    Tone:
+      type: string
+      description: Preferred tone for responses or feedback.
+      enum:
+        - FORMAL
+        - NEUTRAL
+        - FRIENDLY
+    User:
+      type: object
+      description: User information including type and optional preferences influencing response tone, detail, and language.
+      required:
+        - type
+      additionalProperties: true
+      properties:
+        userId:
+          type:
+            - string
+            - 'null'
+          description: Optional unique identifier for the user.
+        type:
+          $ref: '#/components/schemas/UserType'
+        preference:
+          type: object
+          properties:
+            detail:
+              description: Optional preferred level of detail in responses.
+              $ref: '#/components/schemas/Detail'
+            tone:
+              description: Optional preferred tone for responses.
+              $ref: '#/components/schemas/Tone'
+            language:
+              type:
+                - string
+                - 'null'
+              description: Optional preferred language code following ISO 639 language codes (e.g., 'en', 'de').
+          additionalProperties: true
+        taskProgress:
+          type:
+            - object
+            - 'null'
+          description: Optional information about the user's progress on this task/topic.
+          additionalProperties: true
+    NumericGrade:
+      title: Numeric Grade
+      type: object
+      required:
+        - min
+        - max
+        - value
+      properties:
+        min:
+          type: number
+          description: Minimum value for the numeric range
+        max:
+          type: number
+          description: Maximum value for the numeric range
+        value:
+          type: number
+          description: The actual rating value within the min-max range
+    LetterOnlyGrade:
+      title: Letter Only Grade
+      type: object
+      required:
+        - value
+      properties:
+        value:
+          type: string
+          enum:
+            - A
+            - B
+            - C
+            - D
+            - E
+            - F
+            - n/a
+    LetterPlusMinusGrade:
+      title: Letter +/- grades
+      type: object
+      required:
+        - value
+      properties:
+        value:
+          type: string
+          enum:
+            - A+
+            - A
+            - A-
+            - B+
+            - B
+            - B-
+            - C+
+            - C
+            - C-
+            - D+
+            - D
+            - D-
+            - E+
+            - E
+            - E-
+            - F
+    OtherGrade:
+      title: Other
+      type: object
+      required:
+        - value
+      properties:
+        value:
+          type: string
+          description: Free-form string rating
+    Criterion:
+      type: object
+      description: A criterion used to assess one dimension of a submission.
+      required:
+        - name
+      properties:
+        criterionId:
+          type: string
+          description: Optional unique identifier of the criterion.
+        name:
+          type: string
+          description: Human-readable name of the criterion.
+        context:
+          type:
+            - string
+            - object
+            - 'null'
+          description: Optional additional context about how to apply this criterion.
+          additionalProperties: true
+        gradeConfig:
+          oneOf:
+            - $ref: '#/components/schemas/NumericGrade'
+            - $ref: '#/components/schemas/LetterOnlyGrade'
+            - $ref: '#/components/schemas/LetterPlusMinusGrade'
+            - $ref: '#/components/schemas/OtherGrade'
+          description: Optional configuration for grades for this criterion.
+    PreSubmissionFeedback:
+      type: object
+      description: Optional configuration for pre-submission feedback runs.
+      required:
+        - enabled
+      additionalProperties: true
+      properties:
+        enabled:
+          type: boolean
+          description: Indicates whether pre-submission feedback is requested.
+    LLMConfiguration:
+      type: object
+      description: |
+        Optional configuration for an LLM provider. All fields are optional and provider-specific values may be included via additional properties.
+      additionalProperties: true
+      properties:
+        model:
+          type:
+            - string
+            - 'null'
+          description: Optional model identifier (e.g., 'gpt-4o', 'llama-3').
+        temperature:
+          type:
+            - number
+            - 'null'
+          description: Optional sampling temperature.
+        maxTokens:
+          type:
+            - integer
+            - 'null'
+          description: Optional maximum number of tokens to generate.
+        stream:
+          type:
+            - boolean
+            - 'null'
+          description: Optional flag indicating whether streaming responses are requested.
+        credentials:
+          type:
+            - object
+            - 'null'
+          description: Optional credentials object to be supplied with time-based key via a proxy.
+          additionalProperties: true
+    Region:
+      type: string
+      description: |
+        Geographic regions using ISO 3166-1 alpha-2 country codes (e.g., US, GB, DE) or regional groupings (e.g., EEA, EU, APAC).
+    AnonymizationLevel:
+      type: string
+      description: Level of required anonymization.
+      enum:
+        - NONE
+        - PSEUDONYMIZED
+        - ANONYMIZED
+        - AGGREGATED
+    DataPolicy:
+      type: object
+      description: |
+        Declares what downstream services are allowed to do with data associated with this request: which legal regimes apply, what uses are permitted, how long data may be retained, where it may be processed, and what constraints apply (especially for children / sensitive data).
+      additionalProperties: true
+      properties:
+        legal:
+          type:
+            - object
+            - 'null'
+          description: Legal framework and authority governing this data.
+          properties:
+            applicableLaws:
+              type: array
+              description: One or more applicable legal regimes.
+              items:
+                type: string
+                enum:
+                  - GDPR
+                  - UK_GDPR
+                  - EPRIVACY
+                  - CCPA_CPRA
+                  - COPPA
+                  - FERPA
+                  - PPRA
+                  - PIPEDA
+                  - LGPD
+                  - POPIA
+                  - APPI
+                  - PIPL
+                  - OTHER
+            legalBasis:
+              type:
+                - array
+                - 'null'
+              description: Optional but recommended legal basis for processing.
+              items:
+                type: string
+                enum:
+                  - CONSENT
+                  - CONTRACT
+                  - LEGAL_OBLIGATION
+                  - PUBLIC_TASK
+                  - LEGITIMATE_INTERESTS
+                  - VITAL_INTERESTS
+                  - OTHER
+        jurisdiction:
+          type:
+            - object
+            - 'null'
+          description: Geographic constraints for data subjects and processing.
+          properties:
+            dataSubjectRegions:
+              type:
+                - array
+                - 'null'
+              description: Where the data subjects are located.
+              items:
+                $ref: '#/components/schemas/Region'
+            allowedProcessingRegions:
+              type:
+                - array
+                - 'null'
+              description: Where processing/storage is allowed.
+              items:
+                $ref: '#/components/schemas/Region'
+            disallowedProcessingRegions:
+              type:
+                - array
+                - 'null'
+              description: Explicit exclusions for processing regions.
+              items:
+                $ref: '#/components/schemas/Region'
+        dataSubject:
+          type:
+            - object
+            - 'null'
+          description: Information about who this data is about.
+          properties:
+            population:
+              type:
+                - string
+                - 'null'
+              description: Type of population this data concerns.
+              enum:
+                - STUDENT
+                - STAFF
+                - GUARDIAN
+                - MIXED
+                - OTHER
+            isChildData:
+              type:
+                - boolean
+                - 'null'
+              description: Indicates whether this data concerns children. If true, then minAge required.
+            minAge:
+              type:
+                - integer
+                - 'null'
+              description: Minimum age of data subjects, if relevant/known.
+        dataCategory:
+          type:
+            - object
+            - 'null'
+          description: Classification of the type of data.
+          properties:
+            classification:
+              type:
+                - string
+                - 'null'
+              description: Primary classification of the data.
+              enum:
+                - ANONYMOUS
+                - PSEUDONYMOUS
+                - PERSONAL
+                - EDUCATION_RECORD
+                - SENSITIVE
+                - OTHER
+              additionalProperties: true
+        retentionPermission:
+          type:
+            - array
+            - 'null'
+          description: What retention and secondary uses are permitted.
+          items:
+            type: string
+            enum:
+              - NEVER
+              - SECURITY
+              - LOGGING
+              - PRODUCT-IMPROVEMENT-NO-SHARE
+              - PRODUCT-IMPROVEMENT-SHARE-LIMITED
+              - RESEARCH-CONFIDENTIAL
+              - PUBLIC
+              - OTHER
+        retention:
+          type:
+            - object
+            - 'null'
+          description: How long data may be retained.
+          properties:
+            retentionPeriod:
+              type:
+                - string
+                - 'null'
+              description: Concrete retention period, following ISO 8601 standard.
+            deleteOnRequest:
+              type:
+                - boolean
+                - 'null'
+              description: Whether data must be deleted on user request.
+            legalHoldAllowed:
+              type:
+                - boolean
+                - 'null'
+              description: Whether legal holds are permitted on this data.
+        sharing:
+          type:
+            - object
+            - 'null'
+          description: Constraints on who can receive this data.
+          properties:
+            thirdPartySharing:
+              type:
+                - string
+                - 'null'
+              description: Third-party sharing policy.
+              enum:
+                - PROHIBITED
+                - ALLOWED
+                - ALLOWED-LIMITED
+            subprocessorsAllowed:
+              type:
+                - boolean
+                - 'null'
+              description: Whether subprocessors are allowed.
+            allowedRecipients:
+              type:
+                - array
+                - 'null'
+              description: Categories of allowed recipients.
+              items:
+                type: string
+                enum:
+                  - CONTROLLER-ONLY
+                  - INTERNAL-SERVICES
+                  - NAMED-PARTNERS
+                  - PUBLIC
+        deidentification:
+          type:
+            - object
+            - 'null'
+          description: Required deidentification for specific uses.
+          properties:
+            requiredForServiceImprovement:
+              $ref: '#/components/schemas/AnonymizationLevel'
+            requiredForResearch:
+              $ref: '#/components/schemas/AnonymizationLevel'
+    ExecutionPolicy:
+      type: object
+      description: |
+        Declares execution constraints that the server or client consuming this API should apply when triggering calls to external providers (such as LLMs). Covers queue management and response timeouts.
+      additionalProperties: true
+      properties:
+        priority:
+          type:
+            - string
+            - 'null'
+          description: Request priority for queue management when capacity is constrained.
+          enum:
+            - low
+            - normal
+            - high
+            - null
+        timeout:
+          type:
+            - integer
+            - 'null'
+          description: Maximum time in milliseconds to wait for a complete response before failing.
+          minimum: 1
+    EvaluateRequest:
+      type: object
+      description: |
+        Input for task evaluate service. The submission is mandatory; task, user, criteria, pre-submission feedback options, and configuration, and callback URL are optional.
+      required:
+        - submission
+      properties:
+        task:
+          description: |
+            Optional task context that can include prompt content, learning objectives, a reference solution, and additional context metadata.
+          type:
+            - object
+            - 'null'
+          allOf:
+            - $ref: '#/components/schemas/Task'
+        submission:
+          $ref: '#/components/schemas/Submission'
+        user:
+          description: Optional user information including type and preferences that can influence response tone, detail, and language.
+          type:
+            - object
+            - 'null'
+          allOf:
+            - $ref: '#/components/schemas/User'
+        criteria:
+          type:
+            - array
+            - 'null'
+          description: Optional criteria used for evaluate.
+          items:
+            $ref: '#/components/schemas/Criterion'
+        preSubmissionFeedback:
+          description: |
+            Optional settings for pre-submission feedback (non-final). When enabled, the service should avoid committing or finalizing grades.
+          type:
+            - object
+            - 'null'
+          allOf:
+            - $ref: '#/components/schemas/PreSubmissionFeedback'
+        callbackUrl:
+          type:
+            - string
+            - 'null'
+          format: uri
+          description: |
+            Optional HTTPS callback URL for asynchronous processing. If provided, the service may return 202 Accepted immediately and deliver feedback results to this URL once processing is complete.
+        configuration:
+          description: |
+            Optional key-value configuration dictionary for provider-specific or experimental parameters. Not standardized.
+          type:
+            - object
+            - 'null'
+          additionalProperties: true
+          properties:
+            llm:
+              description: Optional LLM configuration used for this request.
+              type:
+                - object
+                - 'null'
+              allOf:
+                - $ref: '#/components/schemas/LLMConfiguration'
+            dataPolicy:
+              description: Optional data policy governing how this request's data may be processed and retained.
+              type:
+                - object
+                - 'null'
+              allOf:
+                - $ref: '#/components/schemas/DataPolicy'
+            executionPolicy:
+              description: Optional execution constraints for this request.
+              type:
+                - object
+                - 'null'
+              allOf:
+                - $ref: '#/components/schemas/ExecutionPolicy'
+    FeedbackTarget:
+      type: object
+      description: Optional reference to a specific part of the submission.
+      required:
+        - artefactType
+      properties:
+        artefactType:
+          $ref: '#/components/schemas/ArtefactType'
+        format:
+          type:
+            - string
+            - 'null'
+          description: |
+            Optional format specifier matching the submission format (e.g., python, latex).
+        locator:
+          type:
+            - object
+            - 'null'
+          description: |
+            Optional locator into the submission content. Standard locator types: - TEXT: { type: "span", startIndex: number, endIndex: number } - CODE: { type: "range", file?: string, startLine: number, endLine: number, startColumn?: number, endColumn?: number } - MATH: { type: "subexpression", path: string } (e.g., path to subexpression) - MODEL: { type: "element", elementId: string, elementType?: string }
+          additionalProperties: true
+    Feedback:
+      type: object
+      description: |
+        A single feedback item produced for the submission. It may include suggested actions, optional points, optional criterion linkage, and optional targeting into the submission.
+      properties:
+        feedbackId:
+          type: string
+          description: Unique identifier of the feedback item.
+        title:
+          type:
+            - string
+            - 'null'
+          description: Optional short label for this feedback item.
+        message:
+          type:
+            - string
+            - 'null'
+          description: Optional feedback text shown to the learner.
+        suggestedAction:
+          type:
+            - string
+            - 'null'
+          description: Optional suggestion for how to act on this feedback.
+        awardedPoints:
+          type:
+            - number
+            - 'null'
+          format: double
+          description: Optional points awarded for this feedback item.
+        criterion:
+          type:
+            - object
+            - 'null'
+          description: Optional criterion linked to this feedback item.
+          allOf:
+            - $ref: '#/components/schemas/Criterion'
+        target:
+          type:
+            - object
+            - 'null'
+          description: Optional target reference inside the submission.
+          allOf:
+            - $ref: '#/components/schemas/FeedbackTarget'
+    EvaluateAcceptedResponse:
+      type: object
+      description: Acknowledgement that evaluation was accepted for asynchronous processing.
+      required:
+        - status
+        - requestId
+      properties:
+        status:
+          type: string
+          enum:
+            - ACCEPTED
+          description: Indicates that the request has been accepted for asynchronous processing.
+        requestId:
+          type: string
+          description: Identifier to correlate this accepted request with callback delivery.
+        message:
+          type:
+            - string
+            - 'null'
+          description: Optional human-readable message about asynchronous processing.
+    ErrorResponse:
+      type: object
+      description: Standard error response returned by µEd API services.
+      required:
+        - title
+      properties:
+        title:
+          type: string
+          description: Short, human-readable error title.
+        message:
+          type:
+            - string
+            - 'null'
+          description: Optional human-readable error message.
+        code:
+          type:
+            - string
+            - 'null'
+          description: Optional application-specific error code.
+        trace:
+          type:
+            - string
+            - 'null'
+          description: Optional debug trace or stack trace (should be omitted in production by default).
+        details:
+          type:
+            - object
+            - 'null'
+          description: Optional provider-specific details for debugging or programmatic handling.
+          additionalProperties: true
+    HealthStatus:
+      type: string
+      description: Overall health status of the service.
+      enum:
+        - OK
+        - DEGRADED
+        - UNAVAILABLE
+    EvaluateRequirements:
+      type: object
+      description: |
+        Requirements for calling the evaluate endpoint, e.g. whether an Authorization header and/or LLM configuration or credentials (provided via a proxy, preferably time-based and/or signed tokens) are required.
+      additionalProperties: true
+      properties:
+        requiresAuthorizationHeader:
+          type:
+            - boolean
+            - 'null'
+          description: Optional flag indicating whether an Authorization header is required.
+        requiresLlmConfiguration:
+          type:
+            - boolean
+            - 'null'
+          description: Optional flag indicating whether configuration.llm must be provided.
+        requiresLlmCredentialProxy:
+          type:
+            - boolean
+            - 'null'
+          description: Optional flag indicating whether configuration.llm.credentials must be provided via a proxy.
+    DataPolicySupport:
+      type: string
+      enum:
+        - SUPPORTED
+        - NOT_SUPPORTED
+        - PARTIAL
+      description: Indicates whether the service supports data policy configuration.
+    ArtefactProfile:
+      type: object
+      description: |
+        Describes support for a specific artefact type and its formats. Used in health/capabilities responses to advertise what a service can handle.
+      required:
+        - type
+      properties:
+        type:
+          $ref: '#/components/schemas/ArtefactType'
+        supportedFormats:
+          type:
+            - array
+            - 'null'
+          description: |
+            List of supported formats for this artefact type. Use lowercase values. If null or empty, the service accepts any format for this type.
+          items:
+            type: string
+          examples:
+            - - plain
+              - markdown
+            - - python
+              - java
+              - javascript
+              - wolfram
+              - matlab
+            - - latex
+              - mathml
+        contentSchema:
+          type:
+            - object
+            - 'null'
+          description: |
+            Optional JSON Schema describing the expected content structure for this artefact type. Allows services to advertise their exact requirements.
+          additionalProperties: true
+        locatorSchema:
+          type:
+            - object
+            - 'null'
+          description: |
+            Optional JSON Schema describing the locator structure used for feedback targeting within this artefact type.
+          additionalProperties: true
+    EvaluateCapabilities:
+      type: object
+      description: Capabilities of the evaluate service.
+      required:
+        - supportsEvaluate
+        - supportsPreSubmissionFeedback
+        - supportsFormativeFeedback
+        - supportsSummativeFeedback
+        - supportsDataPolicy
+      additionalProperties: true
+      properties:
+        supportsEvaluate:
+          type: boolean
+          description: Indicates whether the /evaluate endpoint is implemented and usable.
+        supportsPreSubmissionFeedback:
+          type: boolean
+          description: Indicates whether the service supports pre-submission feedback runs.
+        supportsFormativeFeedback:
+          type: boolean
+          description: Indicates whether the service supports qualitative feedback without points.
+        supportsSummativeFeedback:
+          type: boolean
+          description: Indicates whether the service supports feedback with points / grading signals.
+        supportsDataPolicy:
+          $ref: '#/components/schemas/DataPolicySupport'
+        supportedArtefactProfiles:
+          type:
+            - array
+            - 'null'
+          description: |
+            Optional list of supported artefact profiles. Each profile specifies an artefact type and the formats supported for that type.
+          items:
+            $ref: '#/components/schemas/ArtefactProfile'
+        supportedLanguages:
+          type:
+            - array
+            - 'null'
+          description: Optional list of supported language codes (e.g., 'en', 'de').
+          items:
+            type: string
+        supportedAPIVersions:
+          type:
+            - array
+            - 'null'
+          description: |
+            Optional list of µEd API versions supported by this service implementation (e.g., ["0.1.0"]). Clients can use this to select a compatible X-Api-Version.
+          items:
+            type: string
+    EvaluateHealthResponse:
+      type: object
+      description: Health status and capabilities of the evaluate service.
+      required:
+        - status
+        - capabilities
+      properties:
+        status:
+          $ref: '#/components/schemas/HealthStatus'
+        message:
+          type:
+            - string
+            - 'null'
+          description: Optional human-readable status message.
+        version:
+          type:
+            - string
+            - 'null'
+          description: Optional version of the evaluate service implementation.
+        requirements:
+          type:
+            - object
+            - 'null'
+          description: Optional requirements clients must satisfy to use this service.
+          allOf:
+            - $ref: '#/components/schemas/EvaluateRequirements'
+        capabilities:
+          $ref: '#/components/schemas/EvaluateCapabilities'
+    Message:
+      type: object
+      required:
+        - role
+        - content
+      properties:
+        role:
+          type: string
+          enum:
+            - USER
+            - ASSISTANT
+            - SYSTEM
+            - TOOL
+        content:
+          type: string
+    ChatRequest:
+      type: object
+      description: Request body for the chat endpoint.
+      required:
+        - messages
+      properties:
+        messages:
+          type: array
+          description: List of messages in the conversation (including history).
+          items:
+            $ref: '#/components/schemas/Message'
+        conversationId:
+          type:
+            - string
+            - 'null'
+          description: Optional identifier for the conversation session.
+        user:
+          description: Optional user information to adapt the chat style and level.
+          type:
+            - object
+            - 'null'
+          allOf:
+            - $ref: '#/components/schemas/User'
+        context:
+          type:
+            - object
+            - 'null'
+          description: Optional educational context (e.g., course material, task context).
+          additionalProperties: true
+        configuration:
+          type:
+            - object
+            - 'null'
+          description: Optional configuration for the model(s).
+          additionalProperties: true
+          properties:
+            type:
+              type:
+                - string
+                - 'null'
+              description: Optional type for the chatbot or chat model.
+            llm:
+              description: Optional LLM configuration used for this request.
+              type:
+                - object
+                - 'null'
+              allOf:
+                - $ref: '#/components/schemas/LLMConfiguration'
+            dataPolicy:
+              description: Optional data policy governing how this request's data may be processed and retained.
+              type:
+                - object
+                - 'null'
+              allOf:
+                - $ref: '#/components/schemas/DataPolicy'
+            executionPolicy:
+              description: Optional execution constraints for this request.
+              type:
+                - object
+                - 'null'
+              allOf:
+                - $ref: '#/components/schemas/ExecutionPolicy'
+    ChatResponse:
+      type: object
+      description: Response body for the chat endpoint.
+      required:
+        - output
+      properties:
+        output:
+          $ref: '#/components/schemas/Message'
+          description: The generated assistant response.
+        metadata:
+          type:
+            - object
+            - 'null'
+          description: Optional metadata about response generation.
+          additionalProperties: true
+    ChatCapabilities:
+      type: object
+      description: Capabilities of the chat service.
+      required:
+        - supportsChat
+        - supportsDataPolicy
+      additionalProperties: true
+      properties:
+        supportsChat:
+          type: boolean
+          description: Indicates whether the /chat endpoint is implemented and usable.
+        supportsUserPreferences:
+          type: boolean
+          description: Indicates whether the service supports adapting to user preferences.
+        supportsStreaming:
+          type: boolean
+          description: Indicates whether the service supports streaming responses.
+        supportsDataPolicy:
+          $ref: '#/components/schemas/DataPolicySupport'
+        supportedLanguages:
+          type:
+            - array
+            - 'null'
+          description: Optional list of supported language codes.
+          items:
+            type: string
+        supportedModels:
+          type:
+            - array
+            - 'null'
+          description: Optional list of supported models.
+          items:
+            type: string
+        supportedAPIVersions:
+          type:
+            - array
+            - 'null'
+          description: |
+            Optional list of µEd API versions supported by this service implementation (e.g., ["0.1.0"]). Clients can use this to select a compatible X-Api-Version.
+          items:
+            type: string
+    ChatHealthResponse:
+      type: object
+      description: Health status and capabilities of the chat service.
+      required:
+        - status
+        - capabilities
+      properties:
+        status:
+          $ref: '#/components/schemas/HealthStatus'
+        statusMessage:
+          type:
+            - string
+            - 'null'
+          description: Optional human-readable status message.
+        version:
+          type:
+            - string
+            - 'null'
+          description: Optional version of the chat service implementation.
+        capabilities:
+          $ref: '#/components/schemas/ChatCapabilities'
+  responses:
+    202-Accepted:
+      description: Request accepted for asynchronous evaluation processing.
+      headers:
+        X-Request-Id:
+          description: Request id for tracing this request across services.
+          schema:
+            type: string
+        X-Api-Version:
+          description: The API version that was used to serve this response.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/EvaluateAcceptedResponse'
+          examples:
+            asyncAccepted:
+              summary: Example accepted async request
+              value:
+                status: ACCEPTED
+                requestId: req-7c193f38
+                message: Evaluation queued. Results will be sent to callbackUrl.
+    400-BadRequest:
+      description: Invalid request (e.g. missing content or invalid schema).
+      headers:
+        X-Request-Id:
+          description: Request id for tracing this request across services.
+          schema:
+            type: string
+        X-Api-Version:
+          description: The API version that was used to serve this response.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            validationError:
+              summary: Example validation error
+              value:
+                title: Invalid request
+                message: submission.content must not be empty.
+                code: VALIDATION_ERROR
+                trace: null
+                details:
+                  field: submission.content
+    403-Forbidden:
+      description: Forbidden (e.g. insufficient permissions or access denied).
+      headers:
+        X-Request-Id:
+          description: Request id for tracing this request across services.
+          schema:
+            type: string
+        X-Api-Version:
+          description: The API version that was used to serve this response.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            permissionError:
+              summary: Example permission error
+              value:
+                title: Forbidden
+                message: You do not have permission to access this resource.
+                code: PERMISSION_DENIED
+                trace: null
+                details:
+                  resource: submission
+                  required_permission: write
+    406-VersionNotSupported:
+      description: |
+        The requested API version (supplied via X-Api-Version) is not supported by this service.
+      headers:
+        X-Request-Id:
+          description: Request id for tracing this request across services.
+          schema:
+            type: string
+        X-Api-Version:
+          description: The API version that was used to serve this response.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            versionNotSupported:
+              summary: Example version not supported error
+              value:
+                title: API version not supported
+                message: 'The requested API version ''0.0'' is not supported. Supported versions are: [''0.1.0''].'
+                code: VERSION_NOT_SUPPORTED
+                trace: null
+                details:
+                  requestedVersion: '0.0'
+                  supportedVersions:
+                    - 0.1.0
+    500-InternalError:
+      description: Internal server error.
+      headers:
+        X-Request-Id:
+          description: Request id for tracing this request across services.
+          schema:
+            type: string
+        X-Api-Version:
+          description: The API version that was used to serve this response.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            internalError:
+              summary: Example internal error
+              value:
+                title: Internal server error
+                message: Unexpected failure while generating feedback.
+                code: INTERNAL_ERROR
+                trace: 'java.lang.RuntimeException: ... (stack trace omitted)'
+                details:
+                  subsystem: llm-provider
+    501-NotImplemented:
+      description: |
+        The server does not support the evaluate method. This allows service providers to implement only subsets of the µEd API.
+      headers:
+        X-Request-Id:
+          description: Request id for tracing this request across services.
+          schema:
+            type: string
+        X-Api-Version:
+          description: The API version that was used to serve this response.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            notImplemented:
+              summary: Example not implemented error
+              value:
+                title: Not implemented
+                message: This service does not implement /evaluate.
+                code: NOT_IMPLEMENTED
+                trace: null
+                details: null
+    503-ServiceUnavailable:
+      description: Service is currently unavailable or unhealthy.
+      headers:
+        X-Request-Id:
+          description: Request id for tracing this request across services.
+          schema:
+            type: string
+        X-Api-Version:
+          description: The API version that was used to serve this response.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            serviceUnavailable:
+              summary: Example unavailable error
+              value:
+                title: Service unavailable
+                message: Evaluate service is currently unavailable.
+                code: SERVICE_UNAVAILABLE
+                trace: null
+                details:
+                  reason: Database connection failed
+            unhealthy:
+              summary: Example degraded / unavailable service
+              value:
+                title: Service unhealthy
+                status: UNAVAILABLE
+                message: Database connection failed
+                version: 1.0.0
+                capabilities:
+                  supportsEvaluate: false
+                  supportsPreSubmissionFeedback: false
+                  supportsFormativeFeedback: false
+                  supportsSummativeFeedback: false
+                  supportsDataPolicy: NOT_SUPPORTED
+                  supportedArtefactProfiles: []
+                  supportedLanguages: []
+    400-BadRequest-2:
+      description: Invalid request (e.g. missing content or invalid schema).
+      headers:
+        X-Request-Id:
+          description: Request id for tracing this request across services.
+          schema:
+            type: string
+        X-Api-Version:
+          description: The API version that was used to serve this response.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            invalidChatRequest:
+              summary: Example invalid chat request
+              value:
+                title: Invalid request
+                message: messages must contain at least one item.
+                code: VALIDATION_ERROR
+                trace: null
+                details:
+                  field: messages
+    500-InternalError-2:
+      description: Internal server error.
+      headers:
+        X-Request-Id:
+          description: Request id for tracing this request across services.
+          schema:
+            type: string
+        X-Api-Version:
+          description: The API version that was used to serve this response.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            modelProviderError:
+              summary: Example model provider error
+              value:
+                title: Model provider error
+                message: LLM provider returned an error while generating a response.
+                code: LLM_PROVIDER_ERROR
+                trace: null
+                details:
+                  provider: openai
+    501-NotImplemented-2:
+      description: |
+        The server does not support the chat method. This allows service providers to implement only subsets of the µEd API.
+      headers:
+        X-Request-Id:
+          description: Request id for tracing this request across services.
+          schema:
+            type: string
+        X-Api-Version:
+          description: The API version that was used to serve this response.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            notImplemented:
+              summary: Example not implemented error
+              value:
+                title: Not implemented
+                message: This service does not implement /chat.
+                code: NOT_IMPLEMENTED
+                trace: null
+                details: null
+    503-ServiceUnavailable-2:
+      description: Service is currently unavailable or unhealthy.
+      headers:
+        X-Request-Id:
+          description: Request id for tracing this request across services.
+          schema:
+            type: string
+        X-Api-Version:
+          description: The API version that was used to serve this response.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            serviceUnavailable:
+              summary: Example unavailable error
+              value:
+                title: Service unavailable
+                message: Chat service is currently unavailable.
+                code: SERVICE_UNAVAILABLE
+                trace: null
+                details:
+                  reason: LLM provider connection failed
+            serviceUnhealthy:
+              summary: Example degraded / unavailable service
+              value:
+                title: Service unhealthy
+                message: LLM provider connection failed
+                code: SERVICE_UNHEALTHY
+                version: 1.0.0
+                capabilities:
+                  supportsChat: false
+                  supportsUserPreferences: false
+                  supportsStreaming: false
+                  supportsDataPolicy: NOT_SUPPORTED
+                  supportedLanguages: []
+                  supportedModels: []

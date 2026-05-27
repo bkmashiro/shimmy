@@ -37,6 +37,12 @@ func NewMuEdHandler(params MuEdHandlerParams) *MuEdHandler {
 	}
 }
 
+func writeJSONError(w http.ResponseWriter, msg string, status int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": msg}}) //nolint:errcheck
+}
+
 func (h *MuEdHandler) checkAuth(w http.ResponseWriter, r *http.Request) bool {
 	if h.config.Auth.Key != "" && r.Header.Get("api-key") != h.config.Auth.Key {
 		h.log.Debug("unauthorized request", zap.String("path", r.URL.Path))
@@ -59,13 +65,13 @@ func (h *MuEdHandler) ServeEvaluate(w http.ResponseWriter, r *http.Request) {
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "failed to read body", http.StatusBadRequest)
+		writeJSONError(w, "failed to read body", http.StatusBadRequest)
 		return
 	}
 
 	var muEdReq runtime.MuEdEvaluateRequest
 	if err := json.Unmarshal(body, &muEdReq); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		writeJSONError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -78,13 +84,13 @@ func (h *MuEdHandler) ServeEvaluate(w http.ResponseWriter, r *http.Request) {
 		legacyBody, err = runtime.MuEdBuildLegacyEvaluateRequest(muEdReq)
 	}
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeJSONError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	legacyBodyBytes, err := json.Marshal(legacyBody)
 	if err != nil {
-		http.Error(w, "failed to build request", http.StatusInternalServerError)
+		writeJSONError(w, "failed to build request", http.StatusInternalServerError)
 		return
 	}
 
@@ -118,13 +124,13 @@ func (h *MuEdHandler) ServeEvaluate(w http.ResponseWriter, r *http.Request) {
 
 	var respBody map[string]any
 	if err := json.Unmarshal(resp.Body, &respBody); err != nil {
-		http.Error(w, "failed to parse response", http.StatusInternalServerError)
+		writeJSONError(w, "failed to parse response", http.StatusInternalServerError)
 		return
 	}
 
 	result, ok := respBody["result"].(map[string]any)
 	if !ok {
-		http.Error(w, "invalid response from evaluation function", http.StatusInternalServerError)
+		writeJSONError(w, "invalid response from evaluation function", http.StatusInternalServerError)
 		return
 	}
 
@@ -160,13 +166,18 @@ func (h *MuEdHandler) ServeHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, ok := resp["result"]
+	result, ok := resp["result"].(map[string]any)
 	if !ok {
 		http.Error(w, "invalid health response", http.StatusInternalServerError)
 		return
 	}
 
+	status := "DEGRADED"
+	if testsPassed, _ := result["tests_passed"].(bool); testsPassed {
+		status = "OK"
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(result) //nolint:errcheck
+	json.NewEncoder(w).Encode(map[string]any{"status": status}) //nolint:errcheck
 }

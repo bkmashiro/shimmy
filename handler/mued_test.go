@@ -280,7 +280,7 @@ func TestMuEdServeHealth_Success(t *testing.T) {
 
 	var result map[string]any
 	require.NoError(t, json.Unmarshal(raw, &result))
-	assert.Equal(t, true, result["tests_passed"])
+	assert.Equal(t, "OK", result["status"])
 
 	mockRuntime.AssertExpectations(t)
 }

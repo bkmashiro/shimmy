@@ -208,25 +208,45 @@ func TestMuEdServeEvaluate_InvalidJSON(t *testing.T) {
 
 	newMuEdHandler(mockHandler, nil, "").ServeEvaluate(w, req)
 
-	assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+	res := w.Result()
+	defer res.Body.Close()
+	raw, _ := io.ReadAll(res.Body)
+
+	assert.Equal(t, http.StatusBadRequest, res.StatusCode)
+	assert.Equal(t, "0.1.0", res.Header.Get("X-Api-Version"))
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(raw, &body))
+	assert.Equal(t, "VALIDATION_ERROR", body["code"])
+
 	mockHandler.AssertNotCalled(t, "Handle", mock.Anything, mock.Anything)
 }
 
 func TestMuEdServeEvaluate_MissingReferenceSolution(t *testing.T) {
 	mockHandler := new(MockHandler)
 
-	body, _ := json.Marshal(map[string]any{
+	reqBody, _ := json.Marshal(map[string]any{
 		"submission": map[string]any{
 			"type":    "MATH",
 			"content": map[string]any{"expression": "x^2"},
 		},
 	})
-	req := httptest.NewRequest(http.MethodPost, "/evaluate", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/evaluate", bytes.NewReader(reqBody))
 	w := httptest.NewRecorder()
 
 	newMuEdHandler(mockHandler, nil, "").ServeEvaluate(w, req)
 
-	assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+	res := w.Result()
+	defer res.Body.Close()
+	raw, _ := io.ReadAll(res.Body)
+
+	assert.Equal(t, http.StatusBadRequest, res.StatusCode)
+	assert.Equal(t, "0.1.0", res.Header.Get("X-Api-Version"))
+
+	var errBody map[string]any
+	require.NoError(t, json.Unmarshal(raw, &errBody))
+	assert.Equal(t, "VALIDATION_ERROR", errBody["code"])
+
 	mockHandler.AssertNotCalled(t, "Handle", mock.Anything, mock.Anything)
 }
 
@@ -251,6 +271,7 @@ func TestMuEdServeEvaluate_WorkerErrorForwarded(t *testing.T) {
 	raw, _ := io.ReadAll(res.Body)
 
 	assert.Equal(t, http.StatusInternalServerError, res.StatusCode)
+	assert.Equal(t, "0.1.0", res.Header.Get("X-Api-Version"))
 	assert.Equal(t, errorBody, bytes.TrimRight(raw, "\n"))
 }
 
@@ -327,7 +348,47 @@ func TestMuEdServeHealth_RuntimeError(t *testing.T) {
 
 	newMuEdHandler(nil, mockRuntime, "").ServeHealth(w, req)
 
-	assert.Equal(t, http.StatusInternalServerError, w.Result().StatusCode)
+	res := w.Result()
+	defer res.Body.Close()
+	raw, _ := io.ReadAll(res.Body)
+
+	assert.Equal(t, http.StatusInternalServerError, res.StatusCode)
+	assert.Equal(t, "0.1.0", res.Header.Get("X-Api-Version"))
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(raw, &body))
+	assert.Equal(t, "INTERNAL_ERROR", body["code"])
+
+	mockRuntime.AssertExpectations(t)
+}
+
+func TestMuEdServeHealth_DegradedStatus(t *testing.T) {
+	healthResult := map[string]any{"tests_passed": false, "successes": []any{}, "failures": []any{"f1"}, "errors": []any{}}
+	mockRuntime := new(MockRuntime)
+	mockRuntime.On("Handle", mock.Anything, runtime.EvaluationRequest{
+		Command: runtime.CommandHealth,
+		Data:    map[string]any{},
+	}).Return(runtime.EvaluationResponse{
+		"command": "healthcheck",
+		"result":  healthResult,
+	}, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/evaluate/health", nil)
+	w := httptest.NewRecorder()
+
+	newMuEdHandler(nil, mockRuntime, "").ServeHealth(w, req)
+
+	res := w.Result()
+	defer res.Body.Close()
+	raw, _ := io.ReadAll(res.Body)
+
+	assert.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Equal(t, "0.1.0", res.Header.Get("X-Api-Version"))
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(raw, &result))
+	assert.Equal(t, "DEGRADED", result["status"])
+
 	mockRuntime.AssertExpectations(t)
 }
 

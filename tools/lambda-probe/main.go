@@ -12,6 +12,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -20,6 +21,9 @@ import (
 	"strings"
 	"syscall"
 	"unsafe"
+
+	"github.com/tetratelabs/wazero"
+	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 )
 
 // ---- result helpers --------------------------------------------------------
@@ -383,6 +387,113 @@ func probeKernelVersion() {
 	pass("kernel_version", string(b))
 }
 
+// ---- wazero linear memory uffd WP probe ------------------------------------
+
+// minimalWasm is a tiny valid WASM module with 1 page (64 KB) of linear memory.
+// Generated from: (module (memory (export "memory") 1))
+var minimalWasm = []byte{
+	0x00, 0x61, 0x73, 0x6d, // magic
+	0x01, 0x00, 0x00, 0x00, // version
+	// memory section: 1 memory, min=1 page
+	0x05, 0x03, 0x01, 0x00, 0x01,
+	// export section: export "memory" as memory index 0
+	0x07, 0x0a, 0x01, 0x06, 0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x02, 0x00,
+}
+
+// probeUffdWPWazero instantiates a real wazero module, gets its linear memory
+// slice, and attempts UFFDIO_REGISTER_MODE_WP on that backing allocation.
+func probeUffdWPWazero() {
+	ctx := context.Background()
+
+	rt := wazero.NewRuntime(ctx)
+	defer rt.Close(ctx)
+
+	wasi_snapshot_preview1.MustInstantiate(ctx, rt)
+
+	mod, err := rt.InstantiateWithConfig(ctx, minimalWasm,
+		wazero.NewModuleConfig().WithName("probe-mem"))
+	if err != nil {
+		fail("uffd_wp_wazero", "wazero instantiate failed: "+err.Error())
+		return
+	}
+	defer mod.Close(ctx)
+
+	mem := mod.Memory()
+	if mem == nil {
+		fail("uffd_wp_wazero", "module has no exported memory")
+		return
+	}
+
+	// Read() returns the full backing []byte of wazero linear memory.
+	buf, ok := mem.Read(0, mem.Size())
+	if !ok || len(buf) == 0 {
+		fail("uffd_wp_wazero", "failed to read wazero linear memory slice")
+		return
+	}
+
+	// Open a uffd fd.
+	uffd, errno := openUffd()
+	if errno != 0 {
+		fail("uffd_wp_wazero", "userfaultfd open failed: "+errno.Error())
+		return
+	}
+	defer syscall.Close(int(uffd))
+
+	// UFFDIO_API handshake with WP feature.
+	apiStruct := uffdioAPIStruct{api: 0xaa, features: uffdFeatureWP}
+	if err := sysIoctl(uffd, uffdioAPIReq, uintptr(unsafe.Pointer(&apiStruct))); err != 0 {
+		fail("uffd_wp_wazero", "UFFDIO_API handshake failed: "+err.Error())
+		return
+	}
+	if apiStruct.features&uffdFeatureWP == 0 {
+		fail("uffd_wp_wazero", "kernel does not advertise UFFD_FEATURE_PAGEFAULT_FLAG_WP")
+		return
+	}
+
+	// Attempt WP registration on wazero's linear memory backing allocation.
+	addr := uintptr(unsafe.Pointer(&buf[0]))
+	size := uintptr(len(buf))
+
+	// Page-align size down (should already be page-aligned for wazero).
+	pageSize := uintptr(syscall.Getpagesize())
+	size = (size / pageSize) * pageSize
+	if size == 0 {
+		fail("uffd_wp_wazero", "linear memory too small to align")
+		return
+	}
+
+	reg := uffdioRegister{
+		uffdioRange: uffdioRange{start: uint64(addr), len: uint64(size)},
+		mode:        uffdModeWP,
+	}
+	if err := sysIoctl(uffd, uffdioRegisterReq, uintptr(unsafe.Pointer(&reg))); err != 0 {
+		fail("uffd_wp_wazero", fmt.Sprintf(
+			"UFFDIO_REGISTER_MODE_WP on wazero linear memory failed: errno=%v — addr=0x%x size=%d",
+			err, addr, size))
+		return
+	}
+
+	pass("uffd_wp_wazero", fmt.Sprintf(
+		"WP register OK on wazero linear memory: addr=0x%x size=%d (%d KB) region_ioctls=0x%x",
+		addr, size, size/1024, reg.ioctls))
+
+	// Verify: /proc/self/smaps should show the region as anonymous (not shared).
+	smaps, _ := os.ReadFile("/proc/self/smaps")
+	addrHex := fmt.Sprintf("%x", addr)
+	if strings.Contains(string(smaps), addrHex) {
+		if strings.Contains(string(smaps), "Shared_Clean:") {
+			// Extract the mapping flags line for this region
+			lines := strings.Split(string(smaps), "\n")
+			for i, l := range lines {
+				if strings.Contains(l, addrHex) && i+1 < len(lines) {
+					pass("uffd_wp_wazero_smaps", "mapping flags: "+lines[i+1])
+					break
+				}
+			}
+		}
+	}
+}
+
 // ---- summary ---------------------------------------------------------------
 
 func main() {
@@ -398,6 +509,7 @@ func main() {
 	probeUnprivilegedUffdSysctl()
 	probeUserfaultfdFd()
 	probeUffdWPRegister()
+	probeUffdWPWazero()
 	probeSmaps()
 	probeMmapMinAddr()
 	probeMmapZero()

@@ -68,8 +68,13 @@ import (
 // Use ReactorPythonDispatcher (a pool of runners) for concurrent workloads.
 type ReactorPythonRunner struct {
 	wasmPath string
-	cfg      Config
-	log      *zap.Logger
+	// wasmBytes, when non-nil, is used in place of reading wasmPath from disk
+	// during Init. The dispatcher pre-loads the 242 MB python-reactor.wasm
+	// once and shares the slice across every pooled runner (and replacement
+	// spawns) so the file is not re-read per runner.
+	wasmBytes []byte
+	cfg       Config
+	log       *zap.Logger
 
 	mu          sync.Mutex
 	initialized bool
@@ -111,6 +116,17 @@ func NewReactorPythonRunner(wasmPath string, cfg Config, log *zap.Logger) *React
 	}
 }
 
+// newReactorPythonRunnerWithBytes is like NewReactorPythonRunner but reuses
+// an already-loaded copy of the .wasm bytes. The dispatcher pre-loads
+// python-reactor.wasm once and hands the same slice to every pool runner so
+// the 242 MB file is not re-read per runner. wasmPath is retained for
+// diagnostics only.
+func newReactorPythonRunnerWithBytes(wasmPath string, wasmBytes []byte, cfg Config, log *zap.Logger) *ReactorPythonRunner {
+	r := NewReactorPythonRunner(wasmPath, cfg, log)
+	r.wasmBytes = wasmBytes
+	return r
+}
+
 // Init loads python-reactor.wasm, instantiates it in reactor mode (calling
 // _initialize), invokes py_init() to start CPython, then snapshots linear
 // memory. This is the expensive step (~7-8 s for Python startup).
@@ -121,14 +137,20 @@ func (r *ReactorPythonRunner) Init(ctx context.Context) error {
 	if r.initialized {
 		return nil
 	}
-	if r.wasmPath == "" {
-		return fmt.Errorf("reactor python: wasmPath must be set")
-	}
 
-	r.log.Info("reading python-reactor.wasm", zap.String("path", r.wasmPath))
-	wasmBytes, err := os.ReadFile(r.wasmPath)
-	if err != nil {
-		return fmt.Errorf("reactor python: read %q: %w", r.wasmPath, err)
+	wasmBytes := r.wasmBytes
+	if wasmBytes == nil {
+		if r.wasmPath == "" {
+			return fmt.Errorf("reactor python: wasmPath must be set")
+		}
+		r.log.Info("reading python-reactor.wasm", zap.String("path", r.wasmPath))
+		b, err := os.ReadFile(r.wasmPath)
+		if err != nil {
+			return fmt.Errorf("reactor python: read %q: %w", r.wasmPath, err)
+		}
+		wasmBytes = b
+	} else {
+		r.log.Debug("reusing pre-loaded python-reactor.wasm bytes", zap.Int("size", len(wasmBytes)))
 	}
 
 	rtCfg := wazero.NewRuntimeConfig().
@@ -407,12 +429,14 @@ func (r *ReactorPythonRunner) SendRequest(ctx context.Context, script, method st
 // Two-phase design
 // ─────────────────
 // Phase 1 (initSysPathPhase1): sys.path, meta-path finder, numpy test stubs,
-//   numpy.random package stubs.  Updates _base_modules so the stubs survive
-//   the per-request eviction pass.  Must not import numpy (avoids crash risk).
+//
+//	numpy.random package stubs.  Updates _base_modules so the stubs survive
+//	the per-request eviction pass.  Must not import numpy (avoids crash risk).
 //
 // Phase 2 (initSysPathPhase2): imports numpy so the snapshot captures it in
-//   sys.modules.  If this phase crashes (WASM unreachable), Phase 1 results
-//   are preserved and numpy is still importable per-request from the binary.
+//
+//	sys.modules.  If this phase crashes (WASM unreachable), Phase 1 results
+//	are preserved and numpy is still importable per-request from the binary.
 //
 // Splitting the script means a crash in phase 2 does not swallow the phase 1
 // setup, and the log clearly identifies which phase failed.
@@ -887,14 +911,50 @@ type ReactorPythonDispatcher struct {
 	log    *zap.Logger
 	pool   chan *ReactorPythonRunner
 	script string
+
+	// wasmBytes holds the python-reactor.wasm file contents, loaded once in
+	// Start and shared by every pool runner (and replacement spawn) so the
+	// 242 MB binary is not re-read from disk per runner.
+	wasmBytes []byte
+
+	// mu protects closed and serialises the closed/push transitions so a
+	// replacement runner cannot land in the pool after Shutdown has begun.
+	mu     sync.Mutex
+	closed bool
+	// closedCh is closed atomically with closed=true (under mu) by Shutdown.
+	// Send selects on it to unblock a pool acquire racing Shutdown.
+	closedCh chan struct{}
+	// pending tracks BOTH in-flight Sends (Add in tryBeginSend, Done via
+	// Send's defer) AND background goroutines spawned during a Send
+	// (replacement spawns, discard-shutdowns). Shutdown waits on it before
+	// draining the pool.
+	//
+	// Invariant: every pending.Add is either (a) under d.mu after observing
+	// !closed, or (b) by code that already holds a pending count (e.g.
+	// discardAsync inside Send). That keeps Add from racing Shutdown's Wait.
+	pending sync.WaitGroup
 }
 
 // NewReactorPythonDispatcher creates a ReactorPythonDispatcher. Call Start first.
 func NewReactorPythonDispatcher(cfg Config, log *zap.Logger) *ReactorPythonDispatcher {
 	return &ReactorPythonDispatcher{
-		cfg: cfg,
-		log: log.Named("dispatcher_reactor_python"),
+		cfg:      cfg,
+		log:      log.Named("dispatcher_reactor_python"),
+		closedCh: make(chan struct{}),
 	}
+}
+
+// tryBeginSend atomically checks closed and increments pending. Returns false
+// if Shutdown has begun; on true the caller MUST call pending.Done exactly
+// once. See Dispatcher.tryBeginSend for the rationale.
+func (d *ReactorPythonDispatcher) tryBeginSend() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.closed {
+		return false
+	}
+	d.pending.Add(1)
+	return true
 }
 
 // Start reads the eval script and initialises all pool runners in parallel.
@@ -910,6 +970,19 @@ func (d *ReactorPythonDispatcher) Start(ctx context.Context) error {
 		return fmt.Errorf("reactor-python: read script %q: %w", d.cfg.PythonScriptPath, err)
 	}
 	d.script = string(scriptBytes)
+
+	if d.cfg.ModulePath == "" {
+		return fmt.Errorf("reactor-python: ModulePath must be set (FUNCTION_WASM_MODULE)")
+	}
+	wasmBytes, err := os.ReadFile(d.cfg.ModulePath)
+	if err != nil {
+		return fmt.Errorf("reactor-python: read wasm %q: %w", d.cfg.ModulePath, err)
+	}
+	d.wasmBytes = wasmBytes
+	d.log.Info("loaded python-reactor.wasm",
+		zap.String("path", d.cfg.ModulePath),
+		zap.Int("size", len(wasmBytes)),
+	)
 
 	poolSize := d.cfg.MaxInstances
 	if poolSize <= 0 {
@@ -946,7 +1019,7 @@ func (d *ReactorPythonDispatcher) Start(ctx context.Context) error {
 		i := i
 		go func() {
 			defer wg.Done()
-			runner := NewReactorPythonRunner(d.cfg.ModulePath, d.cfg, d.log)
+			runner := newReactorPythonRunnerWithBytes(d.cfg.ModulePath, d.wasmBytes, d.cfg, d.log)
 			if err := runner.Init(ctx); err != nil {
 				results[i] = result{index: i, err: err}
 				return
@@ -990,22 +1063,29 @@ func (d *ReactorPythonDispatcher) Send(ctx context.Context, method string, param
 		}, nil
 	}
 
+	if !d.tryBeginSend() {
+		return nil, fmt.Errorf("reactor-python: dispatcher is shut down")
+	}
+	defer d.pending.Done()
+
 	var runner *ReactorPythonRunner
 	select {
 	case runner = <-d.pool:
+	case <-d.closedCh:
+		return nil, fmt.Errorf("reactor-python: dispatcher is shut down")
 	case <-ctx.Done():
 		return nil, fmt.Errorf("reactor-python: acquire runner: %w", ctx.Err())
 	}
 	defer func() {
 		if runner.IsHealthy() {
-			d.pool <- runner
+			d.returnOrDiscard(runner)
 		} else {
 			// Runner's WASM module was closed (e.g. by a timeout). Discard it
 			// and spin up a replacement in the background so pool capacity is
 			// restored without blocking the current request.
 			d.log.Warn("reactor runner unhealthy after request — dropping from pool, spawning replacement")
-			go func() { _ = runner.Shutdown(context.Background()) }()
-			go d.spawnReplacement()
+			d.discardAsync(runner)
+			d.spawnReplacementAsync()
 		}
 	}()
 
@@ -1024,25 +1104,118 @@ func (d *ReactorPythonDispatcher) Send(ctx context.Context, method string, param
 	}, nil
 }
 
+// returnOrDiscard returns a healthy runner to the pool unless Shutdown has
+// begun, in which case the runner is closed asynchronously so it does not leak
+// past a drained pool.
+//
+// Must be called from inside Send (which holds a pending count) so that the
+// Add issued by discardAsync cannot race Shutdown's pending.Wait.
+func (d *ReactorPythonDispatcher) returnOrDiscard(runner *ReactorPythonRunner) {
+	d.mu.Lock()
+	if d.closed {
+		d.mu.Unlock()
+		d.discardAsync(runner)
+		return
+	}
+	d.pool <- runner
+	d.mu.Unlock()
+}
+
+// discardAsync closes a discarded runner in the background, tracked via the
+// pending WaitGroup so Shutdown can wait for it before returning.
+//
+// Must be called from a goroutine that already holds a pending count (Send,
+// via tryBeginSend). That invariant keeps Shutdown.pending.Wait blocked
+// across this Add, eliminating the Add-after-Wait race.
+func (d *ReactorPythonDispatcher) discardAsync(runner *ReactorPythonRunner) {
+	d.pending.Add(1)
+	go func() {
+		defer d.pending.Done()
+		_ = runner.Shutdown(context.Background())
+	}()
+}
+
+// spawnReplacementAsync schedules spawnReplacement unless Shutdown has begun.
+// Tracked via the pending WaitGroup.
+func (d *ReactorPythonDispatcher) spawnReplacementAsync() {
+	d.mu.Lock()
+	if d.closed {
+		d.mu.Unlock()
+		return
+	}
+	d.pending.Add(1)
+	d.mu.Unlock()
+	go d.spawnReplacement()
+}
+
 // spawnReplacement initialises a fresh ReactorPythonRunner and adds it to the
 // pool. Called in a goroutine when an unhealthy runner is discarded, so that
 // pool capacity is eventually restored. Failures are logged but not fatal.
+//
+// If Shutdown begins while Init is running, the freshly initialised runner is
+// closed immediately rather than inserted into the drained pool.
 func (d *ReactorPythonDispatcher) spawnReplacement() {
+	defer d.pending.Done()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	d.log.Info("reactor-python: initialising replacement runner")
-	runner := NewReactorPythonRunner(d.cfg.ModulePath, d.cfg, d.log)
+	runner := newReactorPythonRunnerWithBytes(d.cfg.ModulePath, d.wasmBytes, d.cfg, d.log)
 	if err := runner.Init(ctx); err != nil {
 		d.log.Error("reactor-python: replacement runner init failed", zap.Error(err))
 		return
 	}
+
+	d.mu.Lock()
+	if d.closed {
+		d.mu.Unlock()
+		d.log.Info("reactor-python: replacement runner born during shutdown — closing immediately")
+		_ = runner.Shutdown(context.Background())
+		return
+	}
 	d.pool <- runner
+	d.mu.Unlock()
 	d.log.Info("reactor-python: replacement runner ready")
 }
 
-// Shutdown drains the pool and shuts down each runner.
+// Shutdown drains the pool and shuts down each runner. Idempotent.
 func (d *ReactorPythonDispatcher) Shutdown(ctx context.Context) error {
+	d.mu.Lock()
+	if d.closed {
+		d.mu.Unlock()
+		return nil
+	}
+	d.closed = true
+	// Close closedCh under mu so tryBeginSend's check + Add is atomic with the
+	// shutdown signal.
+	close(d.closedCh)
+	d.mu.Unlock()
+
 	d.log.Debug("shutting down reactor-python dispatcher")
-	return drainPool(ctx, d.pool, d.log)
+
+	// Wait for in-flight Sends AND background goroutines (replacement spawns,
+	// discard-shutdowns) to finish before draining the pool. Otherwise a Send
+	// could still be running inside a runner while we tear that runner down,
+	// or a late spawnReplacement could push to a drained pool.
+	d.pending.Wait()
+
+	// Non-blocking drain: after pending.Wait, no spawn or returnOrDiscard
+	// goroutine will push to the pool, so we just close everything currently
+	// buffered. (drainPool's blocking-for-cap-items semantics would deadlock
+	// here when spawnReplacement took the closed-shortcut and never pushed.)
+	var firstErr error
+	for {
+		select {
+		case runner := <-d.pool:
+			if err := runner.Shutdown(ctx); err != nil {
+				d.log.Warn("error shutting down pooled runner", zap.Error(err))
+				if firstErr == nil {
+					firstErr = err
+				}
+			}
+		default:
+			return firstErr
+		}
+	}
 }

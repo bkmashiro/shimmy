@@ -283,6 +283,51 @@ def evaluation_function(response, answer, params=None):
 	t.Logf("lineno: %v, error_type: %v", lineno, errType)
 }
 
+// TestReactorPythonRunner_PreloadedBytesSkipFileRead verifies that a runner
+// constructed via newReactorPythonRunnerWithBytes does not re-read the wasm
+// file in Init. We point wasmPath at a non-existent path and pass garbage
+// bytes; Init must progress past the file-read gate (the disk read would have
+// returned ENOENT) and fail later at compilation instead. This guards the
+// dispatcher's "load once, share across pooled runners" optimisation.
+func TestReactorPythonRunner_PreloadedBytesSkipFileRead(t *testing.T) {
+	log, err := zap.NewDevelopment()
+	require.NoError(t, err)
+
+	// Path that does NOT exist — if Init still tried to ReadFile, we would
+	// get an ENOENT error rather than a compile error.
+	bogusPath := filepath.Join(t.TempDir(), "does-not-exist.wasm")
+	_, statErr := os.Stat(bogusPath)
+	require.Error(t, statErr, "fixture path must not exist")
+
+	// Plausibly-shaped but invalid wasm bytes — wazero will reject these at
+	// compile time, which is exactly the failure mode we want to observe.
+	garbage := []byte("\x00asm\x01\x00\x00\x00 not a real module")
+
+	runner := newReactorPythonRunnerWithBytes(bogusPath, garbage, Config{
+		Timeout:        5 * time.Second,
+		MaxMemoryPages: 256,
+	}, log)
+	t.Cleanup(func() {
+		shutCtx, sc := context.WithTimeout(context.Background(), 5*time.Second)
+		defer sc()
+		_ = runner.Shutdown(shutCtx)
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err = runner.Init(ctx)
+	require.Error(t, err, "Init must fail (garbage bytes); we only assert HOW it fails")
+
+	// The error must come from compile (or later), not from the disk read.
+	// If the optimisation regressed, we would see "reactor python: read ...
+	// no such file or directory".
+	assert.NotContains(t, err.Error(), "read \""+bogusPath+"\"",
+		"Init read the file from disk instead of reusing pre-loaded bytes")
+	assert.NotContains(t, err.Error(), "no such file or directory",
+		"Init read the file from disk instead of reusing pre-loaded bytes")
+}
+
 // BenchmarkReactorPythonRunner_SendRequest measures per-request latency with
 // snapshot/restore isolation. Compare against BenchmarkResidentPythonRunner_SendRequest.
 func BenchmarkReactorPythonRunner_SendRequest(b *testing.B) {

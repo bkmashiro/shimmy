@@ -1,0 +1,2 @@
+build/python-reactor/artifacts/*.wasm filter=lfs diff=lfs merge=lfs -text
+internal/execution/wasm/testdata/python-reactor.wasm filter=lfs diff=lfs merge=lfs -text

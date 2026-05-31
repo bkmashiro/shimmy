@@ -2,6 +2,7 @@ package wasm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -10,6 +11,12 @@ import (
 	"github.com/tetratelabs/wazero/api"
 	"go.uber.org/zap"
 )
+
+// ErrMemoryGrew indicates that the guest expanded linear memory during a
+// request beyond the size captured at snapshot time. wazero (and the WASM
+// spec) does not allow shrinking linear memory, so the original snapshotted
+// state cannot be fully reproduced and the supervisor must be discarded.
+var ErrMemoryGrew = errors.New("wasm: linear memory grew beyond snapshotted size")
 
 // wasmSupervisor manages a single instantiated WASM module. After the module
 // is initialised its linear memory is snapshotted; the snapshot is restored
@@ -38,6 +45,12 @@ type wasmSupervisor struct {
 	// safely returned to the pool. It is set to false when restoreSnapshot fails,
 	// indicating the WASM module's memory state is undefined.
 	healthy bool
+
+	// snapshotSize is the linear-memory size (in bytes) captured at Take time.
+	// restoreSnapshot compares this against the post-request memory size to
+	// detect memory.grow during execution — wazero cannot shrink memory, so
+	// any growth invalidates the snapshot and must mark the supervisor unhealthy.
+	snapshotSize uint32
 
 	timeout time.Duration
 	log     *zap.Logger
@@ -171,18 +184,28 @@ func (s *wasmSupervisor) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-// takeSnapshot captures the guest's linear memory via the active strategy.
+// takeSnapshot captures the guest's linear memory via the active strategy and
+// records the memory size so restoreSnapshot can detect post-snapshot growth.
 // Must be called with s.mu held.
 func (s *wasmSupervisor) takeSnapshot() error {
 	mem := s.mod.Memory()
 	if mem == nil {
+		s.snapshotSize = 0
 		return nil
 	}
-	return s.strategy.Take(mem)
+	if err := s.strategy.Take(mem); err != nil {
+		return err
+	}
+	s.snapshotSize = mem.Size()
+	return nil
 }
 
 // restoreSnapshot restores the guest's linear memory from the last snapshot
-// via the active strategy. Must be called with s.mu held.
+// via the active strategy. If the guest grew memory during the request
+// (memory.grow), it zero-fills the tail beyond the snapshotted size to prevent
+// leaking guest data into the next request and returns ErrMemoryGrew so the
+// caller (Send) marks the supervisor unhealthy and discards it. Must be called
+// with s.mu held.
 func (s *wasmSupervisor) restoreSnapshot() error {
 	if s.mod == nil {
 		return nil
@@ -191,5 +214,16 @@ func (s *wasmSupervisor) restoreSnapshot() error {
 	if mem == nil {
 		return nil
 	}
-	return s.strategy.Restore(mem)
+	if err := s.strategy.Restore(mem); err != nil {
+		return err
+	}
+	if cur := mem.Size(); cur > s.snapshotSize {
+		tail := cur - s.snapshotSize
+		zeros := make([]byte, tail)
+		if !mem.Write(s.snapshotSize, zeros) {
+			return fmt.Errorf("wasm: memory grew by %d bytes; zero-fill failed: %w", tail, ErrMemoryGrew)
+		}
+		return fmt.Errorf("wasm: memory grew by %d bytes (tail zero-filled): %w", tail, ErrMemoryGrew)
+	}
+	return nil
 }

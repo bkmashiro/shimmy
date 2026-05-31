@@ -234,3 +234,67 @@ func TestSupervisor_Send_NotStarted(t *testing.T) {
 	_, err := sv.Send(ctx, "test", nil)
 	assert.Error(t, err, "Send without Start should return an error")
 }
+
+// TestSupervisor_Send_MemoryGrowDetected is the regression test for
+// memory.grow snapshot isolation: if the guest expands linear memory during a
+// request, the supervisor must (a) detect the growth, (b) zero the grown tail
+// so the next request cannot read leaked guest data, (c) surface
+// ErrMemoryGrew, and (d) mark itself unhealthy so the dispatcher discards it
+// instead of returning it to the pool.
+//
+// The echo fixture itself never grows memory, so we simulate a request that
+// did by growing the module's memory from host code (between Start and Send)
+// and writing a recognisable poison pattern into the new pages. After Send
+// runs, restoreSnapshot observes mem.Size() > snapshotSize and must trip the
+// defensive path.
+func TestSupervisor_Send_MemoryGrowDetected(t *testing.T) {
+	ctx := context.Background()
+	log := newTestLogger(t)
+
+	wasmBytes := echoWasmBytes(t)
+	rt, compiled := compileEchoModule(t, ctx, wasmBytes)
+	t.Cleanup(func() { _ = rt.Close(ctx) })
+
+	sv := newWasmSupervisor(rt, compiled, wazero.NewModuleConfig().WithName(""), 5*time.Second, "", log)
+	require.NoError(t, sv.Start(ctx))
+	t.Cleanup(func() { _ = sv.Shutdown(ctx) })
+
+	require.True(t, sv.IsHealthy(), "supervisor should be healthy after Start")
+
+	// Capture the snapshot size, then grow memory by 1 page (64 KiB) and
+	// poison the new pages. This simulates a guest that called memory.grow
+	// during execution and wrote sensitive data into the new pages.
+	mem := sv.mod.Memory()
+	require.NotNil(t, mem)
+	origSize := mem.Size()
+	require.Equal(t, origSize, sv.snapshotSize, "snapshotSize must be recorded at Take time")
+
+	prevPages, ok := mem.Grow(1)
+	require.True(t, ok, "memory.Grow must succeed (echo fixture has no max)")
+	require.Equal(t, origSize/(64*1024), prevPages)
+
+	grownSize := mem.Size()
+	require.Greater(t, grownSize, origSize, "memory must have grown")
+
+	poison := make([]byte, grownSize-origSize)
+	for i := range poison {
+		poison[i] = 0xAB
+	}
+	require.True(t, mem.Write(origSize, poison), "poison tail")
+
+	// Issue a request. The echo guest doesn't itself grow memory, but Send's
+	// post-call restoreSnapshot will observe the host-injected growth and
+	// trip the defensive path.
+	_, err := sv.Send(ctx, "test", map[string]any{"hello": "world"})
+	require.Error(t, err, "Send must return the restore error")
+	assert.ErrorIs(t, err, ErrMemoryGrew, "error must wrap ErrMemoryGrew")
+
+	assert.False(t, sv.IsHealthy(), "supervisor must be marked unhealthy after grow detected")
+
+	// The grown tail must have been zeroed so no leftover guest data remains
+	// in the (now-unhealthy but still-instantiated) module.
+	tail, readOK := mem.Read(origSize, grownSize-origSize)
+	require.True(t, readOK)
+	expected := make([]byte, grownSize-origSize)
+	assert.Equal(t, expected, []byte(tail), "tail must be zero-filled, not contain poison bytes")
+}

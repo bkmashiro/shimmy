@@ -243,6 +243,151 @@ func TestUffdStrategy_DirtyPageCount(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// TestUffdStrategy_ValidateMemoryUnchanged
+// ---------------------------------------------------------------------------
+
+// TestUffdStrategy_ValidateMemoryUnchanged exercises the base-pointer drift
+// guard in isolation, without needing a working uffd fd. It constructs a
+// minimal UffdStrategy whose basePtr/memSize are seeded from a real wazero
+// memory, then perturbs each field to confirm the guard surfaces
+// ErrUffdMemoryDrifted.
+//
+// This test runs even when userfaultfd is unavailable (e.g. Docker default
+// seccomp), because validateMemoryUnchanged performs only pointer/size
+// comparisons — no syscalls.
+func TestUffdStrategy_ValidateMemoryUnchanged(t *testing.T) {
+	ctx := context.Background()
+	wasmBytes := echoWasmBytes(t)
+	rt, compiled := compileEchoModule(t, ctx, wasmBytes)
+	t.Cleanup(func() { _ = rt.Close(ctx) })
+
+	modCfg := wazero.NewModuleConfig().
+		WithName("").
+		WithSysNanosleep().
+		WithSysWalltime().
+		WithSysNanotime()
+
+	mod, err := rt.InstantiateModule(ctx, compiled,
+		modCfg.WithStartFunctions("_initialize", "_start"))
+	require.NoError(t, err, "instantiate echo module")
+	t.Cleanup(func() { _ = mod.Close(ctx) })
+
+	mem := mod.Memory()
+	require.NotNil(t, mem)
+
+	size := mem.Size()
+	buf, ok := mem.Read(0, size)
+	require.True(t, ok)
+	basePtr := unsafe.Pointer(unsafe.SliceData(buf))
+
+	// Construct a UffdStrategy with only the fields validateMemoryUnchanged
+	// reads. We deliberately leave uffdFd=-1 and the pinner zero-valued so no
+	// Close is required — the test never touches kernel state.
+	s := &UffdStrategy{
+		uffdFd:  -1,
+		basePtr: basePtr,
+		memSize: size,
+	}
+
+	require.NoError(t, s.validateMemoryUnchanged(mem),
+		"matching pointer+size must validate cleanly")
+	require.NoError(t, s.validateMemoryUnchanged(nil),
+		"nil mem must short-circuit to nil error")
+
+	// Simulate a base-pointer drift (wazero reallocated the backing array).
+	// Use the address of a local byte so the pointer is valid but distinct
+	// from basePtr — avoids vet's unsafe.Pointer(uintptr) warning.
+	var fakeDrifted byte
+	s.basePtr = unsafe.Pointer(&fakeDrifted)
+	err = s.validateMemoryUnchanged(mem)
+	require.Error(t, err, "drifted basePtr must error")
+	require.ErrorIs(t, err, ErrUffdMemoryDrifted,
+		"drift error must wrap ErrUffdMemoryDrifted")
+
+	// Restore basePtr; simulate a size drift (memory.grow happened).
+	s.basePtr = basePtr
+	s.memSize = size + 1
+	err = s.validateMemoryUnchanged(mem)
+	require.Error(t, err, "drifted memSize must error")
+	require.ErrorIs(t, err, ErrUffdMemoryDrifted,
+		"size-drift error must wrap ErrUffdMemoryDrifted")
+}
+
+// ---------------------------------------------------------------------------
+// TestUffdStrategy_TakeRestoreRefusesAfterDrift
+// ---------------------------------------------------------------------------
+
+// TestUffdStrategy_TakeRestoreRefusesAfterDrift verifies that once the
+// registered basePtr no longer matches the live wazero memory backing
+// pointer, Take and Restore both refuse to operate and return errors that
+// wrap ErrUffdMemoryDrifted. This is the contract the supervisor relies on
+// to mark itself unhealthy instead of silently corrupting memory.
+func TestUffdStrategy_TakeRestoreRefusesAfterDrift(t *testing.T) {
+	if !UffdAvailable() {
+		t.Skip("userfaultfd not available in this environment (seccomp or insufficient privileges)")
+	}
+
+	ctx := context.Background()
+	wasmBytes := echoWasmBytes(t)
+	rt, compiled := compileEchoModule(t, ctx, wasmBytes)
+	t.Cleanup(func() { _ = rt.Close(ctx) })
+
+	modCfg := wazero.NewModuleConfig().
+		WithName("").
+		WithSysNanosleep().
+		WithSysWalltime().
+		WithSysNanotime()
+
+	mod, err := rt.InstantiateModule(ctx, compiled,
+		modCfg.WithStartFunctions("_initialize", "_start"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = mod.Close(ctx) })
+
+	mem := mod.Memory()
+	require.NotNil(t, mem)
+
+	strategy, err := NewUffdStrategy(mem)
+	if err != nil {
+		t.Skipf("NewUffdStrategy failed (uffd+WP unavailable): %v", err)
+	}
+
+	// Take a baseline snapshot so Restore would otherwise be a real copy.
+	require.NoError(t, strategy.Take(mem), "initial Take must succeed")
+
+	origPtr := strategy.basePtr
+	origSize := strategy.memSize
+
+	// Cleanup must restore the original basePtr/memSize so Close can disarm
+	// WP and release resources against the actually-registered region.
+	t.Cleanup(func() {
+		strategy.mu.Lock()
+		strategy.basePtr = origPtr
+		strategy.memSize = origSize
+		strategy.mu.Unlock()
+		require.NoError(t, strategy.Close())
+	})
+
+	// Simulate that wazero reallocated the backing buffer beneath us.
+	// Use a local byte's address so the fake basePtr is a valid Go pointer
+	// (avoids vet's unsafe.Pointer(uintptr) warning) while still differing
+	// from the registered pointer.
+	var fakeDrifted byte
+	strategy.mu.Lock()
+	strategy.basePtr = unsafe.Pointer(&fakeDrifted)
+	strategy.mu.Unlock()
+
+	takeErr := strategy.Take(mem)
+	require.Error(t, takeErr, "Take must refuse on drifted basePtr")
+	assert.ErrorIs(t, takeErr, ErrUffdMemoryDrifted,
+		"Take error must wrap ErrUffdMemoryDrifted")
+
+	restoreErr := strategy.Restore(mem)
+	require.Error(t, restoreErr, "Restore must refuse on drifted basePtr")
+	assert.ErrorIs(t, restoreErr, ErrUffdMemoryDrifted,
+		"Restore error must wrap ErrUffdMemoryDrifted")
+}
+
+// ---------------------------------------------------------------------------
 // TestUffdStrategy_RestoreNilSnapshot
 // ---------------------------------------------------------------------------
 

@@ -3,6 +3,7 @@
 package wasm
 
 import (
+	"errors"
 	"fmt"
 	"runtime"
 	"sync"
@@ -12,6 +13,17 @@ import (
 	"github.com/tetratelabs/wazero/api"
 	"golang.org/x/sys/unix"
 )
+
+// ErrUffdMemoryDrifted is wrapped by Take and Restore when the wazero linear
+// memory backing pointer or size no longer matches the values registered with
+// userfaultfd at NewUffdStrategy time. This typically means the guest grew
+// linear memory (memory.grow) and wazero reallocated the backing buffer,
+// invalidating the kernel registration. Continuing would either silently
+// drop WP faults (faultLoop bounds-checks the registered region) or, worse,
+// cause Restore to copy the snapshot into freed or unrelated memory.
+// Callers (wasmSupervisor) must treat this as fatal and mark the supervisor
+// unhealthy so the dispatcher discards it.
+var ErrUffdMemoryDrifted = errors.New("uffd: wasm linear memory backing pointer or size drifted from uffd registration")
 
 // pipeFd is a pair of fds created by Pipe2, used to wake up faultLoop.
 // wakeupR is the read end (polled by faultLoop); wakeupW is the write end
@@ -304,7 +316,7 @@ type uffdMsg struct {
 var _ [0]byte = [unsafe.Sizeof(uffdMsg{}) - 32]byte{}
 
 const (
-	uffdEventPagefault = 0x12 // UFFD_EVENT_PAGEFAULT
+	uffdEventPagefault = 0x12   // UFFD_EVENT_PAGEFAULT
 	uffdPagfaultFlagWP = 1 << 9 // UFFD_PAGEFAULT_FLAG_WP
 )
 
@@ -407,9 +419,9 @@ func NewUffdStrategy(mem api.Memory) (*UffdStrategy, error) {
 	cleanup := true
 	defer func() {
 		if cleanup {
-			syscall.Close(int(fd))       //nolint:errcheck
-			syscall.Close(pipeFds[0])    //nolint:errcheck
-			syscall.Close(pipeFds[1])    //nolint:errcheck
+			syscall.Close(int(fd))    //nolint:errcheck
+			syscall.Close(pipeFds[0]) //nolint:errcheck
+			syscall.Close(pipeFds[1]) //nolint:errcheck
 			pinner.Unpin()
 		}
 	}()
@@ -562,12 +574,49 @@ func (s *UffdStrategy) faultLoop() {
 	}
 }
 
+// validateMemoryUnchanged reports an error wrapping ErrUffdMemoryDrifted if
+// the current api.Memory backing pointer or size no longer matches what was
+// registered with the uffd fd at NewUffdStrategy time.
+//
+// The wazero MemoryInstance.Buffer is a []byte; on memory.grow it may be
+// reallocated (Go's runtime is free to move the backing array on append /
+// resize), which would leave UffdStrategy.basePtr pointing at freed memory.
+// Without this guard a subsequent Restore would write the snapshot into an
+// unrelated region. Configuring WithMemoryLimitPages prevents growth in
+// production, but this defensive check ensures any divergence surfaces as a
+// clear error instead of silent corruption.
+func (s *UffdStrategy) validateMemoryUnchanged(mem api.Memory) error {
+	if mem == nil {
+		return nil
+	}
+	size := mem.Size()
+	if size != s.memSize {
+		return fmt.Errorf("%w (size: registered=%d current=%d)", ErrUffdMemoryDrifted, s.memSize, size)
+	}
+	buf, ok := mem.Read(0, size)
+	if !ok {
+		return fmt.Errorf("%w (could not read %d bytes of linear memory)", ErrUffdMemoryDrifted, size)
+	}
+	cur := unsafe.Pointer(unsafe.SliceData(buf))
+	if cur != s.basePtr {
+		return fmt.Errorf("%w (base pointer: registered=%p current=%p)", ErrUffdMemoryDrifted, s.basePtr, cur)
+	}
+	return nil
+}
+
 // Take implements SnapshotStrategy. It copies the current WASM linear memory
 // into the internal snapshot buffer, re-arms write-protection on the entire
 // region, and clears the dirty page bitset.
 func (s *UffdStrategy) Take(mem api.Memory) error {
 	if mem == nil {
 		return nil
+	}
+
+	// Refuse to operate on a memory whose backing pointer/size has drifted
+	// from the kernel registration — reading or writing s.basePtr in that
+	// case touches stale memory, not the live wazero linear memory.
+	if err := s.validateMemoryUnchanged(mem); err != nil {
+		return err
 	}
 
 	// Reads don't trigger WP faults — we can read directly without disarming.
@@ -611,9 +660,18 @@ func (s *UffdStrategy) Take(mem api.Memory) error {
 //     for a 3 MB module).
 //   - Direct unsafe.Slice + copy bypasses wazero's per-call bounds check,
 //     saving one function call per dirty page.
-func (s *UffdStrategy) Restore(_ api.Memory) error {
+func (s *UffdStrategy) Restore(mem api.Memory) error {
 	if s.snapshot == nil {
 		return nil
+	}
+
+	// Refuse to restore into a backing buffer that no longer matches the uffd
+	// registration: writing via s.basePtr would corrupt freed or unrelated
+	// memory, and dirty tracking is already invalid (faultLoop bounds-checks
+	// against the registered region). Returning a wrapped sentinel lets the
+	// supervisor mark itself unhealthy in one place.
+	if err := s.validateMemoryUnchanged(mem); err != nil {
+		return err
 	}
 
 	s.mu.Lock()
@@ -739,4 +797,3 @@ func UffdAvailable() bool {
 	syscall.Close(int(fd)) //nolint:errcheck
 	return true
 }
-

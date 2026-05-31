@@ -103,9 +103,12 @@ var allStrategies = []string{"memcpy", "soft-dirty", "mprotect", "uffd"}
 // concurrentSafe reports whether a strategy supports N>1 concurrent runners.
 //
 // mprotect:   global C SIGSEGV handler tracks a single [base, base+size) region;
-//             a second runner overwrites g_base/g_size and corrupts tracking.
+//
+//	a second runner overwrites g_base/g_size and corrupts tracking.
+//
 // soft-dirty: /proc/self/clear_refs resets ALL PTEs in the process;
-//             concurrent runners destroy each other's dirty-page information.
+//
+//	concurrent runners destroy each other's dirty-page information.
 func concurrentSafe(mode string) bool {
 	return mode == "memcpy" || mode == "uffd"
 }
@@ -125,6 +128,12 @@ func wasmPathOrSkip(b testing.TB) string {
 
 func newBenchRunner(b testing.TB, wasmPath, mode string) *ReactorPythonRunner {
 	b.Helper()
+	// The mprotect strategy is gated behind FUNCTION_WASM_ALLOW_EXPERIMENTAL_MPROTECT
+	// to prevent accidental production use. Benchmarks intentionally measure
+	// it, so opt in for the duration of the test.
+	if mode == "mprotect" {
+		b.Setenv(mprotectOptInEnv, "true")
+	}
 	cfg := Config{
 		Timeout:        60 * time.Second,
 		MaxMemoryPages: 8192,
@@ -280,6 +289,9 @@ func BenchmarkPool(b *testing.B) {
 			b.Run(fmt.Sprintf("%s/N%d", st, N), func(b *testing.B) {
 				if N > 1 && !concurrentSafe(st) {
 					b.Skipf("strategy %s uses process-wide global state — not safe for N>1 runners", st)
+				}
+				if st == "mprotect" {
+					b.Setenv(mprotectOptInEnv, "true")
 				}
 
 				runners := make([]*ReactorPythonRunner, N)

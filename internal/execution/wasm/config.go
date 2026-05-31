@@ -56,7 +56,13 @@ type Config struct {
 	// memory between requests. Valid values:
 	//   "memcpy"     — copy all pages on every restore (default, always available)
 	//   "soft-dirty" — use /proc/self/pagemap soft-dirty bits (Linux >= 3.18)
-	//   "mprotect"   — use mprotect(PROT_READ) + SIGSEGV dirty tracking (Linux + CGO)
+	//   "mprotect"   — use mprotect(PROT_READ) + SIGSEGV dirty tracking
+	//                  (Linux + CGO, EXPERIMENTAL — installs a process-wide
+	//                  SIGSEGV handler that intercepts every segfault in the Go
+	//                  process. Requires the operator to also set
+	//                  FUNCTION_WASM_ALLOW_EXPERIMENTAL_MPROTECT=true; otherwise
+	//                  it silently falls back to "memcpy" with a warning log.
+	//                  Not recommended for production.)
 	//   "uffd"       — use userfaultfd write-protect (Linux, requires privilege)
 	//
 	// Falls back to "memcpy" if the requested strategy is unavailable.

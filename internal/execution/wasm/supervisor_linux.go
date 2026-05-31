@@ -3,9 +3,29 @@
 package wasm
 
 import (
+	"os"
+
 	"github.com/tetratelabs/wazero/api"
 	"go.uber.org/zap"
 )
+
+// mprotectOptInEnv is the env var an operator must set to opt in to the
+// experimental mprotect snapshot strategy. The mprotect strategy installs a
+// process-wide SIGSEGV handler from CGo that intercepts WASM linear-memory
+// write faults. Any nil-pointer panic in unrelated Go code lands in the same
+// handler and is chained back to the Go runtime; that chaining works in our
+// tests but is fragile in production (interaction with libraries that also
+// install SIGSEGV handlers, Sentry crash reporting, Go runtime upgrades, etc.)
+// so the strategy is gated behind an explicit opt-in to prevent accidental
+// selection by an operator who only set FUNCTION_WASM_SNAPSHOT_MODE=mprotect.
+const mprotectOptInEnv = "FUNCTION_WASM_ALLOW_EXPERIMENTAL_MPROTECT"
+
+// mprotectOptedIn reports whether the operator has explicitly opted in to the
+// experimental mprotect snapshot strategy.
+func mprotectOptedIn() bool {
+	v := os.Getenv(mprotectOptInEnv)
+	return v == "true" || v == "1"
+}
 
 // selectSnapshotStrategy creates the SnapshotStrategy for the given mode and
 // memory. If the requested strategy is unavailable it falls back to
@@ -17,6 +37,7 @@ import (
 //	"memcpy"     — FullMemcpyStrategy (default, always available)
 //	"soft-dirty" — SoftDirtyStrategy via /proc/self/pagemap
 //	"mprotect"   — MprotectStrategy via mprotect(PROT_READ) + SIGSEGV
+//	               (EXPERIMENTAL — requires FUNCTION_WASM_ALLOW_EXPERIMENTAL_MPROTECT=true)
 //	"uffd"       — UffdStrategy via userfaultfd write-protect
 func selectSnapshotStrategy(mode string, mem api.Memory, log *zap.Logger) SnapshotStrategy {
 	switch mode {
@@ -32,13 +53,19 @@ func selectSnapshotStrategy(mode string, mem api.Memory, log *zap.Logger) Snapsh
 		return sd
 
 	case "mprotect":
+		if !mprotectOptedIn() {
+			log.Warn("mprotect snapshot strategy is experimental and requires explicit opt-in; falling back to full memcpy",
+				zap.String("opt_in_env", mprotectOptInEnv),
+				zap.String("reason", "installs a process-wide SIGSEGV handler that intercepts ALL segfaults in the Go process"))
+			return NewFullMemcpyStrategy()
+		}
 		mp, err := NewMprotectStrategy(mem)
 		if err != nil {
 			log.Warn("mprotect unavailable, falling back to full memcpy",
 				zap.Error(err))
 			return NewFullMemcpyStrategy()
 		}
-		log.Info("using mprotect dirty-page tracking strategy",
+		log.Warn("using EXPERIMENTAL mprotect dirty-page tracking strategy — process-wide SIGSEGV handler installed",
 			zap.Uint32("mem_size", mem.Size()))
 		return mp
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/tetratelabs/wazero"
@@ -13,6 +14,10 @@ import (
 
 	"github.com/lambda-feedback/shimmy/internal/execution/dispatcher"
 )
+
+// ErrDispatcherClosed is returned by Send after the dispatcher has begun (or
+// completed) Shutdown. Callers should treat it as a terminal error.
+var ErrDispatcherClosed = fmt.Errorf("wasm: dispatcher is shut down")
 
 // Dispatcher implements [dispatcher.Dispatcher] for the WASM execution
 // backend. It compiles the .wasm module once at startup, then maintains a pool
@@ -26,6 +31,28 @@ type Dispatcher struct {
 	modCfg   wazero.ModuleConfig
 	pool     chan *wasmSupervisor
 	log      *zap.Logger
+
+	// mu protects closed and serialises the closed/push transitions so that a
+	// replacement supervisor cannot land in the pool after Shutdown has begun
+	// draining it.
+	mu     sync.Mutex
+	closed bool
+	// closedCh is closed atomically with closed=true (under mu) by Shutdown.
+	// Send selects on it to (a) unblock a pool acquire that is racing Shutdown
+	// and (b) avoid waiting on an empty pool that Shutdown is about to drain.
+	closedCh chan struct{}
+	// pending tracks BOTH in-flight Sends (Add in tryBeginSend, Done via Send's
+	// defer) AND background goroutines spawned during a Send (replacement
+	// spawns, discard-shutdowns). Shutdown waits on it before draining the
+	// pool / closing the runtime.
+	//
+	// Invariant: every pending.Add is either (a) made under d.mu after
+	// observing !closed, or (b) made by code that is itself holding a pending
+	// count (e.g. discardAsync called from inside Send). This keeps Add from
+	// racing Shutdown's Wait — if closed is already set, branch (a) skips the
+	// Add and falls back to a synchronous close; in branch (b) Shutdown is
+	// guaranteed to still be blocked at Wait on the caller's count.
+	pending sync.WaitGroup
 }
 
 var _ dispatcher.Dispatcher = (*Dispatcher)(nil)
@@ -34,9 +61,26 @@ var _ dispatcher.Dispatcher = (*Dispatcher)(nil)
 // initialisation happen in Start.
 func NewDispatcher(cfg Config, log *zap.Logger) *Dispatcher {
 	return &Dispatcher{
-		cfg: cfg,
-		log: log.Named("dispatcher_wasm"),
+		cfg:      cfg,
+		log:      log.Named("dispatcher_wasm"),
+		closedCh: make(chan struct{}),
 	}
+}
+
+// tryBeginSend atomically checks the closed flag and increments pending. It
+// returns false if Shutdown has begun (caller must abort with
+// ErrDispatcherClosed); on true the caller MUST call pending.Done exactly
+// once when finished. Holding a pending count across the entire Send keeps
+// Shutdown's Wait blocked while the Send is mid-flight, which is what lets
+// discardAsync inside Send safely Add to pending without racing Wait.
+func (d *Dispatcher) tryBeginSend() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.closed {
+		return false
+	}
+	d.pending.Add(1)
+	return true
 }
 
 // Start reads and compiles the .wasm file, sets up WASI host functions, and
@@ -170,10 +214,18 @@ func (d *Dispatcher) Send(
 	method string,
 	data map[string]any,
 ) (map[string]any, error) {
-	// Acquire a supervisor, honouring the caller's context deadline.
+	if !d.tryBeginSend() {
+		return nil, ErrDispatcherClosed
+	}
+	defer d.pending.Done()
+
+	// Acquire a supervisor, honouring the caller's context AND the shutdown
+	// signal so we never block forever on a drained pool.
 	var sv *wasmSupervisor
 	select {
 	case sv = <-d.pool:
+	case <-d.closedCh:
+		return nil, ErrDispatcherClosed
 	case <-ctx.Done():
 		return nil, fmt.Errorf("wasm: acquire instance: %w", ctx.Err())
 	}
@@ -185,11 +237,11 @@ func (d *Dispatcher) Send(
 	// supervisor's state is undefined — discard it and spawn a replacement so
 	// pool capacity is eventually restored.
 	if sv.IsHealthy() {
-		d.pool <- sv
+		d.returnOrDiscard(sv)
 	} else {
 		d.log.Warn("wasm supervisor unhealthy after request — dropping from pool, spawning replacement")
-		go func() { _ = sv.Shutdown(context.Background()) }()
-		go d.spawnOne()
+		d.discardAsync(sv)
+		d.spawnReplacementAsync()
 	}
 
 	if err != nil {
@@ -199,10 +251,65 @@ func (d *Dispatcher) Send(
 	return result, nil
 }
 
+// returnOrDiscard puts a healthy supervisor back in the pool unless Shutdown
+// has begun, in which case the supervisor is closed asynchronously so it does
+// not leak past a drained pool.
+//
+// Must be called from a goroutine that already holds a pending count (i.e.
+// from inside Send) so that the Add issued by discardAsync is guaranteed to
+// happen before Shutdown's pending.Wait can return.
+func (d *Dispatcher) returnOrDiscard(sv *wasmSupervisor) {
+	d.mu.Lock()
+	if d.closed {
+		d.mu.Unlock()
+		d.discardAsync(sv)
+		return
+	}
+	// Push under the lock so it interleaves correctly with Shutdown's
+	// closed=true → drainPool sequence: either we push before closed is set
+	// (drainPool sees the supervisor) or we discard via the branch above.
+	d.pool <- sv
+	d.mu.Unlock()
+}
+
+// discardAsync closes a discarded supervisor in the background and tracks it
+// via the pending WaitGroup so Shutdown can wait for the close to complete
+// before tearing down the runtime.
+//
+// Must be called from a goroutine that already holds a pending count
+// (Send, via tryBeginSend). That invariant keeps Shutdown.pending.Wait
+// blocked across this Add, eliminating the Add-after-Wait race.
+func (d *Dispatcher) discardAsync(sv *wasmSupervisor) {
+	d.pending.Add(1)
+	go func() {
+		defer d.pending.Done()
+		_ = sv.Shutdown(context.Background())
+	}()
+}
+
+// spawnReplacementAsync kicks off spawnOne in a background goroutine, but only
+// if the dispatcher is still open. If Shutdown has begun, no replacement is
+// scheduled. Tracked via the pending WaitGroup.
+func (d *Dispatcher) spawnReplacementAsync() {
+	d.mu.Lock()
+	if d.closed {
+		d.mu.Unlock()
+		return
+	}
+	d.pending.Add(1)
+	d.mu.Unlock()
+	go d.spawnOne()
+}
+
 // spawnOne initialises a fresh wasmSupervisor and adds it to the pool.
 // Called in a goroutine when an unhealthy supervisor is discarded so that
 // pool capacity is eventually restored. Failures are logged but not fatal.
+//
+// If Shutdown begins while Start is running, the freshly initialised
+// supervisor is closed immediately rather than inserted into the drained pool.
 func (d *Dispatcher) spawnOne() {
+	defer d.pending.Done()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
@@ -212,15 +319,57 @@ func (d *Dispatcher) spawnOne() {
 		d.log.Error("wasm: replacement supervisor init failed", zap.Error(err))
 		return
 	}
+
+	d.mu.Lock()
+	if d.closed {
+		d.mu.Unlock()
+		d.log.Info("wasm: replacement supervisor born during shutdown — closing immediately")
+		_ = sv.Shutdown(context.Background())
+		return
+	}
 	d.pool <- sv
+	d.mu.Unlock()
 	d.log.Info("wasm: replacement supervisor ready")
 }
 
-// Shutdown closes all module instances and the wazero runtime.
+// Shutdown closes all module instances and the wazero runtime. Idempotent.
 func (d *Dispatcher) Shutdown(ctx context.Context) error {
+	d.mu.Lock()
+	if d.closed {
+		d.mu.Unlock()
+		return nil
+	}
+	d.closed = true
+	// Close the channel under mu so the closed=true / close(closedCh) pair is
+	// atomic with respect to tryBeginSend: any Send that observes !closed has
+	// also pending.Add'd before Shutdown can reach pending.Wait.
+	close(d.closedCh)
+	d.mu.Unlock()
+
 	d.log.Debug("shutting down wasm dispatcher")
 
-	drainPool(ctx, d.pool, d.log)
+	// Wait for in-flight Sends AND any background goroutines (replacement
+	// spawns / discard shutdowns) to finish so that no late-created supervisor
+	// lands in the pool after the drain below, no module is mid-Close while we
+	// close the runtime, and no Send is running against the wazero runtime
+	// when we tear it down.
+	d.pending.Wait()
+
+	// Non-blocking drain: after pending.Wait, no spawn or returnOrDiscard
+	// goroutine will push to the pool, so we just close everything currently
+	// buffered. (drainPool's blocking-for-cap-items semantics would deadlock
+	// here when spawnOne took the closed-shortcut and never pushed.)
+	for {
+		select {
+		case sv := <-d.pool:
+			if err := sv.Shutdown(ctx); err != nil {
+				d.log.Warn("error shutting down pooled supervisor", zap.Error(err))
+			}
+		default:
+			goto drained
+		}
+	}
+drained:
 
 	if d.rt != nil {
 		if err := d.rt.Close(ctx); err != nil {

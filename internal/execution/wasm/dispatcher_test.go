@@ -2,9 +2,11 @@ package wasm
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -133,17 +135,180 @@ func TestDispatcher_Send_Concurrent(t *testing.T) {
 	}
 }
 
-// TestDispatcher_Send_AfterShutdown checks that Send after Shutdown returns an
-// error (context cancellation or pool closed).
+// TestDispatcher_Send_AfterShutdown checks that Send after Shutdown returns
+// ErrDispatcherClosed immediately, rather than blocking on the drained pool
+// until the caller's context expires.
 func TestDispatcher_Send_AfterShutdown(t *testing.T) {
 	d := newEchoDispatcher(t, 1)
 	require.NoError(t, d.Shutdown(context.Background()))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
+	_, err := d.Send(context.Background(), "test", nil)
+	assert.ErrorIs(t, err, ErrDispatcherClosed, "Send after Shutdown must return ErrDispatcherClosed")
+}
 
-	_, err := d.Send(ctx, "test", nil)
-	assert.Error(t, err, "Send after Shutdown should return an error")
+// TestDispatcher_Shutdown_Idempotent verifies that calling Shutdown twice does
+// not return an error or double-close the runtime.
+func TestDispatcher_Shutdown_Idempotent(t *testing.T) {
+	d := newEchoDispatcher(t, 1)
+	require.NoError(t, d.Shutdown(context.Background()))
+	require.NoError(t, d.Shutdown(context.Background()), "second Shutdown must be a no-op")
+}
+
+// TestDispatcher_ReplacementDuringShutdown exercises the race where Send has
+// just discarded an unhealthy supervisor and scheduled a replacement spawn
+// while Shutdown begins. The replacement spawn must NOT insert a supervisor
+// into a drained pool, and Shutdown must wait for the spawn goroutine to
+// finish before closing the runtime (otherwise the late supervisor would
+// reference a torn-down wazero.Runtime).
+func TestDispatcher_ReplacementDuringShutdown(t *testing.T) {
+	d := newEchoDispatcher(t, 1)
+
+	// Consume the only supervisor in the pool to mimic an in-flight Send.
+	sv := <-d.pool
+
+	// Simulate Send's unhealthy-path bookkeeping: schedule the discard close
+	// of the bad supervisor and the spawn of a replacement.
+	d.discardAsync(sv)
+	d.spawnReplacementAsync()
+
+	// Shutdown races with the spawn. It must wait for pending background work
+	// (via d.pending.Wait) before draining the pool and closing the runtime.
+	require.NoError(t, d.Shutdown(context.Background()))
+
+	// After Shutdown the pool must be empty: any replacement that finished
+	// initialising during the race window was closed by spawnOne's
+	// closed-guard rather than inserted.
+	assert.Equal(t, 0, len(d.pool), "drained pool must be empty after Shutdown")
+
+	// Send after Shutdown returns ErrDispatcherClosed promptly.
+	_, err := d.Send(context.Background(), "test", nil)
+	assert.ErrorIs(t, err, ErrDispatcherClosed)
+}
+
+// TestDispatcher_Shutdown_WaitsForInFlightSends drives the original race the
+// lifecycle patch is meant to fix: many concurrent Sends are issued while
+// Shutdown runs partway through. Without the in-flight tracking, Shutdown
+// could close the wazero runtime out from under a live Send (use-after-close),
+// or returnOrDiscard/discardAsync could call pending.Add after Shutdown's
+// pending.Wait already returned. Both surfaces are caught by -race or by an
+// outright panic.
+//
+// Acceptance: every Send either succeeds or returns ErrDispatcherClosed, never
+// any other error; Shutdown returns nil; no panic.
+func TestDispatcher_Shutdown_WaitsForInFlightSends(t *testing.T) {
+	d := newEchoDispatcher(t, runtime.NumCPU())
+
+	const numWorkers = 128
+	var (
+		wg          sync.WaitGroup
+		successes   atomic.Int64
+		closedExits atomic.Int64
+		unexpected  atomic.Int64
+	)
+	wg.Add(numWorkers)
+
+	start := make(chan struct{})
+	for i := 0; i < numWorkers; i++ {
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < 5; j++ {
+				_, err := d.Send(context.Background(), "eval", map[string]any{"j": j})
+				switch {
+				case err == nil:
+					successes.Add(1)
+				case errors.Is(err, ErrDispatcherClosed):
+					closedExits.Add(1)
+					return // dispatcher is gone; stop hammering
+				default:
+					unexpected.Add(1)
+					t.Errorf("unexpected error: %v", err)
+					return
+				}
+			}
+		}()
+	}
+
+	close(start)
+	// Give some Sends a chance to begin.
+	time.Sleep(5 * time.Millisecond)
+
+	require.NoError(t, d.Shutdown(context.Background()))
+	wg.Wait()
+
+	assert.Zero(t, unexpected.Load(), "no Send may return a non-closed error")
+	// Post-shutdown Send must return ErrDispatcherClosed promptly (not block).
+	postCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := d.Send(postCtx, "eval", nil)
+	assert.ErrorIs(t, err, ErrDispatcherClosed)
+	t.Logf("successes=%d closed_exits=%d", successes.Load(), closedExits.Load())
+}
+
+// TestDispatcher_Shutdown_UnblocksBlockedSend covers the second race called
+// out in the patch: a Send that passed tryBeginSend but finds the pool empty
+// (all supervisors are in-use or have been drained by a racing Shutdown).
+// Without selecting on closedCh, the Send would block on the empty pool until
+// the caller's context expired. With the patch it must return
+// ErrDispatcherClosed as soon as Shutdown begins.
+func TestDispatcher_Shutdown_UnblocksBlockedSend(t *testing.T) {
+	d := newEchoDispatcher(t, 1)
+	// Empty the pool so a Send is forced to block on acquire.
+	sv := <-d.pool
+
+	type sendResult struct {
+		err error
+	}
+	res := make(chan sendResult, 1)
+	go func() {
+		_, err := d.Send(context.Background(), "eval", nil)
+		res <- sendResult{err: err}
+	}()
+
+	// Let Send reach the empty-pool select.
+	time.Sleep(50 * time.Millisecond)
+
+	// Put sv back so the dispatcher's drain has something to clean up
+	// (otherwise Shutdown sees an empty pool, which is also fine).
+	d.pool <- sv
+
+	require.NoError(t, d.Shutdown(context.Background()))
+
+	select {
+	case r := <-res:
+		// Either the Send got the supervisor before Shutdown drained it
+		// (succeeded), or Shutdown's closedCh fired first.
+		if r.err != nil {
+			assert.ErrorIs(t, r.err, ErrDispatcherClosed)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Send did not return after Shutdown — closedCh select missing")
+	}
+}
+
+// TestDispatcher_SpawnReplacementAsync_NoopAfterShutdown asserts that calling
+// spawnReplacementAsync on a closed dispatcher is a no-op: it must not
+// increment pending and must not launch a goroutine that touches the closed
+// runtime.
+func TestDispatcher_SpawnReplacementAsync_NoopAfterShutdown(t *testing.T) {
+	d := newEchoDispatcher(t, 1)
+	require.NoError(t, d.Shutdown(context.Background()))
+
+	// Should return immediately without scheduling work.
+	d.spawnReplacementAsync()
+
+	// Wait briefly with a deadline — pending.Wait would block forever if the
+	// no-op guard regressed and a goroutine were leaked with a stale runtime.
+	done := make(chan struct{})
+	go func() {
+		d.pending.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("pending.Wait did not return — spawn goroutine leaked after Shutdown")
+	}
 }
 
 // TestDispatcher_MissingModule checks that Start fails when ModulePath does

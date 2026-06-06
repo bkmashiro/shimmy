@@ -27,4 +27,10 @@ go.work
 
 # Local demo artifacts
 .demo-wasm-server.log
+.demo-logs/
+.demo-lambda-sources/
 examples/demo-stateful/eval.wasm
+examples/eval-c/eval.wasm
+examples/eval-cpp/eval.wasm
+examples/eval-rust/eval.wasm
+examples/eval-rust/target/

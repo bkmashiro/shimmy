@@ -11,4 +11,5 @@
 | [adding-a-language.md](adding-a-language.md) | Step-by-step guide for implementing a new evaluation function language targeting wasm32-wasip1, including Zig, AssemblyScript, and Swift examples |
 | [demo.md](demo.md) | One-command end-to-end demo: build Shimmy, compile a stateful WASM evaluator, serve HTTP, and prove snapshot/restore isolation |
 | [demo-scenarios.md](demo-scenarios.md) | Multi-scenario demo matrix: Go/Rust/C/C++ WASI modules, real Lambda Feedback source references, and Python/Linux notes |
+| [python-examples.md](python-examples.md) | Python demo routes: plain Python, NumPy, and SciPy via separate runtimes |
 | [writing-eval-functions.md](writing-eval-functions.md) | Guide for authors writing Python evaluation functions (`evaluation_function` / `preview_function`) |

@@ -23,6 +23,23 @@ module and sends a concrete grading request to it.
 The optional cases are skipped with a clear message if their compiler is not
 installed, so the script remains safe as a live-demo command.
 
+## Python-focused demo matrix
+
+For the Python story, use the dedicated runner instead of mixing it with the
+Go/Rust/C/C++ WASI matrix:
+
+```bash
+scripts/demo-python-examples.sh
+```
+
+It covers three distinct Python routes:
+
+| Route | Example | Runtime | Why |
+|---|---|---|---|
+| Plain Python | `examples/eval-python/` | `python-wasm` | standard-library evaluator |
+| NumPy | `examples/eval-numpy/` | `reactor-python` | array/vector grading with snapshot/restore |
+| SciPy | `examples/eval-scipy/` | `pyodide` | heavy scientific packages unavailable in CPython-WASI |
+
 ## Real Lambda Feedback source material
 
 To pull public evaluation functions currently in the Lambda Feedback GitHub org:

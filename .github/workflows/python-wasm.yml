@@ -1,103 +1,69 @@
-name: Python-WASM Backend
+name: Python Example Routes
 
 on:
   push:
-    branches:
-      - "feat/wasm-backend"
-      - "main"
+    branches: [main, feat/wasm-backend]
     paths:
-      - "internal/execution/wasm/python*.go"
-      - "internal/execution/wasm/testdata/python.wasm"
-      - "internal/execution/wasm/testdata/python-reactor.wasm"
       - "examples/eval-python/**"
       - "examples/eval-numpy/**"
+      - "examples/eval-scipy/**"
+      - "examples/eval-pyodide/**"
+      - "scripts/demo-python-examples.sh"
+      - "internal/execution/wasm/python*.go"
+      - "internal/execution/wasm/import_scan*.go"
+      - "internal/execution/dispatcher*.go"
       - ".github/workflows/python-wasm.yml"
   pull_request:
     paths:
-      - "internal/execution/wasm/python*.go"
-      - "internal/execution/wasm/testdata/python.wasm"
-      - "internal/execution/wasm/testdata/python-reactor.wasm"
       - "examples/eval-python/**"
       - "examples/eval-numpy/**"
+      - "examples/eval-scipy/**"
+      - "examples/eval-pyodide/**"
+      - "scripts/demo-python-examples.sh"
+      - "internal/execution/wasm/python*.go"
+      - "internal/execution/wasm/import_scan*.go"
+      - "internal/execution/dispatcher*.go"
       - ".github/workflows/python-wasm.yml"
   workflow_dispatch:
 
 jobs:
-  python-wasm:
-    name: CPython-WASI resident backend
+  python-examples:
+    name: Plain Python / NumPy / SciPy examples
     runs-on: ubuntu-latest
-
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          lfs: false
 
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version-file: ./go.mod
+          cache: true
 
-      - name: Install dependencies
-        run: go mod download
+      - name: Setup Node.js for Pyodide/SciPy
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: examples/eval-pyodide/package-lock.json
 
-      - name: Download python-reactor.wasm (CPython 3.14 + numpy)
+      - name: Download python-reactor.wasm for NumPy route
         run: |
           mkdir -p internal/execution/wasm/testdata
           curl -fsSL \
             https://github.com/bkmashiro/webassembly-language-runtimes/releases/download/v1.0.11/python-reactor.wasm \
             -o internal/execution/wasm/testdata/python-reactor.wasm
-          ls -lh internal/execution/wasm/testdata/python-reactor.wasm
 
-      - name: Unit tests — PythonRunner (per-request instantiation)
-        run: |
-          PYTHON_WASM=./testdata/python.wasm \
-            go test ./internal/execution/wasm/... \
-            -run TestPythonRunner \
-            -v -count=1 -timeout 120s
+      - name: Run Python example routes
+        run: scripts/demo-python-examples.sh
 
-      - name: Unit tests — ResidentPythonRunner (persistent server loop)
-        run: |
-          PYTHON_WASM=./testdata/python.wasm \
-            go test ./internal/execution/wasm/... \
-            -run TestResidentPythonRunner \
-            -v -count=1 -timeout 300s
-
-      - name: Unit tests — ReactorPythonRunner (snapshot/restore)
-        run: |
-          PYTHON_REACTOR_WASM=./testdata/python-reactor.wasm \
-            go test ./internal/execution/wasm/... \
-            -run TestReactorPythonRunner \
-            -v -count=1 -timeout 300s
-
-      - name: Numpy sys.path diagnostic
-        run: |
-          PYTHON_REACTOR_WASM=./testdata/python-reactor.wasm \
-            go test ./internal/execution/wasm/... \
-            -run TestReactorPythonRunner_SysPathDiag \
-            -v -count=1 -timeout 300s
-
-      - name: Numpy integration test
-        # python-reactor.wasm has numpy statically linked (CPython 3.14 + WASI SDK 33).
-        # All subtests should run — correctness, tolerance, shape-mismatch, RNG isolation.
-        run: |
-          PYTHON_REACTOR_WASM=./testdata/python-reactor.wasm \
-            go test ./internal/execution/wasm/... \
-            -run TestReactorPythonRunner_Numpy \
-            -v -count=1 -timeout 300s
-
-      - name: Benchmark — per-request vs resident latency
-        run: |
-          PYTHON_WASM=./testdata/python.wasm \
-            go test ./internal/execution/wasm/... \
-            -bench='BenchmarkPythonRunner_RunScript|BenchmarkResidentPythonRunner_SendRequest' \
-            -benchtime=5s -count=1 -run=^$ \
-            -v -timeout 600s 2>&1 | tee bench-python.txt
-
-      - name: Upload benchmark results
+      - name: Upload demo logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bench-python
-          path: bench-python.txt
+          name: python-example-logs
+          path: .demo-logs/*.log
+          retention-days: 14

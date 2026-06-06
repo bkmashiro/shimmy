@@ -1,15 +1,6 @@
-name: Build WASM Examples
+name: Build WASM Examples (manual)
 
 on:
-  push:
-    paths:
-      - "examples/**"
-    branches:
-      - main
-      - feat/wasm-backend
-  pull_request:
-    paths:
-      - "examples/**"
   workflow_dispatch:
 
 jobs:

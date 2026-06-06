@@ -19,6 +19,10 @@ lcov.info
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
+# Python cache files
+__pycache__/
+*.py[cod]
+
 # Go workspace file
 go.work
 
@@ -34,3 +38,6 @@ examples/eval-c/eval.wasm
 examples/eval-cpp/eval.wasm
 examples/eval-rust/eval.wasm
 examples/eval-rust/target/
+# Node/Pyodide demo dependencies
+node_modules/
+examples/eval-pyodide/node_modules/

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -91,6 +92,11 @@ func TestNewDispatcher_ReactorPython_NoHeavyDeps_EmptyModulePath(t *testing.T) {
 	})
 
 	require.Error(t, err, "reactor-python with empty wasmPath must fail")
+	if runtime.GOOS != "linux" {
+		assert.Contains(t, err.Error(), "Linux",
+			"non-Linux hosts should fail before reactor-python config validation")
+		return
+	}
 	assert.Contains(t, err.Error(), "wasmPath",
 		"error should be the reactor-python WASM config error, not a node/pyodide error")
 }
@@ -115,6 +121,11 @@ func TestNewDispatcher_ReactorPython_EmptyScriptPath(t *testing.T) {
 	})
 
 	require.Error(t, err, "reactor-python with no script path must fail")
+	if runtime.GOOS != "linux" {
+		assert.Contains(t, err.Error(), "Linux",
+			"non-Linux hosts should fail before reactor-python script validation")
+		return
+	}
 	assert.Contains(t, err.Error(), "PythonScriptPath",
 		"empty script path should fall through to reactor-python, not Pyodide")
 }

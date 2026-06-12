@@ -32,10 +32,7 @@ func TestMuEdContentKey(t *testing.T) {
 					Content: map[string]any{tc.want: "x"},
 				},
 				Task: &runtime.MuEdTask{
-					ReferenceSolution: &runtime.MuEdSubmission{
-						Type:    tc.t,
-						Content: map[string]any{tc.want: "x"},
-					},
+					ReferenceSolution: map[string]any{tc.want: "x"},
 				},
 			}
 			body, err := runtime.MuEdBuildLegacyEvaluateRequest(req)
@@ -53,10 +50,7 @@ func TestMuEdBuildLegacyEvalRequest(t *testing.T) {
 				Content: map[string]any{"expression": "x^2"},
 			},
 			Task: &runtime.MuEdTask{
-				ReferenceSolution: &runtime.MuEdSubmission{
-					Type:    runtime.MuEdMath,
-					Content: map[string]any{"expression": "x^2"},
-				},
+				ReferenceSolution: map[string]any{"expression": "x^2"},
 			},
 		}
 		body, err := runtime.MuEdBuildLegacyEvaluateRequest(req)
@@ -73,10 +67,7 @@ func TestMuEdBuildLegacyEvalRequest(t *testing.T) {
 				Content: map[string]any{"text": "hello"},
 			},
 			Task: &runtime.MuEdTask{
-				ReferenceSolution: &runtime.MuEdSubmission{
-					Type:    runtime.MuEdText,
-					Content: map[string]any{"text": "hello"},
-				},
+				ReferenceSolution: map[string]any{"text": "hello"},
 			},
 		}
 		body, err := runtime.MuEdBuildLegacyEvaluateRequest(req)
@@ -92,10 +83,7 @@ func TestMuEdBuildLegacyEvalRequest(t *testing.T) {
 				Content: map[string]any{"value": "foo"},
 			},
 			Task: &runtime.MuEdTask{
-				ReferenceSolution: &runtime.MuEdSubmission{
-					Type:    runtime.MuEdOther,
-					Content: map[string]any{"value": "bar"},
-				},
+				ReferenceSolution: map[string]any{"value": "bar"},
 			},
 		}
 		body, err := runtime.MuEdBuildLegacyEvaluateRequest(req)
@@ -111,10 +99,7 @@ func TestMuEdBuildLegacyEvalRequest(t *testing.T) {
 				Content: map[string]any{"value": "x^2"},
 			},
 			Task: &runtime.MuEdTask{
-				ReferenceSolution: &runtime.MuEdSubmission{
-					Type:    runtime.MuEdMath,
-					Content: map[string]any{"value": "x^2"},
-				},
+				ReferenceSolution: map[string]any{"value": "x^2"},
 			},
 		}
 		body, err := runtime.MuEdBuildLegacyEvaluateRequest(req)
@@ -130,10 +115,7 @@ func TestMuEdBuildLegacyEvalRequest(t *testing.T) {
 				Content: map[string]any{"unrelated": "x"},
 			},
 			Task: &runtime.MuEdTask{
-				ReferenceSolution: &runtime.MuEdSubmission{
-					Type:    runtime.MuEdMath,
-					Content: map[string]any{"expression": "x"},
-				},
+				ReferenceSolution: map[string]any{"expression": "x"},
 			},
 		}
 		_, err := runtime.MuEdBuildLegacyEvaluateRequest(req)
@@ -171,10 +153,7 @@ func TestMuEdBuildLegacyEvalRequest(t *testing.T) {
 				Content: map[string]any{"expression": "x"},
 			},
 			Task: &runtime.MuEdTask{
-				ReferenceSolution: &runtime.MuEdSubmission{
-					Type:    runtime.MuEdMath,
-					Content: map[string]any{"expression": "x"},
-				},
+				ReferenceSolution: map[string]any{"expression": "x"},
 			},
 			Configuration: &runtime.MuEdConfiguration{
 				Params: map[string]any{"strict": true},

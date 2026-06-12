@@ -18,7 +18,7 @@ type MuEdSubmission struct {
 }
 
 type MuEdTask struct {
-	ReferenceSolution *MuEdSubmission `json:"referenceSolution"`
+	ReferenceSolution map[string]any `json:"referenceSolution"`
 }
 
 type MuEdConfiguration struct {
@@ -121,8 +121,7 @@ func MuEdBuildLegacyEvaluateRequest(req MuEdEvaluateRequest) (map[string]any, er
 		return nil, fmt.Errorf("task.referenceSolution is required for evaluation")
 	}
 
-	sol := req.Task.ReferenceSolution
-	answer, err := muEdExtractContent(sol.Content, sol.Type)
+	answer, err := muEdExtractContent(req.Task.ReferenceSolution, req.Submission.Type)
 	if err != nil {
 		return nil, fmt.Errorf("referenceSolution: %w", err)
 	}

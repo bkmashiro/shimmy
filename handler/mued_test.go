@@ -57,8 +57,7 @@ func mathEvalBody(t *testing.T) []byte {
 		},
 		"task": map[string]any{
 			"referenceSolution": map[string]any{
-				"type":    "MATH",
-				"content": map[string]any{"expression": "x^2"},
+				"expression": "x^2",
 			},
 		},
 	})

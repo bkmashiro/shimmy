@@ -175,8 +175,8 @@ func TestPooledDispatcher_Send_ReleaseSupervisorWaitErrorOnDestroy(t *testing.T)
 	_, err := m.Send(context.Background(), "test", data)
 	assert.NoError(t, err)
 
-	// wait for the release to happen in a goroutine
-	<-time.After(1 * time.Millisecond)
+	// wait for the background goroutine to finish by draining the pool
+	m.Shutdown(context.Background())
 
 	assert.Equal(t, 2, waited)
 }

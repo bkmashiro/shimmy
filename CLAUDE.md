@@ -241,9 +241,4 @@ Routing is selected explicitly at deployment time via `FUNCTION_INTERFACE` (for 
 ## Relationship to Other Projects
 
 - `/workspace/extra/projects/shimmy/` — original shimmy (read-only reference)
-- `/workspace/extra/projects/shimmy-docs/` — architecture docs, paper notes, research notes
-  - `docs/research/python-sandbox-architecture.md` — two-tier Python decision
-  - `docs/research/what-works.md` — Lambda environment probing results
-  - `docs/papers/zpoline.md` — syscall interception reference
-  - `docs/papers/mares-grading-security-2021.md` — threat model reference
 - `/workspace/extra/projects/interim-report/` — Typst interim report

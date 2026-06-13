@@ -31,4 +31,5 @@ Replace the `match method` arms in `src/lib.rs` with your own evaluation logic.
 The `alloc` and `evaluate` exports must remain unchanged — they are the guest ABI
 that shimmy calls on every request.
 
-See the canonical Guest ABI docs in shimmy-docs: `docs/wasm/guest-abi.md` (or the published `/wasm/guest-abi` page).
+For the complete request/response shape, see the JSON schemas in
+[`../../runtime/schema`](../../runtime/schema).

@@ -79,6 +79,7 @@ func TestReactorPythonRunner_LambdaFeedbackBundleMatrix(t *testing.T) {
 		evalEntry    string
 		previewEntry string
 		input        string
+		method       string
 		wantKeys     []string
 		pureDeps     bool
 	}{
@@ -113,6 +114,25 @@ func TestReactorPythonRunner_LambdaFeedbackBundleMatrix(t *testing.T) {
 			input:     `{"response":1.0,"answer":1.0,"params":{"rtol":0,"atol":0}}`,
 			wantKeys:  []string{"is_correct", "allowed_diff"},
 		},
+		{
+			name:         "symbolic equal package",
+			root:         "examples/lambda-feedback-fixtures/symbolic-equal",
+			evalEntry:    "evaluation_function.evaluation:evaluation_function",
+			previewEntry: "evaluation_function.preview:preview_function",
+			input:        `{"response":"x + 1","answer":"1 + x","params":{"strict_syntax":false}}`,
+			wantKeys:     []string{"is_correct"},
+			pureDeps:     true,
+		},
+		{
+			name:         "symbolic equal latex preview package",
+			root:         "examples/lambda-feedback-fixtures/symbolic-equal",
+			evalEntry:    "evaluation_function.evaluation:evaluation_function",
+			previewEntry: "evaluation_function.preview:preview_function",
+			input:        `{"response":"\\frac{1}{2}","answer":"","params":{"is_latex":true}}`,
+			method:       "preview",
+			wantKeys:     []string{"preview"},
+			pureDeps:     true,
+		},
 	}
 
 	for _, tc := range cases {
@@ -135,7 +155,11 @@ func TestReactorPythonRunner_LambdaFeedbackBundleMatrix(t *testing.T) {
 			runner := newReactorRunnerForLFBundleTest(t)
 			ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 			defer cancel()
-			result, err := runner.SendRequest(ctx, string(scriptBytes), "eval", tc.input)
+			method := tc.method
+			if method == "" {
+				method = "eval"
+			}
+			result, err := runner.SendRequest(ctx, string(scriptBytes), method, tc.input)
 			require.NoError(t, err)
 			for _, key := range tc.wantKeys {
 				require.Contains(t, result, key)

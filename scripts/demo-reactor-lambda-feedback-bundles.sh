@@ -53,22 +53,26 @@ verify_reactor() {
 }
 
 prepare_pure_deps() {
-  if [[ -d "${PURE_DEPS}/mpmath" ]]; then
+  local marker="${PURE_DEPS}/.shimmy-lf-pure-deps-v2"
+  if [[ -f "${marker}" ]]; then
     echo "==> pure Python deps already present: ${PURE_DEPS}"
     return 0
   fi
 
   rm -rf "${PURE_DEPS}"
   mkdir -p "${PURE_DEPS}"
-  echo "==> installing pure Python deps for bundle: mpmath -> ${PURE_DEPS}"
+  echo "==> installing pure Python deps for bundle: mpmath, typing_extensions, antlr4, latex2sympy2 -> ${PURE_DEPS}"
   if need uv; then
-    uv pip install --target "${PURE_DEPS}" mpmath
+    uv pip install --target "${PURE_DEPS}" typing_extensions mpmath==1.2.1 antlr4-python3-runtime==4.7.2
+    uv pip install --target "${PURE_DEPS}" --no-deps 'git+https://github.com/lambda-feedback/latex2sympy.git@master#egg=latex2sympy2'
   elif python3 -m pip --version >/dev/null 2>&1; then
-    python3 -m pip install --target "${PURE_DEPS}" mpmath
+    python3 -m pip install --target "${PURE_DEPS}" typing_extensions mpmath==1.2.1 antlr4-python3-runtime==4.7.2
+    python3 -m pip install --target "${PURE_DEPS}" --no-deps 'git+https://github.com/lambda-feedback/latex2sympy.git@master#egg=latex2sympy2'
   else
     echo "error: uv or python3 -m pip is required to install pure Python bundle deps" >&2
     exit 1
   fi
+  touch "${marker}"
 }
 
 run_direct() {

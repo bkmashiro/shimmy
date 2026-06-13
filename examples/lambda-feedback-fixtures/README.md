@@ -40,6 +40,16 @@ copied from `.demo-lambda-sources` so tests can run without network access.
   - NumPy scalar helper import (`from numpy import spacing`).
   - Numeric tolerance feedback fields returned through reactor bundle normalization.
 
+### `symbolic-equal`
+- **Source repo/folder:** `.demo-lambda-sources/SymbolicEqual/app`
+- **Contains (runtime files only):** `evaluation_function/evaluation.py`, `evaluation_function/preview.py`,
+  parser helpers, feedback messages, and minimal `main.py` registration.
+- **Compatibility behavior covered:**
+  - Larger real evaluator package copied from a flat `app/` layout into `evaluation_function/`.
+  - Basic symbolic comparison via SymPy.
+  - LaTeX preview via pure-Python `latex2sympy2` + `antlr4-python3-runtime` bundled through `--include-root`.
+  - Bundler compatibility rewrite for old `antlr4-python3-runtime` imports (`typing.io` -> `typing`).
+
 No `requirements.txt` files were copied for package-style fixtures because the runtime test matrix
 handles third-party deps separately: built-in reactor packages stay in `python-reactor.wasm`, while
 extra pure-Python deps are supplied to the bundler via `--include-root`.

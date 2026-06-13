@@ -287,7 +287,10 @@ python3 tools/lf-bundle-python/lf_bundle_python.py \
 # For pure-Python dependencies, install them to a staging directory and repeat
 # --include-root. compareBoolean/SymPy needs mpmath plus a small reactor ctypes
 # polyfill because the CPython-WASI artifact does not ship native _ctypes.
-uv pip install --target /tmp/lf-puredeps mpmath
+# SymbolicEqual's LaTeX preview also works when bundling typing_extensions,
+# antlr4-python3-runtime, and latex2sympy2.
+uv pip install --target /tmp/lf-puredeps mpmath typing_extensions antlr4-python3-runtime==4.7.2
+uv pip install --target /tmp/lf-puredeps --no-deps 'git+https://github.com/lambda-feedback/latex2sympy.git@master#egg=latex2sympy2'
 python3 tools/lf-bundle-python/lf_bundle_python.py \
   --root examples/lambda-feedback-fixtures/compare-boolean \
   --adapter-root examples/lambda-feedback-adapter \
@@ -306,8 +309,9 @@ FUNCTION_WASM_PYTHON_SCRIPT=/tmp/boilerplate.bundle.py \
 - The bundle embeds evaluator package modules, the minimal `lf_toolkit` shim, and
   any pure-Python dependency directories passed with `--include-root`.
   Native/WASI packages such as NumPy must already be present in the reactor
-  artifact; `python-reactor.wasm` v1.0.11 has been verified with ArrayEqual and
-  IsSimilar NumPy fixtures. Reactor includes a small deterministic
+  artifact; `python-reactor.wasm` v1.0.11 has been verified with ArrayEqual,
+  IsSimilar, and SymbolicEqual (basic symbolic eval plus LaTeX preview) fixtures.
+  Reactor includes a small deterministic
   `numpy.random` safety polyfill for common APIs (`seed`, `rand`, `randn`,
   `random_sample`, `uniform`, `normal`, `randint`, basic `choice`) so unsupported
   RNG extensions do not abort the WASM instance. SciPy is intentionally not a

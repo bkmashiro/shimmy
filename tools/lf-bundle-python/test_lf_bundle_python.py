@@ -127,6 +127,45 @@ def test_bundle_can_embed_extra_pure_python_include_roots(tmp_path: Path) -> Non
     assert bundle.evaluation_function("", "", {}) == {"is_correct": True}
 
 
+def test_bundle_rewrites_legacy_typing_io_imports_for_python_314(tmp_path: Path) -> None:
+    include_root = tmp_path / "vendor"
+    package = include_root / "old_antlr_like"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("")
+    (package / "lexer.py").write_text(
+        "from typing.io import TextIO\n"
+        "def typename():\n"
+        "    return TextIO.__name__\n"
+    )
+
+    fixture = tmp_path / "fixture"
+    eval_pkg = fixture / "evaluation_function"
+    eval_pkg.mkdir(parents=True)
+    (eval_pkg / "__init__.py").write_text("")
+    (eval_pkg / "evaluation.py").write_text(
+        "from old_antlr_like.lexer import typename\n"
+        "def evaluation_function(response, answer, params=None):\n"
+        "    return {'is_correct': typename() == 'TextIO'}\n"
+    )
+
+    out = tmp_path / "legacy-typing.bundle.py"
+    result = run_bundler(
+        "--root",
+        str(fixture),
+        "--adapter-root",
+        str(ADAPTER),
+        "--include-root",
+        str(include_root),
+        "--eval-entrypoint",
+        "evaluation_function.evaluation:evaluation_function",
+        "--out",
+        str(out),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "from typing import TextIO" in out.read_text()
+
+
 def test_bundle_fails_when_entrypoint_module_is_missing(tmp_path: Path) -> None:
     result = run_bundler(
         "--root",

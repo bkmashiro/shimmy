@@ -132,7 +132,8 @@ Use package mode for real Lambda Feedback evaluator repositories that import
 single-file bundle first, then set `FUNCTION_WASM_PYTHON_SCRIPT` to that bundle:
 
 ```bash
-uv pip install --target /tmp/lf-puredeps mpmath
+uv pip install --target /tmp/lf-puredeps mpmath typing_extensions antlr4-python3-runtime==4.7.2
+uv pip install --target /tmp/lf-puredeps --no-deps 'git+https://github.com/lambda-feedback/latex2sympy.git@master#egg=latex2sympy2'
 python3 tools/lf-bundle-python/lf_bundle_python.py \
   --root examples/lambda-feedback-fixtures/compare-boolean \
   --adapter-root examples/lambda-feedback-adapter \
@@ -144,8 +145,8 @@ python3 tools/lf-bundle-python/lf_bundle_python.py \
 ```
 
 `python-reactor.wasm` v1.0.11 has been verified with bundle fixtures for
-boilerplate, compareBoolean/SymPy, ArrayEqual/NumPy, and IsSimilar/NumPy.
-SciPy remains Pyodide-only by policy.
+boilerplate, compareBoolean/SymPy, ArrayEqual/NumPy, IsSimilar/NumPy, and
+SymbolicEqual/SymPy+LaTeX preview. SciPy remains Pyodide-only by policy.
 
 **With read-only dataset mount:**
 

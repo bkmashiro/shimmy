@@ -41,6 +41,20 @@ def iter_python_files(root: Path) -> Iterable[Path]:
         yield path
 
 
+def normalise_source_for_bundle(source: str) -> str:
+    """Apply tiny compatibility rewrites for old pure-Python deps.
+
+    Some Lambda Feedback dependencies pin old pure-Python packages (notably
+    antlr4-python3-runtime 4.7.x) that import deprecated pseudo-submodules such
+    as `typing.io`. Those imports are gone in CPython 3.14, including the WASI
+    reactor build, but the names still live directly in `typing`.
+    """
+    return (
+        source.replace("from typing.io import ", "from typing import ")
+        .replace("from typing.re import ", "from typing import ")
+    )
+
+
 def collect_fixture_modules(root: Path) -> tuple[dict[str, str], set[str]]:
     modules: dict[str, str] = {}
     packages: set[str] = set()
@@ -51,7 +65,7 @@ def collect_fixture_modules(root: Path) -> tuple[dict[str, str], set[str]]:
         name = module_name_from_file(root, path)
         if not name:
             continue
-        modules[name] = path.read_text()
+        modules[name] = normalise_source_for_bundle(path.read_text())
         if is_package_file(path):
             packages.add(name)
     return modules, packages
@@ -72,7 +86,7 @@ def collect_adapter_modules(adapter_root: Path) -> tuple[dict[str, str], set[str
             name = module_name_from_file(adapter_root, path)
             if not name:
                 continue
-            modules[name] = path.read_text()
+            modules[name] = normalise_source_for_bundle(path.read_text())
             if is_package_file(path):
                 packages.add(name)
     return modules, packages

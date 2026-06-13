@@ -1,0 +1,5 @@
+typing_extensions
+mpmath==1.2.1
+sympy==1.10.1
+antlr4-python3-runtime==4.7.2
+git+https://github.com/lambda-feedback/latex2sympy.git@master#egg=latex2sympy2

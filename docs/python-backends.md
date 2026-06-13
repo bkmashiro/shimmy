@@ -210,15 +210,20 @@ For real Lambda Feedback packages, use one of two explicit paths:
 
 The bundle shortcut covers evaluator package code, the adapter shim, and
 repeatable `--include-root` directories for pure-Python dependencies such as
-`mpmath`. Native/WASI packages such as NumPy must be present in the reactor
-artifact. The verified `v1.0.11` artifact includes NumPy and SymPy, but SymPy also
-needs bundled pure-Python `mpmath` plus the narrow reactor `ctypes` polyfill under
-`tools/lf-bundle-python/polyfills/reactor`. SciPy is intentionally not a reactor
-target; use Pyodide for SciPy-heavy evaluators. The reactor host also installs a
-small `numpy.random` safety polyfill: `seed`, `rand`, `randn`, `random_sample`,
-`uniform`, `normal`, `randint`, and basic `choice` work deterministically through
-stdlib `random`, while unsupported advanced RNG APIs fail with a Python error
-instead of aborting the WASM instance.
+`mpmath`, `typing_extensions`, `antlr4-python3-runtime`, and `latex2sympy2`.
+Native/WASI packages such as NumPy must be present in the reactor artifact. The
+verified `v1.0.11` artifact includes NumPy and SymPy, and has now passed
+boilerplate, compareBoolean, ArrayEqual, IsSimilar, and SymbolicEqual
+basic+LaTeX-preview fixture probes. SymPy still needs bundled pure-Python
+`mpmath` plus the narrow reactor `ctypes` polyfill under
+`tools/lf-bundle-python/polyfills/reactor`. Old ANTLR 4.7.x imports
+`typing.io`, which no longer exists as a pseudo-package in CPython 3.14; the
+bundler applies a narrow source rewrite to `from typing import ...`. SciPy is
+intentionally not a reactor target; use Pyodide for SciPy-heavy evaluators. The
+reactor host also installs a small `numpy.random` safety polyfill: `seed`,
+`rand`, `randn`, `random_sample`, `uniform`, `normal`, `randint`, and basic
+`choice` work deterministically through stdlib `random`, while unsupported
+advanced RNG APIs fail with a Python error instead of aborting the WASM instance.
 
 ### Path 4: Pyodide package/script runner
 

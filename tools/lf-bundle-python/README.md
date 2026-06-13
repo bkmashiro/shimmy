@@ -48,7 +48,8 @@ It can embed pure-Python third-party packages after installing them into a stagi
 folder:
 
 ```bash
-uv pip install --target /tmp/lf-puredeps mpmath
+uv pip install --target /tmp/lf-puredeps mpmath typing_extensions antlr4-python3-runtime==4.7.2
+uv pip install --target /tmp/lf-puredeps --no-deps 'git+https://github.com/lambda-feedback/latex2sympy.git@master#egg=latex2sympy2'
 python3 tools/lf-bundle-python/lf_bundle_python.py \
   --root examples/lambda-feedback-fixtures/compare-boolean \
   --adapter-root examples/lambda-feedback-adapter \
@@ -66,6 +67,11 @@ in the target backend:
 - Pyodide: loaded through `FUNCTION_PYODIDE_PACKAGES`
 
 `scipy` is intentionally out of reactor scope; use Pyodide for scipy-heavy evaluators.
+
+For old pure-Python dependencies, the bundler applies a narrow source rewrite for
+Python 3.14 compatibility (`from typing.io import TextIO` -> `from typing import
+TextIO`). This is needed by the Lambda Feedback `latex2sympy2`/ANTLR stack and
+keeps the workaround in the generated bundle rather than in reactor C.
 
 ## Tests
 

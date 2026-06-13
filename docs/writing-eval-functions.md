@@ -318,6 +318,8 @@ FUNCTION_WASM_PYTHON_SCRIPT=/tmp/boilerplate.bundle.py \
   reactor target; use Pyodide package mode for SciPy-heavy evaluators.
 - Runtime selection is explicit. Shimmy does not infer the backend from imports
   or `requirements.txt`.
+- For the current real-evaluator support table, see
+  [`lambda-feedback-capability-matrix.md`](lambda-feedback-capability-matrix.md).
 - Try the local fixture demo with:
 
 ```bash

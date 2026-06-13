@@ -208,6 +208,9 @@ For real Lambda Feedback packages, use one of two explicit paths:
   `tools/lf-bundle-python/lf_bundle_python.py`, then point
   `FUNCTION_WASM_PYTHON_SCRIPT` at the generated bundle.
 
+See [`lambda-feedback-capability-matrix.md`](lambda-feedback-capability-matrix.md)
+for the current fixture-by-fixture support table.
+
 The bundle shortcut covers evaluator package code, the adapter shim, and
 repeatable `--include-root` directories for pure-Python dependencies such as
 `mpmath`, `typing_extensions`, `antlr4-python3-runtime`, and `latex2sympy2`.

@@ -3,6 +3,25 @@
 This directory contains a small, local subset of real Lambda Feedback evaluator repositories,
 copied from `.demo-lambda-sources` so tests can run without network access.
 
+## Capability matrix
+
+The machine-readable matrix lives in [`capability-matrix.json`](./capability-matrix.json).
+It separates three reactor-success categories from explicit Pyodide-only rows:
+
+| Fixture | Status | Reactor requirements | Pyodide stance |
+|---|---|---|---|
+| `boilerplate-python` | `reactor-bundle` | evaluator package + adapter bundle only | supported |
+| `compare-boolean` | `reactor-bundle-pure-deps` | `sympy` in `python-reactor.wasm`; bundle `mpmath` + reactor `ctypes` polyfill | supported |
+| `array-equal` | `reactor-bundle-artifact-native` | `numpy` from `python-reactor.wasm` | supported |
+| `is-similar` | `reactor-bundle-artifact-native` | `numpy` from `python-reactor.wasm` | supported |
+| `symbolic-equal` | `reactor-bundle-pure-deps` | `sympy` in artifact; bundle `mpmath`, `typing_extensions`, `antlr4-python3-runtime`, `latex2sympy2`; apply old `typing.io` rewrite | supported |
+| `short-text-answer` | `pyodide-only` | not targeted for reactor: `nltk` data, `gensim`/SciPy chain, `matplotlib` stack | default compatibility path |
+
+Rules of thumb:
+- Pure Python evaluator code and dependencies can be bundled with `tools/lf-bundle-python --include-root`.
+- Native/WASI dependencies must already be present in the chosen `python-reactor.wasm` artifact.
+- Heavy scientific/data/rendering stacks remain Pyodide-only unless they become first-class reactor artifact requirements.
+
 ## Fixtures
 
 ### `boilerplate-python`

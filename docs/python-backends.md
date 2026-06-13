@@ -198,11 +198,19 @@ dispatcher discards the runner and spawns a replacement in a background
 goroutine via `spawnReplacement`.
 
 **Use case:** Single-file evaluators that need the fastest Python path and a
-compatible CPython-WASI dependency set. Real Lambda Feedback package layouts
-(`evaluation_function/...` modules plus `lf_toolkit`) are **not supported by
-reactor-python yet**; the dispatcher fails fast if Pyodide package-mode env vars
-are set with `FUNCTION_INTERFACE=reactor-python`. Use Pyodide package mode for
-that compatibility path until reactor package mounting/bootstrap is designed.
+compatible CPython-WASI dependency set. Reactor does not expose the Pyodide
+package-mode environment contract directly, and the dispatcher still fails fast
+if Pyodide package-mode env vars are set with `FUNCTION_INTERFACE=reactor-python`.
+For real Lambda Feedback packages, use one of two explicit paths:
+
+- default compatibility path: Pyodide package mode;
+- fast-path shortcut: generate a single-file wrapper with
+  `tools/lf-bundle-python/lf_bundle_python.py`, then point
+  `FUNCTION_WASM_PYTHON_SCRIPT` at the generated bundle.
+
+The bundle shortcut only covers evaluator package code plus the adapter shim;
+third-party dependencies such as `numpy`/`sympy` must already be present in the
+chosen reactor artifact.
 
 ### Path 4: Pyodide package/script runner
 
@@ -291,6 +299,6 @@ from serving requests with reduced capacity silently.
 | Per-request latency | ~160 ms | ~10-50 ms | ~1-5 ms + restore | highest; depends on Pyodide/packages |
 | Heap isolation | full (fresh instance) | namespace only | full (snapshot/restore) | legacy script: namespace; package mode: persistent imports |
 | `sys.modules` reset | yes | eviction pass | yes (snapshot) | no in package mode |
-| Package-style LF evaluator support | no | no | no | yes |
+| Package-style LF evaluator support | no | no | via generated single-file bundle | yes |
 | Max pool size | N/A | 8 | 4 | supervisor config |
 | Memory per slot | none (transient) | ~242 MB | ~100 MB | Pyodide runtime + packages |

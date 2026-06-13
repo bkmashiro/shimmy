@@ -269,9 +269,29 @@ Notes:
 
 - `FUNCTION_INTERFACE=pyodide` is the current default compatibility path for
   package-style Lambda Feedback evaluators.
-- `FUNCTION_INTERFACE=reactor-python` currently expects a single script via
-  `FUNCTION_WASM_PYTHON_SCRIPT`; it rejects package-mode env vars with an
-  explicit error until reactor package mounting/bootstrap is implemented.
+- `FUNCTION_INTERFACE=reactor-python` directly accepts a single script via
+  `FUNCTION_WASM_PYTHON_SCRIPT`; it rejects Pyodide package-mode env vars with
+  an explicit error.
+- To use a package-style evaluator on reactor without designing a full package
+  runtime, first generate a single-file bundle:
+
+```bash
+python3 tools/lf-bundle-python/lf_bundle_python.py \
+  --root examples/lambda-feedback-fixtures/boilerplate-python \
+  --adapter-root examples/lambda-feedback-adapter \
+  --eval-entrypoint evaluation_function.evaluation:evaluation_function \
+  --preview-entrypoint evaluation_function.preview:preview_function \
+  --out /tmp/boilerplate.bundle.py
+
+FUNCTION_INTERFACE=reactor-python \
+FUNCTION_COMMAND=/path/to/python-reactor.wasm \
+FUNCTION_WASM_PYTHON_SCRIPT=/tmp/boilerplate.bundle.py \
+./shimmy serve
+```
+
+- The bundle embeds evaluator package modules and the minimal `lf_toolkit` shim,
+  but it does not vendor third-party dependencies. `numpy`/`sympy` must already
+  be available in the chosen reactor artifact, or use Pyodide package mode.
 - Runtime selection is explicit. Shimmy does not infer the backend from imports
   or `requirements.txt`.
 - Try the local fixture demo with:

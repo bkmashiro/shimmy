@@ -281,4 +281,42 @@ def evaluation_function(response, answer, params=None):
 			"numpy RNG state must reset with heap snapshot; got %q then %q", f1, f2)
 		t.Logf("numpy RNG draw (both requests): %s", f1)
 	})
+
+	t.Run("numpy_rng_common_polyfill_api", func(t *testing.T) {
+		reqCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		defer cancel()
+
+		rngScript := `
+import numpy as np
+
+
+def _shape_of(value):
+    if isinstance(value, list):
+        if not value:
+            return [0]
+        return [len(value)] + _shape_of(value[0])
+    return []
+
+
+def evaluation_function(response, answer, params=None):
+    np.random.seed(7)
+    values = {
+        "random": float(np.random.random()),
+        "random_sample_shape": _shape_of(np.random.random_sample((2, 3))),
+        "uniform_shape": _shape_of(np.random.uniform(-1.0, 1.0, (2,))),
+        "normal_shape": _shape_of(np.random.normal(0.0, 1.0, (2, 2))),
+        "randint_shape": _shape_of(np.random.randint(1, 5, (3,))),
+        "choice_scalar": int(np.random.choice([10, 20, 30])),
+    }
+    return {"is_correct": True, "feedback": str(values)}
+`
+		result, err := runner.SendRequest(reqCtx, rngScript, "eval", `{"response":"x","answer":"x"}`)
+		require.NoError(t, err)
+		require.NotContains(t, result, "error", "common numpy.random polyfill API should not error: %#v", result)
+		feedback, _ := result["feedback"].(string)
+		assert.Contains(t, feedback, "random_sample_shape': [2, 3]")
+		assert.Contains(t, feedback, "uniform_shape': [2]")
+		assert.Contains(t, feedback, "normal_shape': [2, 2]")
+		assert.Contains(t, feedback, "randint_shape': [3]")
+	})
 }

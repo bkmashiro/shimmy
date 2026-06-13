@@ -676,25 +676,74 @@ def _np_seed(seed=None, _rng=_np_rng):
     # _rng captured as default arg so del _np_rng below does not break this.
     _rng.seed(seed)
 
+def _np_shape(args):
+    if len(args) == 1 and isinstance(args[0], (tuple, list)):
+        return tuple(int(x) for x in args[0])
+    return tuple(int(x) for x in args)
+
+def _np_fill(shape, scalar_fn):
+    if not shape:
+        return scalar_fn()
+    if len(shape) == 1:
+        return [scalar_fn() for _ in range(shape[0])]
+    return [_np_fill(shape[1:], scalar_fn) for _ in range(shape[0])]
+
 def _np_rand(*shape, _rng=_np_rng):
     """Return a scalar or nested list of uniform [0,1) floats matching shape."""
-    if not shape:
-        return _rng.random()
-    def _fill(dims):
-        if len(dims) == 1:
-            return [_rng.random() for _ in range(dims[0])]
-        return [_fill(dims[1:]) for _ in range(dims[0])]
-    return _fill(shape)
+    shape = _np_shape(shape)
+    return _np_fill(shape, _rng.random)
 
 def _np_randn(*shape, _rng=_np_rng):
     """Return a scalar or nested list of standard-normal floats matching shape."""
-    if not shape:
-        return _rng.gauss(0.0, 1.0)
-    def _fill(dims):
-        if len(dims) == 1:
-            return [_rng.gauss(0.0, 1.0) for _ in range(dims[0])]
-        return [_fill(dims[1:]) for _ in range(dims[0])]
-    return _fill(shape)
+    shape = _np_shape(shape)
+    return _np_fill(shape, lambda: _rng.gauss(0.0, 1.0))
+
+def _np_random_sample(size=None, _rng=_np_rng):
+    shape = () if size is None else _np_shape((size,))
+    return _np_fill(shape, _rng.random)
+
+def _np_uniform(low=0.0, high=1.0, size=None, _rng=_np_rng):
+    lo = float(low)
+    hi = float(high)
+    shape = () if size is None else _np_shape((size,))
+    return _np_fill(shape, lambda: lo + (hi - lo) * _rng.random())
+
+def _np_normal(loc=0.0, scale=1.0, size=None, _rng=_np_rng):
+    mu = float(loc)
+    sigma = float(scale)
+    shape = () if size is None else _np_shape((size,))
+    return _np_fill(shape, lambda: _rng.gauss(mu, sigma))
+
+def _np_randint(low, high=None, size=None, dtype=int, _rng=_np_rng):
+    if high is None:
+        lo, hi = 0, int(low)
+    else:
+        lo, hi = int(low), int(high)
+    shape = () if size is None else _np_shape((size,))
+    return _np_fill(shape, lambda: dtype(_rng.randrange(lo, hi)))
+
+def _np_choice(a, size=None, replace=True, p=None, _rng=_np_rng):
+    if p is not None:
+        raise NotImplementedError('numpy.random.choice polyfill does not support probability weights')
+    seq = list(range(int(a))) if isinstance(a, int) else list(a)
+    if not seq:
+        raise ValueError('a cannot be empty')
+    shape = () if size is None else _np_shape((size,))
+    if not replace and shape:
+        total = 1
+        for dim in shape:
+            total *= dim
+        if total > len(seq):
+            raise ValueError('Cannot take a larger sample than population when replace=False')
+        shuffled = list(seq)
+        _rng.shuffle(shuffled)
+        idx = {'i': 0}
+        def take():
+            val = shuffled[idx['i']]
+            idx['i'] += 1
+            return val
+        return _np_fill(shape, take)
+    return _np_fill(shape, lambda: seq[_rng.randrange(0, len(seq))])
 
 # ── numpy.random PACKAGE stub ─────────────────────────────────────────────────
 # Must be registered FIRST so that "import numpy" finds numpy.random already in
@@ -703,6 +752,14 @@ _np_rng_mod = _rand_stub('numpy.random',
     seed=_np_seed,
     rand=_np_rand,
     randn=_np_randn,
+    random=_np_random_sample,
+    random_sample=_np_random_sample,
+    sample=_np_random_sample,
+    ranf=_np_random_sample,
+    uniform=_np_uniform,
+    normal=_np_normal,
+    randint=_np_randint,
+    choice=_np_choice,
     RandomState=_StubRandomState,
     Generator=type('Generator', (), {}),
     BitGenerator=_StubBitGen,
@@ -747,7 +804,7 @@ _rand_stub('numpy.random.mtrand',
     RandomState=_StubRandomState)
 
 del _rand_stub, _StubBitGen, _StubSeedSeq, _StubRandomState
-del _np_seed, _np_rand, _np_randn, _np_rng, _pyr
+del _np_seed, _np_rand, _np_randn, _np_random_sample
 
 # ── 5. Update _base_modules to include all stubs ─────────────────────────────
 # Must happen here, before _handle_request's eviction finally-block runs.

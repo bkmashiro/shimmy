@@ -214,7 +214,11 @@ repeatable `--include-root` directories for pure-Python dependencies such as
 artifact. The verified `v1.0.11` artifact includes NumPy and SymPy, but SymPy also
 needs bundled pure-Python `mpmath` plus the narrow reactor `ctypes` polyfill under
 `tools/lf-bundle-python/polyfills/reactor`. SciPy is intentionally not a reactor
-target; use Pyodide for SciPy-heavy evaluators.
+target; use Pyodide for SciPy-heavy evaluators. The reactor host also installs a
+small `numpy.random` safety polyfill: `seed`, `rand`, `randn`, `random_sample`,
+`uniform`, `normal`, `randint`, and basic `choice` work deterministically through
+stdlib `random`, while unsupported advanced RNG APIs fail with a Python error
+instead of aborting the WASM instance.
 
 ### Path 4: Pyodide package/script runner
 

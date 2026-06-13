@@ -211,24 +211,36 @@ Both return valid JSON and no traceback.
 
 ---
 
-## Task 6: Integrate adapter into reactor-python path, if feasible
+## Task 6: Integrate adapter into reactor-python path with bundle shortcut
 
-**Objective:** Decide whether reactor can support the same adapter immediately or needs a separate packaging step.
+**Objective:** Keep reactor's existing single-script runtime contract while proving
+real Lambda Feedback package evaluators can be transformed into that contract.
 
 **Files:**
-- Inspect/modify: `build/python-reactor/py_reactor.c`
-- Inspect/modify: `internal/execution/wasm/python_reactor.go`
-- Test: `internal/execution/wasm/python_reactor_test.go`
+- Create: `tools/lf-bundle-python/lf_bundle_python.py`
+- Create: `tools/lf-bundle-python/polyfills/reactor/ctypes.py`
+- Test: `tools/lf-bundle-python/test_lf_bundle_python.py`
+- Test: `internal/execution/wasm/python_reactor_lf_bundle_test.go`
 
-**Decision gate:**
+**Decision:** Do not add full Pyodide-style package env support to reactor for now.
+Instead, generate a single-file script that embeds:
 
-- If reactor currently only accepts `FUNCTION_WASM_PYTHON_SCRIPT`, add entrypoint/root env support only if mounted source/module loading is already possible.
-- If not, document that reactor remains single-file/known-compatible until module packaging is implemented.
+- evaluator package modules;
+- `lf_compat_adapter`;
+- the minimal `lf_toolkit` shim;
+- optional pure-Python deps via repeatable `--include-root`.
 
-**Acceptance:** Either:
+Native/WASI packages still come from `python-reactor.wasm`; the verified v1.0.11
+artifact covers NumPy/SymPy. SciPy is intentionally Pyodide-only.
 
-1. reactor runs boilerplate fixture package; or
-2. reactor fails with an explicit “package entrypoints are not supported by reactor-python yet” error and docs explain Pyodide is the default compatibility path.
+**Acceptance:** reactor bundle matrix passes in Docker/Linux with v1.0.11:
+
+```bash
+scripts/demo-reactor-lambda-feedback-bundles.sh docker
+```
+
+Current green fixtures: boilerplate, compareBoolean/SymPy (+ bundled mpmath +
+ctypes polyfill), ArrayEqual/NumPy, IsSimilar/NumPy.
 
 ---
 
@@ -283,9 +295,11 @@ Run:
 
 ```bash
 git diff --check
-python3 -m pytest examples/lambda-feedback-adapter/test_lf_compat_adapter.py -q
+python3 -m pytest examples/lambda-feedback-adapter tools/lf-bundle-python -q
 bash -n scripts/demo-lambda-feedback-fixtures.sh
 scripts/demo-lambda-feedback-fixtures.sh all
+bash -n scripts/demo-reactor-lambda-feedback-bundles.sh
+scripts/demo-reactor-lambda-feedback-bundles.sh docker
 bash -n scripts/demo-python-examples.sh
 scripts/demo-python-examples.sh
 ```

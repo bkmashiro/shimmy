@@ -52,7 +52,7 @@ three WASM backends (`wasm`, `python-wasm`, `reactor-python`).
 
 | Variable | Default | Backend | Description |
 |---|---|---|---|
-| `FUNCTION_WASM_PYTHON_SCRIPT` | _(required for WASM Python script backends)_ | `python-wasm`, `reactor-python` | Path to a **single-file** Python evaluation script (`eval.py`). The file must define `evaluation_function(response, answer, params=None)`. Optionally defines `preview_function(response, answer, params=None)`. Read once at startup and cached in memory. Package-style Lambda Feedback entrypoints are not supported by `reactor-python` yet; use `pyodide` package mode instead. |
+| `FUNCTION_WASM_PYTHON_SCRIPT` | _(required for WASM Python script backends)_ | `python-wasm`, `reactor-python` | Path to a **single-file** Python evaluation script (`eval.py`) or a generated Lambda Feedback bundle from `tools/lf-bundle-python`. The file must define `evaluation_function(response, answer, params=None)`. Optionally defines `preview_function(response, answer, params=None)`. Read once at startup and cached in memory. Reactor still does not consume Pyodide-style package env vars directly; package evaluators should use Pyodide package mode or be converted to a single-file bundle first. |
 | `FUNCTION_WASM_PYTHON_PATH` | `/usr/lib/python3.14/site-packages` | `reactor-python` | Override for the `PYTHONPATH` environment variable passed to the reactor Python module. Used when additional site-packages are packed into the WASM binary at a non-standard path. Also combined with `FUNCTION_WASM_ALLOWED_PATHS` when extra package directories are mounted from the host. |
 | `FUNCTION_PYODIDE_SCRIPT` | _(required in legacy Pyodide script mode)_ | `pyodide` | Path to a single `eval.py` script. Used when `FUNCTION_PYODIDE_ROOT` + `FUNCTION_PYODIDE_EVAL_ENTRYPOINT` are not set. |
 | `FUNCTION_PYODIDE_ROOT` | _(required in Pyodide package mode)_ | `pyodide` | Evaluator package root to mirror into the Pyodide runtime. Use this for Lambda Feedback package layouts such as `evaluation_function/evaluation.py`. |
@@ -128,8 +128,24 @@ docker run --rm \
 ```
 
 Use package mode for real Lambda Feedback evaluator repositories that import
-`lf_toolkit` and expose package entrypoints. Use `reactor-python` only for the
-single-file fast path until reactor package mounting/bootstrap is implemented.
+`lf_toolkit` and expose package entrypoints. For the reactor fast path, generate a
+single-file bundle first, then set `FUNCTION_WASM_PYTHON_SCRIPT` to that bundle:
+
+```bash
+uv pip install --target /tmp/lf-puredeps mpmath
+python3 tools/lf-bundle-python/lf_bundle_python.py \
+  --root examples/lambda-feedback-fixtures/compare-boolean \
+  --adapter-root examples/lambda-feedback-adapter \
+  --include-root /tmp/lf-puredeps \
+  --include-root tools/lf-bundle-python/polyfills/reactor \
+  --eval-entrypoint evaluation_function.evaluation:evaluation_function \
+  --preview-entrypoint evaluation_function.preview:preview_function \
+  --out /tmp/compare-boolean.bundle.py
+```
+
+`python-reactor.wasm` v1.0.11 has been verified with bundle fixtures for
+boilerplate, compareBoolean/SymPy, ArrayEqual/NumPy, and IsSimilar/NumPy.
+SciPy remains Pyodide-only by policy.
 
 **With read-only dataset mount:**
 

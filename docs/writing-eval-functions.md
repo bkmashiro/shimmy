@@ -273,7 +273,8 @@ Notes:
   `FUNCTION_WASM_PYTHON_SCRIPT`; it rejects Pyodide package-mode env vars with
   an explicit error.
 - To use a package-style evaluator on reactor without designing a full package
-  runtime, first generate a single-file bundle:
+  runtime, first generate a single-file bundle. This is the current fast path for
+  compatible package evaluators:
 
 ```bash
 python3 tools/lf-bundle-python/lf_bundle_python.py \
@@ -283,21 +284,41 @@ python3 tools/lf-bundle-python/lf_bundle_python.py \
   --preview-entrypoint evaluation_function.preview:preview_function \
   --out /tmp/boilerplate.bundle.py
 
+# For pure-Python dependencies, install them to a staging directory and repeat
+# --include-root. compareBoolean/SymPy needs mpmath plus a small reactor ctypes
+# polyfill because the CPython-WASI artifact does not ship native _ctypes.
+uv pip install --target /tmp/lf-puredeps mpmath
+python3 tools/lf-bundle-python/lf_bundle_python.py \
+  --root examples/lambda-feedback-fixtures/compare-boolean \
+  --adapter-root examples/lambda-feedback-adapter \
+  --include-root /tmp/lf-puredeps \
+  --include-root tools/lf-bundle-python/polyfills/reactor \
+  --eval-entrypoint evaluation_function.evaluation:evaluation_function \
+  --preview-entrypoint evaluation_function.preview:preview_function \
+  --out /tmp/compare-boolean.bundle.py
+
 FUNCTION_INTERFACE=reactor-python \
 FUNCTION_COMMAND=/path/to/python-reactor.wasm \
 FUNCTION_WASM_PYTHON_SCRIPT=/tmp/boilerplate.bundle.py \
 ./shimmy serve
 ```
 
-- The bundle embeds evaluator package modules and the minimal `lf_toolkit` shim,
-  but it does not vendor third-party dependencies. `numpy`/`sympy` must already
-  be available in the chosen reactor artifact, or use Pyodide package mode.
+- The bundle embeds evaluator package modules, the minimal `lf_toolkit` shim, and
+  any pure-Python dependency directories passed with `--include-root`.
+  Native/WASI packages such as NumPy must already be present in the reactor
+  artifact; `python-reactor.wasm` v1.0.11 has been verified with ArrayEqual and
+  IsSimilar NumPy fixtures. Reactor includes a small deterministic
+  `numpy.random` safety polyfill for common APIs (`seed`, `rand`, `randn`,
+  `random_sample`, `uniform`, `normal`, `randint`, basic `choice`) so unsupported
+  RNG extensions do not abort the WASM instance. SciPy is intentionally not a
+  reactor target; use Pyodide package mode for SciPy-heavy evaluators.
 - Runtime selection is explicit. Shimmy does not infer the backend from imports
   or `requirements.txt`.
 - Try the local fixture demo with:
 
 ```bash
 scripts/demo-lambda-feedback-fixtures.sh all
+scripts/demo-reactor-lambda-feedback-bundles.sh docker
 ```
 
 ---

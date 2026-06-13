@@ -113,32 +113,46 @@ print(result)
 PY
 }
 
-run_python_wasm() {
+ensure_reactor_wasm() {
+  local wasm="${ROOT}/internal/execution/wasm/testdata/python-reactor.wasm"
+  if [[ ! -f "${wasm}" ]]; then
+    echo "==> Downloading python-reactor.wasm"
+    mkdir -p "$(dirname "${wasm}")"
+    curl -fsSL \
+      https://github.com/bkmashiro/webassembly-language-runtimes/releases/download/v1.0.11/python-reactor.wasm \
+      -o "${wasm}"
+  fi
+  printf '%s\n' "${wasm}"
+}
+
+run_plain_reactor() {
   echo
-  echo "==> Plain Python route: examples/eval-python via python-wasm"
+  echo "==> Plain Python route: examples/eval-python via reactor-python"
   echo '    sample: response="3.14159", answer="3.1416", params={"tolerance":0.001}'
   if [[ "$(uname -s)" != "Linux" ]]; then
-    echo "    python-wasm backend is Linux-only in this branch; validating evaluator directly on host Python"
+    echo "    reactor-python backend is Linux-only in this branch; validating evaluator directly on host Python"
     (cd "${ROOT}" && run_plain_python_direct)
     echo "    ✓ plain Python evaluator accepted sample input"
     return 0
   fi
 
-  local p base log pid resp
+  local wasm p base log pid resp
+  wasm="$(ensure_reactor_wasm)"
   p="$(port)"; base="http://${HOST}:${p}"; log="${LOG_DIR}/python-plain.log"; rm -f "${log}"
   (
     cd "${ROOT}"
     exec env \
       LOG_LEVEL=error \
-      FUNCTION_INTERFACE=python-wasm \
-      FUNCTION_WASM_MODULE="${ROOT}/internal/execution/wasm/testdata/python.wasm" \
+      FUNCTION_INTERFACE=reactor-python \
+      FUNCTION_WASM_MODULE="${wasm}" \
       FUNCTION_WASM_PYTHON_SCRIPT="${ROOT}/examples/eval-python/eval.py" \
+      FUNCTION_WASM_MAX_MEMORY_PAGES=4096 \
       FUNCTION_MAX_PROCS=1 \
       FUNCTION_TIMEOUT=30s \
       "${BIN}" serve --host "${HOST}" --port "${p}"
   ) >"${log}" 2>&1 &
   pid="$!"
-  wait_for_health "${pid}" "${base}" "${log}" 120
+  wait_for_health "${pid}" "${base}" "${log}" 300
   resp="$(json_post "${base}" "3.14159" "3.1416" '{"tolerance":0.001}')"
   echo "${resp}" | python3 -m json.tool
   assert_correct "${resp}"
@@ -154,16 +168,8 @@ run_numpy_reactor() {
     (cd "${ROOT}" && run_numpy_direct_if_available)
     return 0
   fi
-  local wasm="${ROOT}/internal/execution/wasm/testdata/python-reactor.wasm"
-  if [[ ! -f "${wasm}" ]]; then
-    echo "==> Downloading python-reactor.wasm"
-    mkdir -p "$(dirname "${wasm}")"
-    curl -fsSL \
-      https://github.com/bkmashiro/webassembly-language-runtimes/releases/download/v1.0.11/python-reactor.wasm \
-      -o "${wasm}"
-  fi
-
-  local p base log pid resp
+  local wasm p base log pid resp
+  wasm="$(ensure_reactor_wasm)"
   p="$(port)"; base="http://${HOST}:${p}"; log="${LOG_DIR}/python-numpy.log"; rm -f "${log}"
   echo
   echo "==> NumPy route: examples/eval-numpy via reactor-python"
@@ -233,7 +239,7 @@ main() {
   echo "==> Building shimmy demo binary"
   (cd "${ROOT}" && go build -trimpath -buildvcs=false -o "${BIN}" .)
 
-  run_python_wasm
+  run_plain_reactor
   run_numpy_reactor
   run_scipy_pyodide
 

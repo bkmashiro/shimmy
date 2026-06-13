@@ -200,12 +200,12 @@ case io.WasmIO:
 
 The WASM backend routes evaluation functions by language:
 
-| Language | Compilation Target | Runtime | Features |
-|----------|--------------------|---------|---------|
+| Language | Compilation | Runtime | Notes |
+|----------|-------------|---------|-------|
 | Rust / C / C++ / Go | `wasm32-wasip1` | wazero | Snapshot, N:1 mux |
-| Python (pure / NumPy) | CPython-WASI → `.wasm` | wazero | Snapshot, N:1 mux |
-| Python (scipy/pandas) | Pyodide (Emscripten) | Node.js subprocess | Full compat, no snapshot |
-| JavaScript | Goja (pure Go, in-process) | in-process | No subprocess needed |
+| Python (pure / NumPy) | CPython-WASI reactor → `.wasm` | wazero | Fastest Python path; snapshot/restore; package support limited by WASI |
+| Python (scipy/pandas) | Pyodide (Emscripten) | Node.js subprocess | Broadest package compatibility; slowest; no wazero snapshot |
+| JavaScript | Javy / QuickJS → `wasm32-wasi` | wazero via RPC subprocess | JS compiled to WASM; no Goja in-process path |
 
 Routing is determined at function registration time based on declared language + `requirements`.
 

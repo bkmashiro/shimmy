@@ -32,13 +32,14 @@ Go/Rust/C/C++ WASI matrix:
 scripts/demo-python-examples.sh
 ```
 
-It covers three distinct Python routes:
+It covers the current Python runtime matrix:
 
 | Route | Example | Runtime | Why |
 |---|---|---|---|
-| Plain Python | `examples/eval-python/` | `python-wasm` | standard-library evaluator |
-| NumPy | `examples/eval-numpy/` | `reactor-python` | array/vector grading with snapshot/restore |
-| SciPy | `examples/eval-scipy/` | `pyodide` | heavy scientific packages unavailable in CPython-WASI |
+| Plain Python | `examples/eval-python/` | `reactor-python` | fastest Python path with snapshot/restore isolation |
+| NumPy | `examples/eval-numpy/` | `reactor-python` | array/vector grading within the CPython-WASI-compatible package subset |
+| SciPy / heavy Python | `examples/eval-scipy/` | `pyodide` | broad package support for dependencies unavailable in CPython-WASI; slowest path |
+| Legacy resident Python | `examples/eval-python/` | `python-wasm` | compatibility/comparison only; interpreter state can leak across requests |
 
 ## Real Lambda Feedback source material
 

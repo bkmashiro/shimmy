@@ -112,9 +112,7 @@ Python → Host stdout:
 initialise in parallel (goroutines); startup wall time equals the slowest
 individual init.
 
-**Use case:** High-throughput Python evaluation where a few hundred milliseconds
-of startup amortises across many requests. Namespace isolation is sufficient
-for most user-supplied evaluation scripts.
+**Use case:** Legacy compatibility or explicit comparison against the reactor backend. Do not use as the isolation-sensitive default: namespace cleanup and `sys.modules` eviction cannot reset the full CPython heap, base-module mutable state, interpreter caches, GC/allocator state, or C-extension state.
 
 ### Path 3: Reactor ReactorPythonRunner
 

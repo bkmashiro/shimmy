@@ -72,7 +72,7 @@ docker run --rm \
   ghcr.io/lambda-feedback/shimmy-wasm:latest
 ```
 
-**Resident Python (fast start, namespace isolation):**
+**Legacy resident Python (compatibility only; weaker isolation):**
 
 ```bash
 docker run --rm \

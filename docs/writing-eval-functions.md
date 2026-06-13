@@ -227,6 +227,61 @@ def evaluation_function(response, answer, params=None):
 
 ---
 
+## Lambda Feedback package evaluators
+
+Real Lambda Feedback Python evaluators often use a package layout rather than a
+single `eval.py` file:
+
+```text
+evaluation_function/
+  __init__.py
+  main.py
+  evaluation.py
+  preview.py
+```
+
+In that layout, the evaluator usually imports `lf_toolkit` and exposes package
+entrypoints such as:
+
+```python
+# evaluation_function/evaluation.py
+from lf_toolkit.evaluation import Result
+
+
+def evaluation_function(response, answer, params):
+    return Result(is_correct=response == answer)
+```
+
+Shimmy's compatibility adapter can run these packages without changing the
+author-facing function names. Configure Pyodide package mode explicitly:
+
+```bash
+FUNCTION_INTERFACE=pyodide \
+FUNCTION_PYODIDE_RUNNER=$PWD/examples/eval-pyodide/runner.js \
+FUNCTION_PYODIDE_ROOT=$PWD/examples/lambda-feedback-fixtures/boilerplate-python \
+FUNCTION_PYODIDE_EVAL_ENTRYPOINT=evaluation_function.evaluation:evaluation_function \
+FUNCTION_PYODIDE_PREVIEW_ENTRYPOINT=evaluation_function.preview:preview_function \
+FUNCTION_PYODIDE_ADAPTER=$PWD/examples/lambda-feedback-adapter/lf_compat_adapter.py \
+FUNCTION_PYODIDE_PACKAGES=sympy
+```
+
+Notes:
+
+- `FUNCTION_INTERFACE=pyodide` is the current default compatibility path for
+  package-style Lambda Feedback evaluators.
+- `FUNCTION_INTERFACE=reactor-python` currently expects a single script via
+  `FUNCTION_WASM_PYTHON_SCRIPT`; it rejects package-mode env vars with an
+  explicit error until reactor package mounting/bootstrap is implemented.
+- Runtime selection is explicit. Shimmy does not infer the backend from imports
+  or `requirements.txt`.
+- Try the local fixture demo with:
+
+```bash
+scripts/demo-lambda-feedback-fixtures.sh all
+```
+
+---
+
 ## Local Testing with `shimmy-eval`
 
 `shimmy-eval` lets you run your script against the real WASM sandbox on your laptop before deploying.

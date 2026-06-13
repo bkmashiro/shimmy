@@ -207,7 +207,7 @@ The WASM backend routes evaluation functions by language:
 | Python (scipy/pandas) | Pyodide (Emscripten) | Node.js subprocess | Broadest package compatibility; slowest; no wazero snapshot |
 | JavaScript | Javy / QuickJS → `wasm32-wasi` | wazero via RPC subprocess | JS compiled to WASM; no Goja in-process path |
 
-Routing is determined at function registration time based on declared language + `requirements`.
+Routing is selected explicitly at deployment time via `FUNCTION_INTERFACE` (for example `pyodide` for compatibility-first Python, `reactor-python` for optimised CPython-WASI cases, `wasm` for native WASI modules, `rpc` for existing subprocess/RPC evaluators). Do not infer Python runtime from imports/requirements automatically.
 
 ---
 

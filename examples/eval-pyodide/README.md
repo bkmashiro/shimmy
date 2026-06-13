@@ -10,21 +10,80 @@ LAPACK/BLAS via f2c-compiled Fortran code that requires native shared objects.
 Pyodide ships its own WebAssembly builds of numpy, scipy, and pandas, so all
 three work inside Node.js without any native libraries.
 
-shimmy uses the existing `rpc` dispatcher + subprocess mode:
+`shimmy` exposes this as an explicit backend:
 
 ```
-FUNCTION_INTERFACE=rpc
-FUNCTION_COMMAND=node /path/to/runner.js /path/to/eval.py
+FUNCTION_INTERFACE=pyodide
+FUNCTION_PYODIDE_RUNNER=/path/to/runner.js
+FUNCTION_PYODIDE_SCRIPT=/path/to/eval.py
 ```
 
-No new dispatcher is needed. The runner speaks the same JSON-RPC 2.0 protocol
-over stdio that shimmy already uses for subprocess workers.
+Under the hood the dispatcher reuses Shimmy's JSON-RPC subprocess path over
+stdio, so the runner speaks the same JSON-RPC 2.0 protocol as other subprocess
+workers.
+
+## Supported runner modes
+
+The runner supports two modes.
+
+### 1) Legacy script mode
+
+This is the historical mode and remains for compatibility.
+
+- provide `<eval.py>` as argv[2], or set `FUNCTION_PYODIDE_SCRIPT`
+- the file must define `evaluation_function(response, answer, params)`
+- legacy defaults to installing `scipy` on startup unless `FUNCTION_PYODIDE_PACKAGES`
+is set
+
+Example:
+
+```bash
+node runner.js eval.py
+# or
+FUNCTION_PYODIDE_SCRIPT=eval.py node runner.js
+```
+
+### 2) Lambda Feedback package mode
+
+Use when evaluator is a package layout instead of a single script.
+
+Required env:
+
+- `FUNCTION_PYODIDE_ROOT` points to the evaluator package root
+- `FUNCTION_PYODIDE_EVAL_ENTRYPOINT` (e.g. `evaluation_function.evaluation:evaluation_function`)
+
+Optional env:
+
+- `FUNCTION_PYODIDE_PREVIEW_ENTRYPOINT` (e.g. `evaluation_function.preview:preview_function`)
+- `FUNCTION_PYODIDE_ADAPTER` path to `lf_compat_adapter.py`
+- `FUNCTION_PYODIDE_PACKAGES` comma-separated Pyodide packages to preinstall
+
+Example:
+
+```bash
+FUNCTION_INTERFACE=pyodide \
+FUNCTION_PYODIDE_RUNNER=/path/to/examples/eval-pyodide/runner.js \
+FUNCTION_PYODIDE_ROOT=/path/to/evaluator/root \
+FUNCTION_PYODIDE_EVAL_ENTRYPOINT=evaluation_function.evaluation:evaluation_function \
+FUNCTION_PYODIDE_PREVIEW_ENTRYPOINT=evaluation_function.preview:preview_function \
+FUNCTION_PYODIDE_ADAPTER=/path/to/examples/lambda-feedback-adapter/lf_compat_adapter.py \
+FUNCTION_PYODIDE_PACKAGES=scipy
+```
+
+Package mode does not take a script argument. It mirrors the evaluator root into the
+Pyodide runtime, loads the adapter once, and dispatches requests via
+`lf_compat_adapter.call_function + normalize_result`.
+
+For `preview` RPCs, the preview entrypoint is used when provided; otherwise the
+runner falls back to the eval entrypoint.
 
 ## State isolation
 
-Each request runs `evaluation_function` in a fresh Python namespace via
-`exec(source, {})`. This gives per-request state isolation without memory
-snapshots (Pyodide's JS-side state cannot be snapshot-restored).
+Legacy script mode runs `evaluation_function` in a fresh Python namespace via
+`exec(source, {})` for each request, giving state isolation without snapshots.
+
+Package mode uses a persisted evaluator import for performance; package modules should be
+written to avoid cross-request mutable global state that must be isolated.
 
 ## Prerequisites
 
@@ -37,21 +96,33 @@ npm install pyodide
 ```
 
 Pyodide's npm package (~100 MB) ships the Python runtime and a package index.
-The `runner.js` loads `scipy` on startup via `loadPackage`, which fetches it
-from the CDN on first run (or from a local mirror if `PYODIDE_PACKAGE_URL` is
-set).
+By default, the legacy script mode preinstalls `scipy`; package mode only installs
+packages listed in `FUNCTION_PYODIDE_PACKAGES`.
 
 ## Running
 
 ```bash
-# Direct:
+# Legacy direct:
 node runner.js eval.py
 
-# Via shimmy:
-FUNCTION_INTERFACE=rpc \
-FUNCTION_RPC_TRANSPORT=stdio \
-FUNCTION_COMMAND="node $(pwd)/runner.js $(pwd)/eval.py" \
+# Package mode direct:
+FUNCTION_PYODIDE_ROOT=/path/to/root \
+FUNCTION_PYODIDE_EVAL_ENTRYPOINT=evaluation_function.evaluation:evaluation_function \
+FUNCTION_PYODIDE_ADAPTER=/path/to/examples/lambda-feedback-adapter/lf_compat_adapter.py \
+node examples/eval-pyodide/runner.js
+
+# Via shimmy (legacy demo):
+FUNCTION_INTERFACE=pyodide \
+FUNCTION_PYODIDE_RUNNER=$(pwd)/runner.js \
+FUNCTION_PYODIDE_SCRIPT=$(pwd)/eval.py \
   shimmy
+```
+
+## Fixture demos
+
+```bash
+# From repo root: local adapter + Pyodide package-mode smoke tests.
+scripts/demo-lambda-feedback-fixtures.sh all
 ```
 
 ## Wire protocol
@@ -66,9 +137,18 @@ Content-Length: <N>\r\n
 ```
 
 shimmy sends `method` as the configured function interface method name
-(typically `"evaluate"`). The runner always dispatches to
-`evaluation_function(response, answer, params)` in the loaded script,
-regardless of the method name.
+(typically `"evaluate"` for eval paths or `"preview"` for preview paths). The runner
+always loads the configured entrypoint, and falls back to eval behavior when preview
+is unavailable.
+
+## env vars
+
+- `FUNCTION_PYODIDE_SCRIPT`: legacy script mode path
+- `FUNCTION_PYODIDE_ROOT`: package mode evaluator root
+- `FUNCTION_PYODIDE_EVAL_ENTRYPOINT`: package eval entrypoint
+- `FUNCTION_PYODIDE_PREVIEW_ENTRYPOINT`: optional package preview entrypoint
+- `FUNCTION_PYODIDE_ADAPTER`: path to lambda-feedback adapter shim
+- `FUNCTION_PYODIDE_PACKAGES`: comma-separated list of Pyodide packages
 
 ## eval.py contract
 
@@ -110,7 +190,7 @@ To avoid CDN fetches, pre-install Pyodide packages and point the runner at a
 local mirror:
 
 ```bash
-# Download scipy wheel into a local dir
+# Download package wheels into a local dir
 node -e "
 const { loadPyodide } = require('pyodide');
 loadPyodide().then(py => py.loadPackage(['scipy']));

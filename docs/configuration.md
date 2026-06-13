@@ -52,8 +52,14 @@ three WASM backends (`wasm`, `python-wasm`, `reactor-python`).
 
 | Variable | Default | Backend | Description |
 |---|---|---|---|
-| `FUNCTION_WASM_PYTHON_SCRIPT` | _(required for Python backends)_ | `python-wasm`, `reactor-python` | Path to the Python evaluation script (`eval.py`). The file must define `evaluation_function(response, answer, params=None)`. Optionally defines `preview_function(response, answer, params=None)`. Read once at startup and cached in memory. |
+| `FUNCTION_WASM_PYTHON_SCRIPT` | _(required for WASM Python script backends)_ | `python-wasm`, `reactor-python` | Path to a **single-file** Python evaluation script (`eval.py`). The file must define `evaluation_function(response, answer, params=None)`. Optionally defines `preview_function(response, answer, params=None)`. Read once at startup and cached in memory. Package-style Lambda Feedback entrypoints are not supported by `reactor-python` yet; use `pyodide` package mode instead. |
 | `FUNCTION_WASM_PYTHON_PATH` | `/usr/lib/python3.14/site-packages` | `reactor-python` | Override for the `PYTHONPATH` environment variable passed to the reactor Python module. Used when additional site-packages are packed into the WASM binary at a non-standard path. Also combined with `FUNCTION_WASM_ALLOWED_PATHS` when extra package directories are mounted from the host. |
+| `FUNCTION_PYODIDE_SCRIPT` | _(required in legacy Pyodide script mode)_ | `pyodide` | Path to a single `eval.py` script. Used when `FUNCTION_PYODIDE_ROOT` + `FUNCTION_PYODIDE_EVAL_ENTRYPOINT` are not set. |
+| `FUNCTION_PYODIDE_ROOT` | _(required in Pyodide package mode)_ | `pyodide` | Evaluator package root to mirror into the Pyodide runtime. Use this for Lambda Feedback package layouts such as `evaluation_function/evaluation.py`. |
+| `FUNCTION_PYODIDE_EVAL_ENTRYPOINT` | _(required in Pyodide package mode)_ | `pyodide` | Eval entrypoint in `module:function` form, e.g. `evaluation_function.evaluation:evaluation_function`. |
+| `FUNCTION_PYODIDE_PREVIEW_ENTRYPOINT` | _(empty)_ | `pyodide` | Optional preview entrypoint in `module:function` form. If omitted, preview RPCs fall back to the eval entrypoint. |
+| `FUNCTION_PYODIDE_ADAPTER` | _(required in package mode)_ | `pyodide` | Path to `examples/lambda-feedback-adapter/lf_compat_adapter.py`. The runner mirrors the adapter directory too so the minimal `lf_toolkit` shim is importable. |
+| `FUNCTION_PYODIDE_PACKAGES` | _(empty in package mode; `scipy` in legacy script mode)_ | `pyodide` | Comma-separated Pyodide packages to install before loading the evaluator, e.g. `sympy` or `scipy`. |
 
 ---
 
@@ -104,6 +110,26 @@ docker run --rm \
   -p 8080:8080 \
   ghcr.io/lambda-feedback/shimmy-wasm:latest
 ```
+
+**Pyodide package mode (Lambda Feedback package compatibility):**
+
+```bash
+docker run --rm \
+  -e FUNCTION_INTERFACE=pyodide \
+  -e FUNCTION_PYODIDE_RUNNER=/app/examples/eval-pyodide/runner.js \
+  -e FUNCTION_PYODIDE_ROOT=/app/evaluator \
+  -e FUNCTION_PYODIDE_EVAL_ENTRYPOINT=evaluation_function.evaluation:evaluation_function \
+  -e FUNCTION_PYODIDE_PREVIEW_ENTRYPOINT=evaluation_function.preview:preview_function \
+  -e FUNCTION_PYODIDE_ADAPTER=/app/examples/lambda-feedback-adapter/lf_compat_adapter.py \
+  -e FUNCTION_PYODIDE_PACKAGES=sympy \
+  -v $(pwd)/evaluation_function:/app/evaluator/evaluation_function:ro \
+  -p 8080:8080 \
+  ghcr.io/lambda-feedback/shimmy-wasm:latest
+```
+
+Use package mode for real Lambda Feedback evaluator repositories that import
+`lf_toolkit` and expose package entrypoints. Use `reactor-python` only for the
+single-file fast path until reactor package mounting/bootstrap is implemented.
 
 **With read-only dataset mount:**
 

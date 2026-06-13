@@ -7,10 +7,10 @@ instantiation of it — linking the standard library, running startup code,
 importing site packages — takes 7-8 seconds. That cost is acceptable once per
 pool slot but not once per request.
 
-shimmy-wasm provides three distinct execution paths for Python, trading off
-isolation, latency, and memory usage against each other. The right choice
-depends on the concurrency, latency, and isolation requirements of the
-deployment.
+shimmy-wasm provides four distinct execution paths for Python, trading off
+isolation, latency, package compatibility, and memory usage against each other.
+The right choice depends on the evaluator layout, dependency set, concurrency,
+latency, and isolation requirements of the deployment.
 
 ## Execution Paths
 
@@ -197,6 +197,49 @@ detects this and sets `r.closed = true`. `IsHealthy()` returns `false`. The
 dispatcher discards the runner and spawns a replacement in a background
 goroutine via `spawnReplacement`.
 
+**Use case:** Single-file evaluators that need the fastest Python path and a
+compatible CPython-WASI dependency set. Real Lambda Feedback package layouts
+(`evaluation_function/...` modules plus `lf_toolkit`) are **not supported by
+reactor-python yet**; the dispatcher fails fast if Pyodide package-mode env vars
+are set with `FUNCTION_INTERFACE=reactor-python`. Use Pyodide package mode for
+that compatibility path until reactor package mounting/bootstrap is designed.
+
+### Path 4: Pyodide package/script runner
+
+**`FUNCTION_INTERFACE=pyodide` + `FUNCTION_PYODIDE_RUNNER=examples/eval-pyodide/runner.js`**
+
+Implemented as a Node.js subprocess running `examples/eval-pyodide/runner.js`.
+The Go dispatcher translates `FUNCTION_INTERFACE=pyodide` into the existing
+JSON-RPC stdio supervisor path.
+
+Pyodide supports two modes:
+
+1. **Legacy script mode** — set `FUNCTION_PYODIDE_SCRIPT=/path/to/eval.py` or
+   pass the script path as the runner argument. The script must define
+   `evaluation_function(response, answer, params)` and may define
+   `preview_function`.
+2. **Lambda Feedback package mode** — set:
+   - `FUNCTION_PYODIDE_ROOT=/path/to/evaluator/root`
+   - `FUNCTION_PYODIDE_EVAL_ENTRYPOINT=evaluation_function.evaluation:evaluation_function`
+   - optional `FUNCTION_PYODIDE_PREVIEW_ENTRYPOINT=evaluation_function.preview:preview_function`
+   - `FUNCTION_PYODIDE_ADAPTER=/path/to/examples/lambda-feedback-adapter/lf_compat_adapter.py`
+   - optional `FUNCTION_PYODIDE_PACKAGES=sympy,scipy,...`
+
+Package mode mirrors the evaluator root into the Pyodide virtual filesystem,
+mirrors the adapter directory so the minimal `lf_toolkit` shim is importable,
+loads the entrypoints once, and dispatches requests through
+`lf_compat_adapter.call_function()` and `normalize_result()`.
+
+**Isolation:** Legacy script mode executes the script in a fresh namespace per
+request. Package mode keeps imported package modules loaded for performance;
+evaluators should not rely on mutable global state being reset between requests.
+Use reactor-python single-file mode when snapshot/restore isolation is the
+primary requirement and the evaluator fits its package constraints.
+
+**Use case:** Default compatibility path for real Lambda Feedback Python
+packages and for heavy scientific dependencies available in Pyodide (SciPy,
+Pandas, SymPy, etc.).
+
 ## The Compilation Cache
 
 Cold compilation of `python-reactor.wasm` takes 1-3 minutes on modern hardware.
@@ -239,14 +282,15 @@ from serving requests with reduced capacity silently.
 
 ## Summary Table
 
-| Property | Per-Request | Resident | Reactor |
-|---|---|---|---|
-| `FUNCTION_INTERFACE` | `wasm` | `python-wasm` | `reactor-python` |
-| Binary | `python.wasm` | `python.wasm` | `python-reactor.wasm` |
-| Instances per pool | 1 per request | persistent, pooled | persistent, pooled (max 4) |
-| CPython startup cost | per request (~7 s) | once per pool slot | once per pool slot |
-| Per-request latency | ~160 ms | ~10-50 ms | ~1-5 ms + restore |
-| Heap isolation | full (fresh instance) | namespace only | full (snapshot/restore) |
-| `sys.modules` reset | yes | eviction pass | yes (snapshot) |
-| Max pool size | N/A | 8 | 4 |
-| Memory per slot | none (transient) | ~242 MB | ~100 MB |
+| Property | Per-Request | Resident | Reactor | Pyodide |
+|---|---|---|---|---|
+| `FUNCTION_INTERFACE` | `wasm` | `python-wasm` | `reactor-python` | `pyodide` |
+| Binary/process | `python.wasm` | `python.wasm` | `python-reactor.wasm` | Node.js + Pyodide |
+| Instances per pool | 1 per request | persistent, pooled | persistent, pooled (max 4) | subprocess worker |
+| CPython startup cost | per request (~7 s) | once per pool slot | once per pool slot | once per worker |
+| Per-request latency | ~160 ms | ~10-50 ms | ~1-5 ms + restore | highest; depends on Pyodide/packages |
+| Heap isolation | full (fresh instance) | namespace only | full (snapshot/restore) | legacy script: namespace; package mode: persistent imports |
+| `sys.modules` reset | yes | eviction pass | yes (snapshot) | no in package mode |
+| Package-style LF evaluator support | no | no | no | yes |
+| Max pool size | N/A | 8 | 4 | supervisor config |
+| Memory per slot | none (transient) | ~242 MB | ~100 MB | Pyodide runtime + packages |

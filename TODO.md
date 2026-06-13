@@ -22,23 +22,14 @@
 
 ---
 
-## #2 — scipy 自动路由 ✅ 完成
+## #2 — Python runtime policy: Pyodide 默认，reactor 作为性能优化
 
-当 `eval.py` 里有 `import scipy` / `import pandas` / `import statsmodels` / `import sklearn` / `import matplotlib` / `import seaborn` 时，自动切到 Pyodide/Node.js 子进程，否则用 `reactor-python`。
+不要做 requirements/import 自动路由。Python eval function 的兼容默认路径应是 `pyodide`：尽量支持 Lambda Feedback 现有 Python 包生态；当某个 evaluator 需要性能优化、且依赖集已知可在 CPython-WASI/reactor 中运行时，再由部署配置显式切到 `reactor-python`。
 
-**实现：**
-- `internal/execution/wasm/import_scan.go`：`ScriptNeedsHeavyRuntime(src string) bool`
-  - `(?m)^\s*(?:import|from)\s+(scipy|pandas|...) (?:\s|\.|\r?\n|$)` 行首 regexp，不匹配注释行
-  - `ScriptFileNeedsHeavyRuntime(path string)` 读文件版本
-- `internal/execution/wasm/import_scan_test.go`：单元测试覆盖注释/字符串/word-boundary 边界情况
-- `internal/execution/dispatcher.go` `ReactorPythonIO` case：启动前 scan 脚本
-  - heavy → 透明路由至 `FUNCTION_PYODIDE_RUNNER`（Node.js/Pyodide）
-  - 轻量 → 正常走 `ReactorPythonDispatcher`（CPython-WASI）
-  - scan 失败（文件不可读）→ 保守回退到 reactor，记 warn 日志
-
-**注意事项：**
-- 不捕获 `__import__("scipy")` 等动态 import（可接受，运营者可手动指定 `PyodideIO`）
-- `FUNCTION_PYODIDE_RUNNER` 未设置时默认用 `runner.js`（与 `PyodideIO` case 行为一致）
+**待办：**
+- 将文档中“根据 requirements 自动选择 runtime”的描述改成“部署配置显式选择 runtime”。
+- Pyodide runner 先做 Lambda Feedback compatibility adapter：package layout、`lf_toolkit.Result` 序列化、preview 签名兼容。
+- reactor-python 保留为 fast path，不作为默认 Python 路径，也不通过扫描自动接管。
 
 ---
 

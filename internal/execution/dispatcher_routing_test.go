@@ -101,6 +101,28 @@ func TestNewDispatcher_ReactorPython_NoHeavyDeps_EmptyModulePath(t *testing.T) {
 		"error should be the reactor-python WASM config error, not a node/pyodide error")
 }
 
+func TestNewDispatcher_ReactorPython_RejectsPackageEntrypoints(t *testing.T) {
+	t.Setenv("FUNCTION_PYODIDE_ROOT", t.TempDir())
+	t.Setenv("FUNCTION_PYODIDE_EVAL_ENTRYPOINT", "evaluation_function.evaluation:evaluation_function")
+	t.Setenv("FUNCTION_WASM_PYTHON_SCRIPT", writeTempScript(t, "def evaluation_function(r, a, p):\n    return {'is_correct': True}\n"))
+
+	_, err := execution.NewDispatcher(execution.Params{
+		Context: context.Background(),
+		Config: execution.Config{
+			Supervisor: supervisor.Config{
+				IO: supervisor.IOConfig{
+					Interface: supervisor.ReactorPythonIO,
+				},
+			},
+		},
+		Log: zap.NewNop(),
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reactor-python does not support package-style Lambda Feedback entrypoints yet")
+	assert.Contains(t, err.Error(), "FUNCTION_INTERFACE=pyodide")
+}
+
 // TestNewDispatcher_ReactorPython_EmptyScriptPath verifies that when
 // FUNCTION_WASM_PYTHON_SCRIPT is not set, the dispatcher skips the import
 // scan entirely and falls through to the reactor-python path, which then

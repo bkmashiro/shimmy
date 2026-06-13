@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # One-shot: build → package → deploy → invoke → print results
-# Usage: ./deploy-and-run.sh [RUNTIME] [REGION]
-#   RUNTIME  lambda python runtime, e.g. python3.11 (AL2) or python3.12 (AL2023)
-#   REGION   AWS region, default eu-west-2
+# Usage: ./deploy-and-run.sh [RUNTIME] [REGION] [OUTPUT_JSON]
+#   RUNTIME      lambda python runtime, e.g. python3.11 (AL2) or python3.12 (AL2023)
+#   REGION       AWS region, default eu-west-2
+#   OUTPUT_JSON  result path, default tools/lambda-probe/last-results.json
 #
 # Requires: aws cli, go (cross-compile)
 set -euo pipefail
 
 RUNTIME="${1:-python3.12}"
 REGION="${2:-eu-west-2}"
+OUTPUT_JSON="${3:-}"
 FUNCTION_NAME="shimmy-lambda-probe"
 ROLE_ARN="${LAMBDA_PROBE_ROLE_ARN:-}"   # set this env var, or edit below
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -65,7 +67,8 @@ aws lambda wait function-updated --function-name "$FUNCTION_NAME" --region "$REG
 sleep 2
 
 echo "=== Invoking ==="
-RESP_FILE="$PROBE_DIR/last-results.json"
+RESP_FILE="${OUTPUT_JSON:-$PROBE_DIR/last-results.json}"
+mkdir -p "$(dirname "$RESP_FILE")"
 aws lambda invoke \
   --function-name "$FUNCTION_NAME" \
   --region "$REGION" \

@@ -2,7 +2,7 @@ name: Python Example Routes
 
 on:
   push:
-    branches: [main, feat/wasm-backend]
+    branches: [main]
     paths:
       - "examples/eval-python/**"
       - "examples/eval-numpy/**"

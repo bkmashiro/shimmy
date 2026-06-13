@@ -157,7 +157,7 @@ exhibit this crash.
 **Mode value:** `"uffd"`  
 **Availability:** Linux kernel with `UFFD_FEATURE_PAGEFAULT_FLAG_WP`. Requires
 that the `userfaultfd(2)` syscall is not blocked by seccomp (Docker's default
-profile blocks it; AWS Lambda's does not on newer AMIs).
+profile blocks it; AWS Lambda's does not on current Python 3.11/3.12 AMIs).
 
 The file contains **two** implementations:
 
@@ -193,6 +193,25 @@ memory satisfies (it uses `MAP_PRIVATE | MAP_ANONYMOUS`). The probe workflow
 
 **When to use it:** The recommended strategy for production when multiple pool
 slots are needed and the host kernel + seccomp policy permit userfaultfd.
+
+**AWS Lambda probe results (eu-west-2, 2026-06-13):** local AWS CLI runs of
+`tools/lambda-probe/deploy-and-run.sh` against `shimmy-lambda-probe` on both
+`python3.11` and `python3.12` report the same useful boundary:
+
+| Probe | Python 3.11 | Python 3.12 | Meaning |
+|---|---:|---:|---|
+| `/proc/self/pagemap` readable | ✅ | ✅ | soft-dirty scan can read pagemap entries |
+| `/proc/self/clear_refs` write `4` | ✅ | ✅ | kernel accepts soft-dirty reset syscall path |
+| soft-dirty bit roundtrip | ❌ | ❌ | bit 55 is not set after a write; do not rely on soft-dirty in Lambda |
+| `vm.unprivileged_userfaultfd` | ✅ `1` | ✅ `1` | unprivileged uffd is enabled |
+| `userfaultfd` fd + WP API | ✅ | ✅ | syscall is available and advertises write-protect support |
+| uffd WP register on mmap page | ✅ | ✅ | basic WP registration works |
+| uffd WP register on wazero memory | ✅ | ✅ | wazero linear memory can be registered |
+| `mmap(addr=0)` | ⚠️ rounded up | ⚠️ rounded up | zpoline-style addr-0 mapping is still unavailable |
+
+Raw snapshots are checked in as
+`tools/lambda-probe/last-results-py-311-v3.json` and
+`tools/lambda-probe/last-results-py-312-v3.json`.
 
 ## Strategy Selection Logic
 

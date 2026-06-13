@@ -45,10 +45,21 @@ coverage is in `internal/execution/wasm/python_reactor_lf_bundle_test.go`.
 
 ## Verification commands
 
+Fast local gate:
+
 ```bash
 python3 -m pytest examples/lambda-feedback-fixtures tools/lf-bundle-python examples/lambda-feedback-adapter -q
+```
+
+Full reactor bundle gate (downloads/prepares reactor artifacts and can take a
+few minutes) is intentionally not on every push. Run it manually:
+
+```bash
 scripts/demo-reactor-lambda-feedback-bundles.sh docker
 ```
+
+Or from GitHub Actions, trigger **Lambda Feedback Reactor Bundle Matrix
+(manual)** via `workflow_dispatch`.
 
 The Docker demo prepares the pure-Python staging directory with:
 

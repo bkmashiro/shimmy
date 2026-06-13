@@ -2,6 +2,13 @@
 
 Shimmy is a shim written in Go that interacts with language-agnostic evaluation functions as part of the lambda feedback platform, and exposes them as a RESTful API.
 
+## Current WASM docs
+
+The current shimmy-wasm system state, Lambda probe results, roadmap, and architecture notes are maintained in `shimmy-docs`, not duplicated in this repository. Start at:
+
+- `~/projects/shimmy-docs/docs/wasm/current-system-roadmap-zh.md`
+- published VitePress route: `/wasm/current-system-roadmap-zh`
+
 ## Background
 
 This project was originally developed as part of a Master's dissertation: [Andreas Pfrutscheller, *MSc Report* (2024)](https://github.com/user-attachments/files/27594869/2024_AndreasPfrutscheller_MSc_report.pdf).

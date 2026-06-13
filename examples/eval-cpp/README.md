@@ -28,4 +28,4 @@ PORT=8080 \
 Edit the method dispatch in `eval.cpp`. The `alloc` and `evaluate` exports
 must remain — they are the guest ABI shimmy calls on every request.
 
-See `WASM.md` in the repo root for the full ABI specification.
+See the canonical Guest ABI docs in shimmy-docs: `docs/wasm/guest-abi.md` (or the published `/wasm/guest-abi` page).

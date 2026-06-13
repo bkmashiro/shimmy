@@ -213,7 +213,7 @@ func TestUserfaultfdProbe_FdOnly(t *testing.T) {
 //   - wazero calls make([]byte, minBytes, capBytes) in NewMemoryInstance
 //   - For large allocations Go's runtime uses mmap(MAP_ANON|MAP_PRIVATE)
 //   - MAP_PRIVATE is required for UFFDIO_REGISTER_MODE_WP
-//   - The "MAP_SHARED" hypothesis in the original TODO.md appears to be
+//   - The old MAP_SHARED hypothesis appears to be
 //     incorrect — wazero does NOT use MAP_SHARED for linear memory
 //
 // If this test fails with EINVAL, the VMA backing the slice may:

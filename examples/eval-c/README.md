@@ -34,4 +34,4 @@ Edit the `eval` branch in `eval.c` with your evaluation logic.
 The `alloc` and `evaluate` exports must remain — they are the guest ABI
 that shimmy calls on every request.
 
-See `WASM.md` in the repo root for the full ABI specification.
+See the canonical Guest ABI docs in shimmy-docs: `docs/wasm/guest-abi.md` (or the published `/wasm/guest-abi` page).

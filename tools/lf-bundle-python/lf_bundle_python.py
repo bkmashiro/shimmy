@@ -152,13 +152,24 @@ def preview_function(response, answer=None, params=None):
 '''
 
 
-def build_bundle(root: Path, adapter_root: Path, eval_entrypoint: str, preview_entrypoint: str | None) -> str:
+def build_bundle(
+    root: Path,
+    adapter_root: Path,
+    eval_entrypoint: str,
+    preview_entrypoint: str | None,
+    include_roots: Iterable[Path] = (),
+) -> str:
     root = root.resolve()
     adapter_root = adapter_root.resolve()
     modules, packages = collect_fixture_modules(root)
     adapter_modules, adapter_packages = collect_adapter_modules(adapter_root)
     modules.update(adapter_modules)
     packages.update(adapter_packages)
+
+    for include_root in include_roots:
+        extra_modules, extra_packages = collect_fixture_modules(include_root.resolve())
+        modules.update(extra_modules)
+        packages.update(extra_packages)
 
     for entrypoint in [eval_entrypoint, preview_entrypoint]:
         if not entrypoint:
@@ -176,6 +187,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--adapter-root", required=True, type=Path, help="Adapter root containing lf_compat_adapter.py and lf_toolkit/")
     parser.add_argument("--eval-entrypoint", required=True, help="module:function entrypoint for eval")
     parser.add_argument("--preview-entrypoint", default="", help="module:function entrypoint for preview")
+    parser.add_argument(
+        "--include-root",
+        action="append",
+        default=[],
+        type=Path,
+        help="Additional pure-Python module root to embed, repeatable (for vendored deps such as mpmath)",
+    )
     parser.add_argument("--out", required=True, type=Path, help="Output single-file Python script")
     return parser.parse_args(argv)
 
@@ -188,6 +206,7 @@ def main(argv: list[str] | None = None) -> int:
             adapter_root=args.adapter_root,
             eval_entrypoint=args.eval_entrypoint,
             preview_entrypoint=args.preview_entrypoint or None,
+            include_roots=args.include_root,
         )
     except Exception as exc:
         print(f"lf-bundle-python: {exc}", file=sys.stderr)

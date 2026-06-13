@@ -91,6 +91,42 @@ def test_generated_bundle_does_not_need_fixture_paths_at_runtime(tmp_path: Path)
     assert "{'preview': {'sympy': 'a'}}" in smoke.stdout
 
 
+def test_bundle_can_embed_extra_pure_python_include_roots(tmp_path: Path) -> None:
+    include_root = tmp_path / "vendor"
+    package = include_root / "helper_pkg"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("VALUE = 41\n")
+    (package / "maths.py").write_text("from . import VALUE\ndef add_one():\n    return VALUE + 1\n")
+
+    fixture = tmp_path / "fixture"
+    eval_pkg = fixture / "evaluation_function"
+    eval_pkg.mkdir(parents=True)
+    (eval_pkg / "__init__.py").write_text("")
+    (eval_pkg / "evaluation.py").write_text(
+        "from helper_pkg.maths import add_one\n"
+        "def evaluation_function(response, answer, params=None):\n"
+        "    return {'is_correct': add_one() == 42}\n"
+    )
+
+    out = tmp_path / "with-vendor.bundle.py"
+    result = run_bundler(
+        "--root",
+        str(fixture),
+        "--adapter-root",
+        str(ADAPTER),
+        "--include-root",
+        str(include_root),
+        "--eval-entrypoint",
+        "evaluation_function.evaluation:evaluation_function",
+        "--out",
+        str(out),
+    )
+
+    assert result.returncode == 0, result.stderr
+    bundle = load_module(out)
+    assert bundle.evaluation_function("", "", {}) == {"is_correct": True}
+
+
 def test_bundle_fails_when_entrypoint_module_is_missing(tmp_path: Path) -> None:
     result = run_bundler(
         "--root",

@@ -122,7 +122,7 @@ Implemented in `internal/execution/wasm/python_reactor.go` as
 `ReactorPythonRunner`, pooled by `ReactorPythonDispatcher`.
 
 `python-reactor.wasm` is compiled in **reactor mode** (`-mexec-model=reactor`,
-WASI SDK) against `libpython3.12.a`. It exports named functions instead of
+WASI SDK) against `libpython3.14.a`. It exports named functions instead of
 `_start`:
 
 | Export | Signature | Description |
@@ -208,9 +208,13 @@ For real Lambda Feedback packages, use one of two explicit paths:
   `tools/lf-bundle-python/lf_bundle_python.py`, then point
   `FUNCTION_WASM_PYTHON_SCRIPT` at the generated bundle.
 
-The bundle shortcut only covers evaluator package code plus the adapter shim;
-third-party dependencies such as `numpy`/`sympy` must already be present in the
-chosen reactor artifact.
+The bundle shortcut covers evaluator package code, the adapter shim, and
+repeatable `--include-root` directories for pure-Python dependencies such as
+`mpmath`. Native/WASI packages such as NumPy must be present in the reactor
+artifact. The verified `v1.0.11` artifact includes NumPy and SymPy, but SymPy also
+needs bundled pure-Python `mpmath` plus the narrow reactor `ctypes` polyfill under
+`tools/lf-bundle-python/polyfills/reactor`. SciPy is intentionally not a reactor
+target; use Pyodide for SciPy-heavy evaluators.
 
 ### Path 4: Pyodide package/script runner
 

@@ -11,6 +11,7 @@ def preview_function(response, answer=None, params=None): ...
 The generated file embeds:
 
 - evaluator package modules from `--root`
+- extra pure-Python modules from repeatable `--include-root` directories
 - `lf_compat_adapter.py`
 - the minimal `lf_toolkit/` shim from `--adapter-root`
 
@@ -40,17 +41,35 @@ FUNCTION_WASM_PYTHON_SCRIPT=/tmp/boilerplate.bundle.py \
 
 ## Scope
 
-This is a shortcut for pure-Python evaluator packages and packages whose external
-dependencies are already present in `python-reactor.wasm`.
+This is a shortcut for evaluator packages, bundled pure-Python dependencies, and
+packages whose native/WASI pieces are already present in `python-reactor.wasm`.
 
-It does **not** bundle third-party packages like `numpy`, `sympy`, `nltk`, or
-`latex2sympy2`. Those must already be available in the target backend:
+It can embed pure-Python third-party packages after installing them into a staging
+folder:
 
-- reactor-python: built into the reactor artifact / WASI VFS
+```bash
+uv pip install --target /tmp/lf-puredeps mpmath
+python3 tools/lf-bundle-python/lf_bundle_python.py \
+  --root examples/lambda-feedback-fixtures/compare-boolean \
+  --adapter-root examples/lambda-feedback-adapter \
+  --include-root /tmp/lf-puredeps \
+  --include-root tools/lf-bundle-python/polyfills/reactor \
+  --eval-entrypoint evaluation_function.evaluation:evaluation_function \
+  --preview-entrypoint evaluation_function.preview:preview_function \
+  --out /tmp/compare-boolean.bundle.py
+```
+
+It does **not** compile native extension packages. Those must already be available
+in the target backend:
+
+- reactor-python: built into the reactor artifact / WASI VFS, e.g. NumPy in `v1.0.11`
 - Pyodide: loaded through `FUNCTION_PYODIDE_PACKAGES`
+
+`scipy` is intentionally out of reactor scope; use Pyodide for scipy-heavy evaluators.
 
 ## Tests
 
 ```bash
 python3 -m pytest tools/lf-bundle-python -q
+scripts/demo-reactor-lambda-feedback-bundles.sh docker
 ```

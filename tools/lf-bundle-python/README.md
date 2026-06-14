@@ -43,6 +43,24 @@ FUNCTION_WASM_PYTHON_SCRIPT=/tmp/boilerplate.bundle.py \
 ./shimmy serve
 ```
 
+Shimmy can also run this packaging step automatically during reactor-python
+startup for Lambda Feedback package-style evaluators:
+
+```bash
+FUNCTION_INTERFACE=reactor-python \
+FUNCTION_WASM_MODULE=/path/to/python-reactor.wasm \
+FUNCTION_LF_ROOT=examples/lambda-feedback-fixtures/boilerplate-python \
+FUNCTION_LF_EVAL_ENTRYPOINT=evaluation_function.evaluation:evaluation_function \
+FUNCTION_LF_PREVIEW_ENTRYPOINT=evaluation_function.preview:preview_function \
+FUNCTION_LF_ADAPTER_ROOT=examples/lambda-feedback-adapter \
+FUNCTION_LF_BUNDLER=tools/lf-bundle-python/lf_bundle_python.py \
+./shimmy serve
+```
+
+In this mode Shimmy invokes the bundler once at process startup, writes a wrapper
+script to a temporary file (or `FUNCTION_LF_BUNDLE_OUT` if set), then executes
+that generated script through reactor-python. Bundling is not done per request.
+
 ## Scope
 
 This is a packaging helper for evaluator packages, bundled pure-Python
@@ -82,6 +100,13 @@ python3 tools/lf-bundle-python/lf_bundle_python.py \
 When running under WASI, the `--sys-path` value must be visible inside the guest
 at the same path, for example via a read-only preopened mount or Lambda layer.
 Build-time bytecode generation for ZIP payloads is preferred when practical.
+
+The same knobs are available through Shimmy's startup integration:
+
+- `FUNCTION_LF_INCLUDE_ROOTS=/opt/lf-puredeps,/opt/shimmy/polyfills/reactor`
+- `FUNCTION_LF_SYS_PATH=/opt/lf-puredeps.zip`
+- `FUNCTION_LF_BUNDLE_OUT=/tmp/evaluator.wrapper.py`
+- `FUNCTION_LF_BUNDLE_PYTHON=python3`
 
 It does **not** compile native extension packages. Those must already be available
 in the target backend:

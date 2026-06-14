@@ -38,6 +38,7 @@ examples/eval-c/eval.wasm
 examples/eval-cpp/eval.wasm
 examples/eval-rust/eval.wasm
 examples/eval-rust/target/
+examples/adversarial/*/eval.wasm
 # Node/Pyodide demo dependencies
 node_modules/
 examples/eval-pyodide/node_modules/

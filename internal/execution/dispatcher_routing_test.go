@@ -29,6 +29,20 @@ func writeTempScript(t *testing.T, content string) string {
 	return f.Name()
 }
 
+func writeFakeBundler(t *testing.T, logPath string) string {
+	t.Helper()
+	bundler := filepath.Join(t.TempDir(), "fake_bundler.py")
+	require.NoError(t, os.WriteFile(bundler, []byte(`
+import pathlib
+import sys
+args = sys.argv[1:]
+pathlib.Path("`+logPath+`").write_text("\n".join(args))
+out = pathlib.Path(args[args.index("--out") + 1])
+out.write_text("def evaluation_function(response, answer, params=None):\n    return {'is_correct': True}\n")
+`), 0o755))
+	return bundler
+}
+
 // ---------------------------------------------------------------------------
 // ScriptFileNeedsHeavyRuntime routing decisions
 // ---------------------------------------------------------------------------
@@ -129,15 +143,7 @@ func TestNewDispatcher_ReactorPython_BundlesLambdaFeedbackPackageAtStartup(t *te
 	adapterRoot := t.TempDir()
 	out := filepath.Join(t.TempDir(), "generated.bundle.py")
 	logPath := filepath.Join(t.TempDir(), "bundler.args")
-	bundler := filepath.Join(t.TempDir(), "fake_bundler.py")
-	require.NoError(t, os.WriteFile(bundler, []byte(`
-import pathlib
-import sys
-args = sys.argv[1:]
-pathlib.Path("`+logPath+`").write_text("\n".join(args))
-out = pathlib.Path(args[args.index("--out") + 1])
-out.write_text("def evaluation_function(response, answer, params=None):\n    return {'is_correct': True}\n")
-`), 0o755))
+	bundler := writeFakeBundler(t, logPath)
 
 	t.Setenv("FUNCTION_LF_ROOT", root)
 	t.Setenv("FUNCTION_LF_EVAL_ENTRYPOINT", "evaluation_function.evaluation:evaluation_function")
@@ -180,6 +186,99 @@ out.write_text("def evaluation_function(response, answer, params=None):\n    ret
 	assert.Contains(t, args, "--include-root\n/opt/polyfills")
 	assert.Contains(t, args, "--sys-path\n/opt/puredeps.zip")
 	assert.Contains(t, args, "--out\n"+out)
+}
+
+func TestNewDispatcher_ReactorPython_DefaultsLambdaFeedbackEntrypoints(t *testing.T) {
+	root := t.TempDir()
+	adapterRoot := t.TempDir()
+	out := filepath.Join(t.TempDir(), "generated.bundle.py")
+	logPath := filepath.Join(t.TempDir(), "bundler.args")
+	bundler := writeFakeBundler(t, logPath)
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "evaluation_function"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "evaluation_function", "preview.py"), []byte("def preview_function():\n    return None\n"), 0o644))
+
+	t.Setenv("FUNCTION_LF_ROOT", root)
+	t.Setenv("FUNCTION_LF_ADAPTER_ROOT", adapterRoot)
+	t.Setenv("FUNCTION_LF_BUNDLER", bundler)
+	t.Setenv("FUNCTION_LF_BUNDLE_OUT", out)
+
+	_, err := execution.NewDispatcher(execution.Params{
+		Context: context.Background(),
+		Config: execution.Config{
+			Supervisor: supervisor.Config{
+				IO: supervisor.IOConfig{
+					Interface: supervisor.ReactorPythonIO,
+				},
+			},
+		},
+		Log: zap.NewNop(),
+	})
+
+	require.Error(t, err)
+	if runtime.GOOS != "linux" {
+		assert.Contains(t, err.Error(), "Linux")
+	} else {
+		assert.Contains(t, err.Error(), "wasmPath")
+	}
+	require.FileExists(t, out, "reactor package mode should generate the bundle before reactor startup")
+	argsBytes, readErr := os.ReadFile(logPath)
+	require.NoError(t, readErr)
+	args := string(argsBytes)
+	assert.Contains(t, args, "--root\n"+root)
+	assert.Contains(t, args, "--adapter-root\n"+adapterRoot)
+	assert.Contains(t, args, "--eval-entrypoint\nevaluation_function.evaluation:evaluation_function")
+	assert.Contains(t, args, "--preview-entrypoint\nevaluation_function.preview:preview_function")
+}
+
+func TestNewDispatcher_ReactorPython_LoadsLambdaFeedbackConfigFileWithEnvOverride(t *testing.T) {
+	root := t.TempDir()
+	adapterRoot := t.TempDir()
+	out := filepath.Join(t.TempDir(), "generated.bundle.py")
+	logPath := filepath.Join(t.TempDir(), "bundler.args")
+	bundler := writeFakeBundler(t, logPath)
+	configPath := filepath.Join(t.TempDir(), "shimmy-lf.json")
+	require.NoError(t, os.WriteFile(configPath, []byte(`{
+  "root": "`+root+`",
+  "eval": "package.eval:evaluate",
+  "preview": "package.preview:preview",
+  "adapter_root": "`+adapterRoot+`",
+  "bundler": "`+bundler+`",
+  "out": "`+out+`",
+  "include_roots": ["/opt/from-config"],
+  "sys_path": ["/opt/from-config.zip"]
+}`), 0o644))
+
+	t.Setenv("FUNCTION_LF_CONFIG", configPath)
+	t.Setenv("FUNCTION_LF_EVAL_ENTRYPOINT", "override.module:eval")
+
+	_, err := execution.NewDispatcher(execution.Params{
+		Context: context.Background(),
+		Config: execution.Config{
+			Supervisor: supervisor.Config{
+				IO: supervisor.IOConfig{
+					Interface: supervisor.ReactorPythonIO,
+				},
+			},
+		},
+		Log: zap.NewNop(),
+	})
+
+	require.Error(t, err)
+	if runtime.GOOS != "linux" {
+		assert.Contains(t, err.Error(), "Linux")
+	} else {
+		assert.Contains(t, err.Error(), "wasmPath")
+	}
+	require.FileExists(t, out, "reactor package mode should generate the bundle before reactor startup")
+	argsBytes, readErr := os.ReadFile(logPath)
+	require.NoError(t, readErr)
+	args := string(argsBytes)
+	assert.Contains(t, args, "--root\n"+root)
+	assert.Contains(t, args, "--adapter-root\n"+adapterRoot)
+	assert.Contains(t, args, "--eval-entrypoint\noverride.module:eval")
+	assert.Contains(t, args, "--preview-entrypoint\npackage.preview:preview")
+	assert.Contains(t, args, "--include-root\n/opt/from-config")
+	assert.Contains(t, args, "--sys-path\n/opt/from-config.zip")
 }
 
 // TestNewDispatcher_ReactorPython_EmptyScriptPath verifies that when

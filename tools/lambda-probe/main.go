@@ -1,3 +1,5 @@
+//go:build linux
+
 // Lambda kernel-feature probe.
 //
 // Build (static, linux/amd64 for Lambda):
@@ -184,8 +186,8 @@ func probeUserfaultfdFd() {
 
 // userfaultfd ioctl layout constants (x86-64 / arm64 ABI)
 const (
-	uffdioAPIReq      = 0xc018aa3f // UFFDIO_API
-	uffdioRegisterReq = 0xc020aa00 // UFFDIO_REGISTER
+	uffdioAPIReq      = 0xc018aa3f     // UFFDIO_API
+	uffdioRegisterReq = 0xc020aa00     // UFFDIO_REGISTER
 	uffdFeatureWP     = uint64(1 << 2) // UFFD_FEATURE_PAGEFAULT_FLAG_WP
 	uffdModeWP        = uint64(1 << 1) // UFFDIO_REGISTER_MODE_WP
 )

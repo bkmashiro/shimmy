@@ -2,10 +2,10 @@
 // Each test compiles a malicious wasm32-wasip1 module that attempts an attack,
 // then verifies wazero's isolation properties block it.
 //
-// Requires pre-built eval.wasm artifacts in each subdirectory.
-// Build them with:
+// The tests auto-build eval.wasm artifacts in each subdirectory when missing.
+// To build them manually:
 //
-//	cd mem-bomb   && GOOS=wasip1 GOARCH=wasm go build -o eval.wasm .
+//	cd mem-bomb && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o eval.wasm .
 //	(repeat for each subdirectory)
 //
 // Then run:
@@ -18,6 +18,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -48,6 +49,7 @@ type callResult struct {
 func loadAndCall(t *testing.T, wasmPath string, timeout time.Duration) (attackResult, error) {
 	t.Helper()
 
+	ensureWasmArtifact(t, wasmPath)
 	wasmBytes, err := os.ReadFile(wasmPath)
 	if err != nil {
 		t.Fatalf("wasm artifact not found (%s): %v", wasmPath, err)
@@ -122,6 +124,28 @@ func loadAndCall(t *testing.T, wasmPath string, timeout time.Duration) (attackRe
 		t.Fatalf("unmarshal response: %v\nbody: %s", err, body)
 	}
 	return result, nil
+}
+
+func ensureWasmArtifact(t *testing.T, wasmPath string) {
+	t.Helper()
+	if _, err := os.Stat(wasmPath); err == nil {
+		return
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat wasm artifact %s: %v", wasmPath, err)
+	}
+
+	moduleDir := filepath.Dir(wasmPath)
+	if _, err := os.Stat(filepath.Join(moduleDir, "main.go")); err != nil {
+		t.Fatalf("wasm artifact missing and module source is unavailable (%s): %v", wasmPath, err)
+	}
+
+	cmd := exec.Command("go", "build", "-buildmode=c-shared", "-o", filepath.Base(wasmPath), ".")
+	cmd.Dir = moduleDir
+	cmd.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("build wasm artifact %s: %v\n%s", wasmPath, err, output)
+	}
 }
 
 // wasmPath returns the path to eval.wasm for a given adversarial module.
@@ -275,9 +299,11 @@ func TestMemoryGrow(t *testing.T) {
 // the other's session ID. The test instantiates two modules in parallel
 // goroutines and asserts both report isolation=true.
 func TestConcurrentIsolation(t *testing.T) {
-	wasmBytes, err := os.ReadFile(wasmPath("concurrent-isolation"))
+	artifactPath := wasmPath("concurrent-isolation")
+	ensureWasmArtifact(t, artifactPath)
+	wasmBytes, err := os.ReadFile(artifactPath)
 	if err != nil {
-		t.Skipf("concurrent-isolation artifact not found, skipping: %v", err)
+		t.Fatalf("wasm artifact not found (%s): %v", artifactPath, err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

@@ -44,7 +44,27 @@ FUNCTION_WASM_PYTHON_SCRIPT=/tmp/boilerplate.bundle.py \
 ```
 
 Shimmy can also run this packaging step automatically during reactor-python
-startup for Lambda Feedback package-style evaluators:
+startup for Lambda Feedback package-style evaluators. The fast path only needs
+the package root; Shimmy uses Lambda Feedback's standard entrypoints and repo
+local bundler/adapter defaults:
+
+```bash
+FUNCTION_INTERFACE=reactor-python \
+FUNCTION_WASM_MODULE=/path/to/python-reactor.wasm \
+FUNCTION_LF_ROOT=examples/lambda-feedback-fixtures/boilerplate-python \
+./shimmy serve
+```
+
+Default startup values:
+
+- eval entrypoint: `evaluation_function.evaluation:evaluation_function`
+- preview entrypoint: `evaluation_function.preview:preview_function` when
+  `evaluation_function/preview.py` exists under `FUNCTION_LF_ROOT`
+- adapter root: `examples/lambda-feedback-adapter`
+- bundler: `tools/lf-bundle-python/lf_bundle_python.py`
+- output: a temporary bundle file
+
+Override only the pieces that differ:
 
 ```bash
 FUNCTION_INTERFACE=reactor-python \
@@ -56,6 +76,29 @@ FUNCTION_LF_ADAPTER_ROOT=examples/lambda-feedback-adapter \
 FUNCTION_LF_BUNDLER=tools/lf-bundle-python/lf_bundle_python.py \
 ./shimmy serve
 ```
+
+For dependency-heavy packages, put the knobs in one JSON file instead of a long
+env list:
+
+```bash
+FUNCTION_INTERFACE=reactor-python \
+FUNCTION_WASM_MODULE=/path/to/python-reactor.wasm \
+FUNCTION_LF_CONFIG=/var/task/shimmy-lf.json \
+./shimmy serve
+```
+
+```json
+{
+  "root": "/var/task",
+  "eval": "evaluation_function.evaluation:evaluation_function",
+  "preview": "evaluation_function.preview:preview_function",
+  "include_roots": ["/opt/lf-puredeps", "/opt/shimmy/polyfills/reactor"],
+  "sys_path": ["/opt/lf-puredeps.zip"]
+}
+```
+
+Explicit `FUNCTION_LF_*` environment variables override values from
+`FUNCTION_LF_CONFIG`.
 
 In this mode Shimmy invokes the bundler once at process startup, writes a wrapper
 script to a temporary file (or `FUNCTION_LF_BUNDLE_OUT` if set), then executes

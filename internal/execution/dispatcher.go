@@ -2,9 +2,11 @@ package execution
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"go.uber.org/zap"
@@ -149,25 +151,103 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 }
 
 func reactorPythonScriptPath(ctx context.Context) (string, error) {
-	root := os.Getenv("FUNCTION_LF_ROOT")
-	evalEntrypoint := os.Getenv("FUNCTION_LF_EVAL_ENTRYPOINT")
-	if root == "" && evalEntrypoint == "" {
+	cfg, packageMode, err := reactorPythonLambdaFeedbackConfig()
+	if err != nil {
+		return "", err
+	}
+	if !packageMode {
 		return os.Getenv("FUNCTION_WASM_PYTHON_SCRIPT"), nil
 	}
-	if root == "" || evalEntrypoint == "" {
-		return "", fmt.Errorf("reactor-python Lambda Feedback package mode requires FUNCTION_LF_ROOT and FUNCTION_LF_EVAL_ENTRYPOINT")
+	return buildLambdaFeedbackBundle(ctx, cfg)
+}
+
+type lambdaFeedbackConfigFile struct {
+	Root              string   `json:"root"`
+	Eval              string   `json:"eval"`
+	EvalEntrypoint    string   `json:"eval_entrypoint"`
+	Preview           string   `json:"preview"`
+	PreviewEntrypoint string   `json:"preview_entrypoint"`
+	AdapterRoot       string   `json:"adapter_root"`
+	Bundler           string   `json:"bundler"`
+	Python            string   `json:"python"`
+	Out               string   `json:"out"`
+	IncludeRoots      []string `json:"include_roots"`
+	SysPath           []string `json:"sys_path"`
+}
+
+func reactorPythonLambdaFeedbackConfig() (lambdaFeedbackBundleConfig, bool, error) {
+	fileCfg, err := readLambdaFeedbackConfigFile(os.Getenv("FUNCTION_LF_CONFIG"))
+	if err != nil {
+		return lambdaFeedbackBundleConfig{}, false, err
 	}
-	return buildLambdaFeedbackBundle(ctx, lambdaFeedbackBundleConfig{
+
+	root := firstNonEmpty(os.Getenv("FUNCTION_LF_ROOT"), fileCfg.Root)
+	evalEntrypoint := firstNonEmpty(os.Getenv("FUNCTION_LF_EVAL_ENTRYPOINT"), fileCfg.EvalEntrypoint, fileCfg.Eval)
+	packageMode := root != "" || evalEntrypoint != "" || os.Getenv("FUNCTION_LF_CONFIG") != ""
+	if !packageMode {
+		return lambdaFeedbackBundleConfig{}, false, nil
+	}
+	if root == "" {
+		return lambdaFeedbackBundleConfig{}, true, fmt.Errorf("reactor-python Lambda Feedback package mode requires FUNCTION_LF_ROOT")
+	}
+	if evalEntrypoint == "" {
+		evalEntrypoint = "evaluation_function.evaluation:evaluation_function"
+	}
+
+	previewEntrypoint := firstNonEmpty(os.Getenv("FUNCTION_LF_PREVIEW_ENTRYPOINT"), fileCfg.PreviewEntrypoint, fileCfg.Preview)
+	if previewEntrypoint == "" && fileExists(filepath.Join(root, "evaluation_function", "preview.py")) {
+		previewEntrypoint = "evaluation_function.preview:preview_function"
+	}
+
+	includeRoots := fileCfg.IncludeRoots
+	if envIncludeRoots := splitEnvList(os.Getenv("FUNCTION_LF_INCLUDE_ROOTS")); len(envIncludeRoots) > 0 {
+		includeRoots = envIncludeRoots
+	}
+	sysPath := fileCfg.SysPath
+	if envSysPath := splitEnvList(os.Getenv("FUNCTION_LF_SYS_PATH")); len(envSysPath) > 0 {
+		sysPath = envSysPath
+	}
+
+	return lambdaFeedbackBundleConfig{
 		Root:              root,
 		EvalEntrypoint:    evalEntrypoint,
-		PreviewEntrypoint: os.Getenv("FUNCTION_LF_PREVIEW_ENTRYPOINT"),
-		AdapterRoot:       os.Getenv("FUNCTION_LF_ADAPTER_ROOT"),
-		Bundler:           envDefault("FUNCTION_LF_BUNDLER", "tools/lf-bundle-python/lf_bundle_python.py"),
-		Python:            envDefault("FUNCTION_LF_BUNDLE_PYTHON", "python3"),
-		Out:               os.Getenv("FUNCTION_LF_BUNDLE_OUT"),
-		IncludeRoots:      splitEnvList(os.Getenv("FUNCTION_LF_INCLUDE_ROOTS")),
-		SysPath:           splitEnvList(os.Getenv("FUNCTION_LF_SYS_PATH")),
-	})
+		PreviewEntrypoint: previewEntrypoint,
+		AdapterRoot:       firstNonEmpty(os.Getenv("FUNCTION_LF_ADAPTER_ROOT"), fileCfg.AdapterRoot, "examples/lambda-feedback-adapter"),
+		Bundler:           firstNonEmpty(os.Getenv("FUNCTION_LF_BUNDLER"), fileCfg.Bundler, "tools/lf-bundle-python/lf_bundle_python.py"),
+		Python:            firstNonEmpty(os.Getenv("FUNCTION_LF_BUNDLE_PYTHON"), fileCfg.Python, "python3"),
+		Out:               firstNonEmpty(os.Getenv("FUNCTION_LF_BUNDLE_OUT"), fileCfg.Out),
+		IncludeRoots:      includeRoots,
+		SysPath:           sysPath,
+	}, true, nil
+}
+
+func readLambdaFeedbackConfigFile(path string) (lambdaFeedbackConfigFile, error) {
+	if path == "" {
+		return lambdaFeedbackConfigFile{}, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return lambdaFeedbackConfigFile{}, fmt.Errorf("reactor-python: read FUNCTION_LF_CONFIG %q: %w", path, err)
+	}
+	var cfg lambdaFeedbackConfigFile
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return lambdaFeedbackConfigFile{}, fmt.Errorf("reactor-python: parse FUNCTION_LF_CONFIG %q: %w", path, err)
+	}
+	return cfg, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 type lambdaFeedbackBundleConfig struct {

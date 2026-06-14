@@ -4,6 +4,7 @@ import importlib.util
 from pathlib import Path
 import subprocess
 import sys
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 BUNDLER = Path(__file__).resolve().parent / "lf_bundle_python.py"
@@ -123,6 +124,49 @@ def test_bundle_can_embed_extra_pure_python_include_roots(tmp_path: Path) -> Non
     )
 
     assert result.returncode == 0, result.stderr
+    bundle = load_module(out)
+    assert bundle.evaluation_function("", "", {}) == {"is_correct": True}
+
+
+def test_bundle_can_add_zip_payloads_to_sys_path(tmp_path: Path) -> None:
+    dep_root = tmp_path / "dep-src"
+    package = dep_root / "zip_dep"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("from .maths import value\n")
+    (package / "maths.py").write_text("def value():\n    return 42\n")
+
+    zip_path = tmp_path / "deps.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        for path in sorted(dep_root.rglob("*.py")):
+            zf.write(path, path.relative_to(dep_root).as_posix())
+
+    fixture = tmp_path / "fixture"
+    eval_pkg = fixture / "evaluation_function"
+    eval_pkg.mkdir(parents=True)
+    (eval_pkg / "__init__.py").write_text("")
+    (eval_pkg / "evaluation.py").write_text(
+        "from zip_dep import value\n"
+        "def evaluation_function(response, answer, params=None):\n"
+        "    return {'is_correct': value() == 42}\n"
+    )
+
+    out = tmp_path / "with-zip-payload.bundle.py"
+    result = run_bundler(
+        "--root",
+        str(fixture),
+        "--adapter-root",
+        str(ADAPTER),
+        "--sys-path",
+        str(zip_path),
+        "--eval-entrypoint",
+        "evaluation_function.evaluation:evaluation_function",
+        "--out",
+        str(out),
+    )
+
+    assert result.returncode == 0, result.stderr
+    text = out.read_text()
+    assert str(zip_path) in text
     bundle = load_module(out)
     assert bundle.evaluation_function("", "", {}) == {"is_correct": True}
 

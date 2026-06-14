@@ -15,6 +15,10 @@ The generated file embeds:
 - `lf_compat_adapter.py`
 - the minimal `lf_toolkit/` shim from `--adapter-root`
 
+It can also prepend repeatable `--sys-path` entries at runtime. Use this for
+pure-Python dependency ZIPs or directories that are mounted into the WASI guest,
+so dependency updates do not require regenerating one very large script.
+
 It uses an in-memory `sys.meta_path` loader rather than writing modules to a temp
 directory, so the bundle survives reactor's `exec(script_src, ns)` model and does
 not need the original package root mounted at request time.
@@ -41,8 +45,9 @@ FUNCTION_WASM_PYTHON_SCRIPT=/tmp/boilerplate.bundle.py \
 
 ## Scope
 
-This is a shortcut for evaluator packages, bundled pure-Python dependencies, and
-packages whose native/WASI pieces are already present in `python-reactor.wasm`.
+This is a packaging helper for evaluator packages, bundled pure-Python
+dependencies, and packages whose native/WASI pieces are already present in
+`python-reactor.wasm`.
 
 It can embed pure-Python third-party packages after installing them into a staging
 folder:
@@ -59,6 +64,24 @@ python3 tools/lf-bundle-python/lf_bundle_python.py \
   --preview-entrypoint evaluation_function.preview:preview_function \
   --out /tmp/compare-boolean.bundle.py
 ```
+
+For larger pure-Python dependency sets, prefer a ZIP or directory payload on
+`sys.path`:
+
+```bash
+(cd /tmp/lf-puredeps && python3 -m zipfile -c /tmp/lf-puredeps.zip .)
+python3 tools/lf-bundle-python/lf_bundle_python.py \
+  --root examples/lambda-feedback-fixtures/compare-boolean \
+  --adapter-root examples/lambda-feedback-adapter \
+  --sys-path /opt/lf-puredeps.zip \
+  --eval-entrypoint evaluation_function.evaluation:evaluation_function \
+  --preview-entrypoint evaluation_function.preview:preview_function \
+  --out /tmp/compare-boolean.wrapper.py
+```
+
+When running under WASI, the `--sys-path` value must be visible inside the guest
+at the same path, for example via a read-only preopened mount or Lambda layer.
+Build-time bytecode generation for ZIP payloads is preferred when practical.
 
 It does **not** compile native extension packages. Those must already be available
 in the target backend:

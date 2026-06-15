@@ -7,6 +7,12 @@ scripts/demo-wasm.sh       # shortest end-to-end story: state reset in one WASM 
 scripts/demo-scenarios.sh  # scenario matrix: multiple guest languages + sample inputs
 ```
 
+For the backend model behind these demos, see
+[`wasm-backend-model.md`](wasm-backend-model.md). In short: `wasm` is the
+runtime interface; language-specific Go/Rust/C/C++/Python/JS compilation is a
+build or deployment recipe, not a separate peer `FUNCTION_INTERFACE` for every
+language.
+
 ## What `scripts/demo-scenarios.sh` runs
 
 The scenario runner builds Shimmy once, then runs one local HTTP server per demo

@@ -187,7 +187,12 @@ Example request using cases:
 
 ### Communication Channels
 
-The shim supports two interface modes, selected with `--interface`:
+The shim supports several interface modes, selected with `--interface`. The
+important naming rule for the WASM work is that `--interface` names the execution
+boundary, not the evaluator source language: avoid adding one mode per language
+such as `rust-wasm`, `go-wasm`, or `js-wasm`. See
+[`docs/wasm-backend-model.md`](docs/wasm-backend-model.md) for the runtime
+interface / WASM profile / build recipe split.
 
 #### RPC (`--interface rpc`, default)
 
@@ -244,3 +249,22 @@ For example, a Wolfram Language evaluation function in `evaluation.wl` would be 
 ```shell
 wolframscript -file evaluation.wl /tmp/shimmy/abc/request-data-123 /tmp/shimmy/abc/response-data-456
 ```
+
+#### WASM (`--interface wasm`)
+
+The generic WASM backend consumes an already-built `.wasm` module that exposes
+Shimmy's `alloc` / `evaluate` ABI. Shimmy does not compile source code at request
+time and should not infer a runtime from language imports or dependency files.
+
+Language-specific work belongs in build/deployment recipes:
+
+- Go: `GOOS=wasip1 GOARCH=wasm go build ... -o eval.wasm`
+- Rust: `cargo build --target wasm32-wasip1` with a Shimmy ABI wrapper
+- C/C++: WASI SDK / clang targeting `wasm32-wasip1`
+- Python: CPython-WASI reactor or Pyodide compatibility lane, depending on package needs
+- JavaScript: future Javy/QuickJS-to-WASI integration with a Shimmy ABI adapter
+
+The current branch has a working generic WASM runtime path and prototype Python
+routes, but the profile/config surface is not fully polished yet. The target
+model is one `wasm` execution backend plus explicit WASM profiles and build
+recipes, not one `FUNCTION_INTERFACE` value per source language.

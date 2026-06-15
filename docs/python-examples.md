@@ -1,6 +1,6 @@
 # Python runtime routes
 
-Shimmy's Python story is a runtime capability matrix, not three equally recommended paths.
+Shimmy's Python story is a runtime capability matrix, not three equally recommended paths. Conceptually, Python should be described as a WASM/runtime **profile or compatibility lane**, not as proof that every source language needs its own peer `FUNCTION_INTERFACE`; see [`wasm-backend-model.md`](wasm-backend-model.md) for the runtime/profile/build split.
 
 | Route | Directory | Runtime | Use when | Trade-off |
 |---|---|---|---|---|

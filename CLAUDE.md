@@ -196,18 +196,22 @@ case io.WasmIO:
 
 ---
 
-## Language Routing (broader Shimmy-WASM project)
+## WASM runtime/profile/build split
 
-The WASM backend routes evaluation functions by language:
+Do not model every source language as a peer `FUNCTION_INTERFACE`. The cleaner target model is:
 
-| Language | Compilation | Runtime | Notes |
+1. **Runtime interface**: `rpc`, `file`, `wasm`, and compatibility lanes such as `pyodide` describe how Shimmy executes/talks to the evaluator.
+2. **WASM profile**: `generic` means a pre-built module exposes the `alloc` / `evaluate` ABI; `python-reactor` means CPython-WASI reactor + evaluator script/package config; future JS/Javy support should be a profile/recipe, not `js-wasm` as a peer interface.
+3. **Build/deployment recipe**: Go/Rust/C/C++/Python/JS each have their own compiler or bundler steps that produce an artifact consumed by Shimmy.
+
+| Source language | Build/deployment recipe | Runtime path | Notes |
 |----------|-------------|---------|-------|
-| Rust / C / C++ / Go | `wasm32-wasip1` | wazero | Snapshot, N:1 mux |
-| Python (pure / NumPy) | CPython-WASI reactor → `.wasm` | wazero | Fastest Python path; snapshot/restore; package support limited by WASI |
-| Python (scipy/pandas) | Pyodide (Emscripten) | Node.js subprocess | Broadest package compatibility; slowest; no wazero snapshot |
-| JavaScript | Javy / QuickJS → `wasm32-wasi` | wazero via RPC subprocess | JS compiled to WASM; no Goja in-process path |
+| Rust / C / C++ / Go | compile to `wasm32-wasip1` with a Shimmy ABI wrapper | `FUNCTION_INTERFACE=wasm` | Generic WASM ABI; snapshot/restore in wazero pool. |
+| Python (pure / NumPy subset) | CPython-WASI reactor + script/package bundle | currently `reactor-python`; conceptually a WASM profile | Fastest Python path; package support limited by WASI. |
+| Python (SciPy/Pandas/heavy packages) | Pyodide/Emscripten runner | `FUNCTION_INTERFACE=pyodide` | Compatibility lane; slowest; not the same in-process wazero pool. |
+| JavaScript | Javy / QuickJS → WASI + ABI adapter | future WASM profile; current demo uses RPC subprocess | JS compiled to WASM, but generic in-process ABI integration is not complete. |
 
-Routing is selected explicitly at deployment time via `FUNCTION_INTERFACE` (for example `pyodide` for compatibility-first Python, `reactor-python` for optimised CPython-WASI cases, `wasm` for native WASI modules, `rpc` for existing subprocess/RPC evaluators). Do not infer Python runtime from imports/requirements automatically.
+Routing must remain explicit at deployment time. Do not infer runtime from imports, `requirements.txt`, or source file extension. See `docs/wasm-backend-model.md`.
 
 ---
 

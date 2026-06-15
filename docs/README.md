@@ -9,3 +9,4 @@ this repository.
 | [demo-scenarios.md](demo-scenarios.md) | Multi-language/demo scenario matrix. |
 | [live-demo-playbook.md](live-demo-playbook.md) | Presenter-facing live demo script, expected outputs, and troubleshooting. |
 | [python-examples.md](python-examples.md) | Plain Python / NumPy / SciPy route demos. |
+| [wasm-backend-model.md](wasm-backend-model.md) | Runtime interface vs WASM profile vs language build recipe. |

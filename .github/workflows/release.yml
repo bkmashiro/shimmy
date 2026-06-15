@@ -70,9 +70,10 @@ jobs:
 
       - name: Trigger evaluation-function-base release
         if: steps.idempotency.outputs.skip == 'false'
-        uses: peter-evans/repository-dispatch@v3
-        with:
-          token: ${{ secrets.SHIMMY_DEPLOY_TOKEN }}
-          repository: ${{ github.repository_owner }}/evaluation-function-base
-          event-type: release
-          client-payload: '{"shimmy_version": "${{ steps.version.outputs.version }}"}'
+        env:
+          GH_TOKEN: ${{ secrets.SHIMMY_DEPLOY_TOKEN }}
+        run: |
+          gh api repos/${{ github.repository_owner }}/evaluation-function-base/dispatches \
+            --method POST \
+            -f event_type=release \
+            -F client_payload='{"shimmy_version": "${{ steps.version.outputs.version }}"}'

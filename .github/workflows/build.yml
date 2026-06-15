@@ -188,8 +188,9 @@ jobs:
       id-token: write
     steps:
       - name: Repository Dispatch
-        uses: peter-evans/repository-dispatch@v3
-        with:
-          token: ${{ secrets.EVALUATION_FUNCTION_BASE_BUILD_TRIGGER_TOKEN }}
-          repository: ${{ github.repository_owner }}/evaluation-function-base
-          event-type: trigger-build
+        env:
+          GH_TOKEN: ${{ secrets.SHIMMY_DEPLOY_TOKEN }}
+        run: |
+          gh api repos/${{ github.repository_owner }}/evaluation-function-base/dispatches \
+            --method POST \
+            -f event_type=trigger-build

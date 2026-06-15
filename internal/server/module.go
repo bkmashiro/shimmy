@@ -6,6 +6,8 @@ func Module(config HttpConfig) fx.Option {
 	return fx.Module("server",
 		// provide config
 		fx.Supply(config),
+		// provide openapi spec
+		fx.Provide(LoadOpenAPISpec),
 		// provide server
 		fx.Provide(NewLifecycleServer),
 		// invoke server

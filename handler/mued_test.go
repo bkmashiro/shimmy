@@ -57,8 +57,7 @@ func mathEvalBody(t *testing.T) []byte {
 		},
 		"task": map[string]any{
 			"referenceSolution": map[string]any{
-				"type":    "MATH",
-				"content": map[string]any{"expression": "x^2"},
+				"expression": "x^2",
 			},
 		},
 	})
@@ -99,6 +98,7 @@ func TestMuEdServeEvaluate_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, res.StatusCode)
 	assert.Equal(t, "application/json", res.Header.Get("Content-Type"))
+	assert.Equal(t, "0.1.0", res.Header.Get("X-Api-Version"))
 
 	var feedback []map[string]any
 	require.NoError(t, json.Unmarshal(body, &feedback))
@@ -207,25 +207,45 @@ func TestMuEdServeEvaluate_InvalidJSON(t *testing.T) {
 
 	newMuEdHandler(mockHandler, nil, "").ServeEvaluate(w, req)
 
-	assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+	res := w.Result()
+	defer res.Body.Close()
+	raw, _ := io.ReadAll(res.Body)
+
+	assert.Equal(t, http.StatusBadRequest, res.StatusCode)
+	assert.Equal(t, "0.1.0", res.Header.Get("X-Api-Version"))
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(raw, &body))
+	assert.Equal(t, "VALIDATION_ERROR", body["code"])
+
 	mockHandler.AssertNotCalled(t, "Handle", mock.Anything, mock.Anything)
 }
 
 func TestMuEdServeEvaluate_MissingReferenceSolution(t *testing.T) {
 	mockHandler := new(MockHandler)
 
-	body, _ := json.Marshal(map[string]any{
+	reqBody, _ := json.Marshal(map[string]any{
 		"submission": map[string]any{
 			"type":    "MATH",
 			"content": map[string]any{"expression": "x^2"},
 		},
 	})
-	req := httptest.NewRequest(http.MethodPost, "/evaluate", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/evaluate", bytes.NewReader(reqBody))
 	w := httptest.NewRecorder()
 
 	newMuEdHandler(mockHandler, nil, "").ServeEvaluate(w, req)
 
-	assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+	res := w.Result()
+	defer res.Body.Close()
+	raw, _ := io.ReadAll(res.Body)
+
+	assert.Equal(t, http.StatusBadRequest, res.StatusCode)
+	assert.Equal(t, "0.1.0", res.Header.Get("X-Api-Version"))
+
+	var errBody map[string]any
+	require.NoError(t, json.Unmarshal(raw, &errBody))
+	assert.Equal(t, "VALIDATION_ERROR", errBody["code"])
+
 	mockHandler.AssertNotCalled(t, "Handle", mock.Anything, mock.Anything)
 }
 
@@ -250,6 +270,7 @@ func TestMuEdServeEvaluate_WorkerErrorForwarded(t *testing.T) {
 	raw, _ := io.ReadAll(res.Body)
 
 	assert.Equal(t, http.StatusInternalServerError, res.StatusCode)
+	assert.Equal(t, "0.1.0", res.Header.Get("X-Api-Version"))
 	assert.Equal(t, errorBody, bytes.TrimRight(raw, "\n"))
 }
 
@@ -277,10 +298,16 @@ func TestMuEdServeHealth_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, res.StatusCode)
 	assert.Equal(t, "application/json", res.Header.Get("Content-Type"))
+	assert.Equal(t, "0.1.0", res.Header.Get("X-Api-Version"))
 
 	var result map[string]any
 	require.NoError(t, json.Unmarshal(raw, &result))
-	assert.Equal(t, true, result["tests_passed"])
+	assert.Equal(t, "OK", result["status"])
+	caps, ok := result["capabilities"].(map[string]any)
+	require.True(t, ok)
+	versions, ok := caps["supportedAPIVersions"].([]any)
+	require.True(t, ok)
+	assert.Contains(t, versions, "0.1.0")
 
 	mockRuntime.AssertExpectations(t)
 }
@@ -320,6 +347,152 @@ func TestMuEdServeHealth_RuntimeError(t *testing.T) {
 
 	newMuEdHandler(nil, mockRuntime, "").ServeHealth(w, req)
 
-	assert.Equal(t, http.StatusInternalServerError, w.Result().StatusCode)
+	res := w.Result()
+	defer res.Body.Close()
+	raw, _ := io.ReadAll(res.Body)
+
+	assert.Equal(t, http.StatusInternalServerError, res.StatusCode)
+	assert.Equal(t, "0.1.0", res.Header.Get("X-Api-Version"))
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(raw, &body))
+	assert.Equal(t, "INTERNAL_ERROR", body["code"])
+
 	mockRuntime.AssertExpectations(t)
+}
+
+func TestMuEdServeHealth_DegradedStatus(t *testing.T) {
+	healthResult := map[string]any{"tests_passed": false, "successes": []any{}, "failures": []any{"f1"}, "errors": []any{}}
+	mockRuntime := new(MockRuntime)
+	mockRuntime.On("Handle", mock.Anything, runtime.EvaluationRequest{
+		Command: runtime.CommandHealth,
+		Data:    map[string]any{},
+	}).Return(runtime.EvaluationResponse{
+		"command": "healthcheck",
+		"result":  healthResult,
+	}, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/evaluate/health", nil)
+	w := httptest.NewRecorder()
+
+	newMuEdHandler(nil, mockRuntime, "").ServeHealth(w, req)
+
+	res := w.Result()
+	defer res.Body.Close()
+	raw, _ := io.ReadAll(res.Body)
+
+	assert.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Equal(t, "0.1.0", res.Header.Get("X-Api-Version"))
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(raw, &result))
+	assert.Equal(t, "DEGRADED", result["status"])
+
+	mockRuntime.AssertExpectations(t)
+}
+
+// --- Version header tests (ServeEvaluate) ---
+
+func TestMuEdServeEvaluate_AbsentVersionHeader(t *testing.T) {
+	mockHandler := new(MockHandler)
+	mockHandler.On("Handle", mock.Anything, mock.Anything).
+		Return(evalHandlerResponse(true, "ok"))
+
+	req := httptest.NewRequest(http.MethodPost, "/evaluate", bytes.NewReader(mathEvalBody(t)))
+	w := httptest.NewRecorder()
+
+	newMuEdHandler(mockHandler, nil, "").ServeEvaluate(w, req)
+
+	res := w.Result()
+	assert.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Equal(t, "0.1.0", res.Header.Get("X-Api-Version"))
+}
+
+func TestMuEdServeEvaluate_SupportedVersionHeader(t *testing.T) {
+	mockHandler := new(MockHandler)
+	mockHandler.On("Handle", mock.Anything, mock.Anything).
+		Return(evalHandlerResponse(true, "ok"))
+
+	req := httptest.NewRequest(http.MethodPost, "/evaluate", bytes.NewReader(mathEvalBody(t)))
+	req.Header.Set("X-Api-Version", "0.1.0")
+	w := httptest.NewRecorder()
+
+	newMuEdHandler(mockHandler, nil, "").ServeEvaluate(w, req)
+
+	res := w.Result()
+	assert.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Equal(t, "0.1.0", res.Header.Get("X-Api-Version"))
+}
+
+func TestMuEdServeEvaluate_UnsupportedVersionHeader(t *testing.T) {
+	mockHandler := new(MockHandler)
+
+	req := httptest.NewRequest(http.MethodPost, "/evaluate", bytes.NewReader(mathEvalBody(t)))
+	req.Header.Set("X-Api-Version", "99.0.0")
+	w := httptest.NewRecorder()
+
+	newMuEdHandler(mockHandler, nil, "").ServeEvaluate(w, req)
+
+	res := w.Result()
+	defer res.Body.Close()
+	raw, _ := io.ReadAll(res.Body)
+
+	assert.Equal(t, http.StatusNotAcceptable, res.StatusCode)
+	assert.Equal(t, "0.1.0", res.Header.Get("X-Api-Version"))
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(raw, &body))
+	assert.Equal(t, "VERSION_NOT_SUPPORTED", body["code"])
+	details, ok := body["details"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "99.0.0", details["requestedVersion"])
+
+	mockHandler.AssertNotCalled(t, "Handle", mock.Anything, mock.Anything)
+}
+
+// --- Version header tests (ServeHealth) ---
+
+func TestMuEdServeHealth_AbsentVersionHeader(t *testing.T) {
+	healthResult := map[string]any{"tests_passed": true, "successes": []any{}, "failures": []any{}, "errors": []any{}}
+	mockRuntime := new(MockRuntime)
+	mockRuntime.On("Handle", mock.Anything, runtime.EvaluationRequest{
+		Command: runtime.CommandHealth,
+		Data:    map[string]any{},
+	}).Return(runtime.EvaluationResponse{
+		"command": "healthcheck",
+		"result":  healthResult,
+	}, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/evaluate/health", nil)
+	w := httptest.NewRecorder()
+
+	newMuEdHandler(nil, mockRuntime, "").ServeHealth(w, req)
+
+	res := w.Result()
+	assert.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Equal(t, "0.1.0", res.Header.Get("X-Api-Version"))
+	mockRuntime.AssertExpectations(t)
+}
+
+func TestMuEdServeHealth_UnsupportedVersionHeader(t *testing.T) {
+	mockRuntime := new(MockRuntime)
+
+	req := httptest.NewRequest(http.MethodGet, "/evaluate/health", nil)
+	req.Header.Set("X-Api-Version", "99.0.0")
+	w := httptest.NewRecorder()
+
+	newMuEdHandler(nil, mockRuntime, "").ServeHealth(w, req)
+
+	res := w.Result()
+	defer res.Body.Close()
+	raw, _ := io.ReadAll(res.Body)
+
+	assert.Equal(t, http.StatusNotAcceptable, res.StatusCode)
+	assert.Equal(t, "0.1.0", res.Header.Get("X-Api-Version"))
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(raw, &body))
+	assert.Equal(t, "VERSION_NOT_SUPPORTED", body["code"])
+
+	mockRuntime.AssertNotCalled(t, "Handle", mock.Anything, mock.Anything)
 }

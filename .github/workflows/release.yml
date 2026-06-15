@@ -66,3 +66,12 @@ jobs:
           gh release create ${{ steps.version.outputs.version }} \
             --generate-notes \
             --title "Release ${{ steps.version.outputs.version }}"
+
+      - name: Trigger evaluation-function-base release
+        if: steps.idempotency.outputs.skip == 'false'
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.EVALUATION_FUNCTION_BASE_BUILD_TRIGGER_TOKEN }}
+          repository: ${{ github.repository_owner }}/evaluation-function-base
+          event-type: release
+          client-payload: '{"shimmy_version": "${{ steps.version.outputs.version }}"}'

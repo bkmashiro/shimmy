@@ -244,3 +244,77 @@ For example, a Wolfram Language evaluation function in `evaluation.wl` would be 
 ```shell
 wolframscript -file evaluation.wl /tmp/shimmy/abc/request-data-123 /tmp/shimmy/abc/response-data-456
 ```
+
+### Sandboxed Execution (Linux only, experimental)
+
+Shimmy can wrap each worker process in an [nsjail](https://github.com/google/nsjail) sandbox to safely execute arbitrary, untrusted code. The sandbox provides:
+
+- **Filesystem confinement** — the worker can only access explicitly bind-mounted paths
+- **Resource limits** — CPU time, memory, and file descriptor caps
+- **Network isolation** — optional; disables all outbound connections
+- **Unprivileged UID** — worker runs as `nobody` (uid 65534) inside the jail
+
+Sandboxing requires Linux and the `nsjail` binary. The Docker image built from the project's `Dockerfile` includes nsjail at `/usr/sbin/nsjail`. On the host, install it with `sudo apt install nsjail` (Ubuntu 22.04+) or build from source.
+
+Enable sandboxing with `--sandbox` and configure it with the flags below:
+
+| Flag | Env var | Default | Description |
+|------|---------|---------|-------------|
+| `--sandbox` | `SANDBOX_ENABLED` | `false` | Enable nsjail sandboxing |
+| `--sandbox-nsjail-path` | `SANDBOX_NSJAIL_PATH` | `/usr/sbin/nsjail` | Path to the nsjail binary |
+| `--sandbox-ro-bind` | `SANDBOX_RO_BINDS` | — | Host path to bind-mount read-only (repeatable) |
+| `--sandbox-rw-bind` | `SANDBOX_RW_BINDS` | — | Host path to bind-mount read-write (repeatable) |
+| `--sandbox-tmpfs` | `SANDBOX_TMPFS` | — | Path inside the sandbox to mount as tmpfs (repeatable) |
+| `--sandbox-cpu-time` | `SANDBOX_CPU_TIME_LIMIT` | `0` (unlimited) | CPU time limit in seconds |
+| `--sandbox-memory-mb` | `SANDBOX_MEMORY_LIMIT` | `0` (unlimited) | Memory limit in megabytes |
+| `--sandbox-max-fds` | `SANDBOX_MAX_FDS` | `0` (nsjail default) | Maximum open file descriptors |
+| `--sandbox-disable-network` | `SANDBOX_DISABLE_NETWORK` | `false` | Disable network access inside the sandbox |
+| `--sandbox-seccomp` | `SANDBOX_SECCOMP` | `false` | Enable seccomp syscall filtering |
+
+A typical invocation for an untrusted Python worker:
+
+```shell
+shimmy -c python3 -a evaluation.py \
+  --sandbox \
+  --sandbox-ro-bind /usr \
+  --sandbox-ro-bind /lib \
+  --sandbox-ro-bind /lib64 \
+  --sandbox-rw-bind /tmp/shimmy \
+  --sandbox-cpu-time 30 \
+  --sandbox-memory-mb 256 \
+  --sandbox-disable-network
+```
+
+> **Note:** nsjail requires either root or user namespace support. In Docker, pass `--privileged` or grant `CAP_SYS_ADMIN`. In Kubernetes, configure the pod's security context accordingly.
+
+#### Testing sandboxing locally
+
+The sandbox integration tests verify actual security properties — filesystem isolation, CPU limits, network isolation, and stdio passthrough. They skip automatically if `nsjail` is not available.
+
+**On Linux with nsjail installed:**
+
+```shell
+go test -v -run 'TestSandboxedWorker' ./internal/execution/worker/...
+```
+
+**On macOS (or any platform) via Docker or Podman:**
+
+```shell
+make test-sandbox                          # Docker (default)
+CONTAINER_ENGINE=podman make test-sandbox  # Podman
+```
+
+This builds the `nsjail-builder` Dockerfile stage (the same nsjail used in production) and runs the tests inside a privileged container. Rootless Podman works fine: `--privileged` grants all capabilities within the user namespace, which is sufficient for nsjail to create its own sub-namespaces.
+
+To manually verify isolation, run the Docker image with a sandboxed worker that attempts to read a protected file:
+
+```shell
+docker run --rm --privileged \
+  -e FUNCTION_COMMAND=/bin/sh \
+  -e FUNCTION_ARGS="-c,cat /etc/shadow" \
+  -e SANDBOX_ENABLED=true \
+  -e SANDBOX_RO_BINDS="/usr:/bin:/lib:/lib64" \
+  ghcr.io/lambda-feedback/shimmy serve
+```
+
+The worker should exit with a non-zero code because `/etc` is not mounted inside the sandbox.

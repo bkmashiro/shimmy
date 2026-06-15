@@ -87,7 +87,15 @@ func New(params Params) (Supervisor, error) {
 	config := params.Config
 
 	if params.WorkerFactory == nil {
-		params.WorkerFactory = defaultWorkerFactory
+		if params.Config.Sandbox.Enabled {
+			factory, err := worker.NewSandboxedWorkerFactory(params.Config.Sandbox)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create sandboxed worker factory: %w", err)
+			}
+			params.WorkerFactory = factory
+		} else {
+			params.WorkerFactory = defaultWorkerFactory
+		}
 	}
 
 	if params.AdapterFactory == nil {

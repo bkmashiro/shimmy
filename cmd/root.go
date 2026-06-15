@@ -139,6 +139,74 @@ functions on arbitrary, serverless platforms.`
 				Value:    "127.0.0.1:7321",
 				Category: "rpc",
 			},
+			// sandbox flags
+			&cli.BoolFlag{
+				Name:     "sandbox",
+				Usage:    "enable nsjail sandboxing for worker processes (Linux only).",
+				Value:    false,
+				Category: "sandbox",
+				EnvVars:  []string{"SANDBOX_ENABLED"},
+			},
+			&cli.StringFlag{
+				Name:     "sandbox-nsjail-path",
+				Usage:    "path to the nsjail binary.",
+				Value:    "/usr/sbin/nsjail",
+				Category: "sandbox",
+				EnvVars:  []string{"SANDBOX_NSJAIL_PATH"},
+			},
+			&cli.StringSliceFlag{
+				Name:     "sandbox-ro-bind",
+				Usage:    "host path to bind-mount read-only inside the sandbox (repeatable).",
+				Category: "sandbox",
+				EnvVars:  []string{"SANDBOX_RO_BINDS"},
+			},
+			&cli.StringSliceFlag{
+				Name:     "sandbox-rw-bind",
+				Usage:    "host path to bind-mount read-write inside the sandbox (repeatable).",
+				Category: "sandbox",
+				EnvVars:  []string{"SANDBOX_RW_BINDS"},
+			},
+			&cli.StringSliceFlag{
+				Name:     "sandbox-tmpfs",
+				Usage:    "path inside the sandbox to mount as tmpfs (repeatable).",
+				Category: "sandbox",
+				EnvVars:  []string{"SANDBOX_TMPFS"},
+			},
+			&cli.IntFlag{
+				Name:     "sandbox-cpu-time",
+				Usage:    "CPU time limit in seconds for worker processes (0 = unlimited).",
+				Value:    0,
+				Category: "sandbox",
+				EnvVars:  []string{"SANDBOX_CPU_TIME_LIMIT"},
+			},
+			&cli.IntFlag{
+				Name:     "sandbox-memory-mb",
+				Usage:    "memory (address space) limit in megabytes for worker processes (0 = unlimited).",
+				Value:    0,
+				Category: "sandbox",
+				EnvVars:  []string{"SANDBOX_MEMORY_LIMIT"},
+			},
+			&cli.IntFlag{
+				Name:     "sandbox-max-fds",
+				Usage:    "maximum open file descriptors for worker processes (0 = nsjail default).",
+				Value:    0,
+				Category: "sandbox",
+				EnvVars:  []string{"SANDBOX_MAX_FDS"},
+			},
+			&cli.BoolFlag{
+				Name:     "sandbox-disable-network",
+				Usage:    "disable network access inside the sandbox.",
+				Value:    false,
+				Category: "sandbox",
+				EnvVars:  []string{"SANDBOX_DISABLE_NETWORK"},
+			},
+			&cli.BoolFlag{
+				Name:     "sandbox-seccomp",
+				Usage:    "enable seccomp syscall filtering inside the sandbox.",
+				Value:    false,
+				Category: "sandbox",
+				EnvVars:  []string{"SANDBOX_SECCOMP"},
+			},
 		},
 		Before: func(ctx *cli.Context) error {
 			// create the logger
@@ -263,6 +331,17 @@ func parseRootConfig(ctx *cli.Context) (config.Config, error) {
 		"rpc-transport-tcp-address":  "runtime.io.rpc.tcp.address",
 		"worker-send-timeout":        "runtime.send.timeout",
 		"worker-stop-timeout":        "runtime.stop.timeout",
+		// sandbox
+		"sandbox":                 "runtime.sandbox.enabled",
+		"sandbox-nsjail-path":     "runtime.sandbox.nsjail_path",
+		"sandbox-ro-bind":         "runtime.sandbox.ro_binds",
+		"sandbox-rw-bind":         "runtime.sandbox.rw_binds",
+		"sandbox-tmpfs":           "runtime.sandbox.tmpfs",
+		"sandbox-cpu-time":        "runtime.sandbox.cpu_time_limit",
+		"sandbox-memory-mb":       "runtime.sandbox.memory_limit",
+		"sandbox-max-fds":         "runtime.sandbox.max_fds",
+		"sandbox-disable-network": "runtime.sandbox.disable_network",
+		"sandbox-seccomp":         "runtime.sandbox.seccomp",
 	}
 
 	// parse config using env

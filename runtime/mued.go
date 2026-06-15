@@ -18,7 +18,7 @@ type MuEdSubmission struct {
 }
 
 type MuEdTask struct {
-	ReferenceSolution *MuEdSubmission `json:"referenceSolution"`
+	ReferenceSolution map[string]any `json:"referenceSolution"`
 }
 
 type MuEdConfiguration struct {
@@ -34,6 +34,45 @@ type MuEdEvaluateRequest struct {
 	Task                  *MuEdTask                  `json:"task"`
 	Configuration         *MuEdConfiguration         `json:"configuration"`
 	PreSubmissionFeedback *MuEdPreSubmissionFeedback `json:"preSubmissionFeedback"`
+}
+
+var SupportedMuEdVersions = []string{"0.1.0"}
+
+// MuEdIsVersionSupported reports whether version is in SupportedMuEdVersions.
+func MuEdIsVersionSupported(version string) bool {
+	for _, v := range SupportedMuEdVersions {
+		if v == version {
+			return true
+		}
+	}
+	return false
+}
+
+// MuEdResolveVersion returns requested if it's supported, else the latest version.
+func MuEdResolveVersion(requested string) string {
+	if MuEdIsVersionSupported(requested) {
+		return requested
+	}
+	return SupportedMuEdVersions[len(SupportedMuEdVersions)-1]
+}
+
+// MuEdToHealthResponse converts a legacy runtime health result to muEd format.
+func MuEdToHealthResponse(result map[string]any) map[string]any {
+	status := "DEGRADED"
+	if passed, ok := result["tests_passed"].(bool); ok && passed {
+		status = "OK"
+	}
+	return map[string]any{
+		"status": status,
+		"capabilities": map[string]any{
+			"supportsEvaluate":              true,
+			"supportsPreSubmissionFeedback": true,
+			"supportsFormativeFeedback":     true,
+			"supportsSummativeFeedback":     false,
+			"supportsDataPolicy":            "NOT_SUPPORTED",
+			"supportedAPIVersions":          SupportedMuEdVersions,
+		},
+	}
 }
 
 func muEdContentKey(t MuEdSubmissionType) string {
@@ -82,8 +121,7 @@ func MuEdBuildLegacyEvaluateRequest(req MuEdEvaluateRequest) (map[string]any, er
 		return nil, fmt.Errorf("task.referenceSolution is required for evaluation")
 	}
 
-	sol := req.Task.ReferenceSolution
-	answer, err := muEdExtractContent(sol.Content, sol.Type)
+	answer, err := muEdExtractContent(req.Task.ReferenceSolution, req.Submission.Type)
 	if err != nil {
 		return nil, fmt.Errorf("referenceSolution: %w", err)
 	}

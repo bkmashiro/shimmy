@@ -23,4 +23,4 @@ lcov.info
 go.work
 
 # Local .env files
-*.local
+*.local.idea/

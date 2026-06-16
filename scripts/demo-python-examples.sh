@@ -119,7 +119,7 @@ ensure_reactor_wasm() {
     echo "==> Downloading python-reactor.wasm"
     mkdir -p "$(dirname "${wasm}")"
     curl -fsSL \
-      https://github.com/bkmashiro/webassembly-language-runtimes/releases/download/v1.0.11/python-reactor.wasm \
+      https://github.com/bkmashiro/webassembly-language-runtimes/releases/download/v1.0.13/python-reactor.wasm \
       -o "${wasm}"
   fi
   printf '%s\n' "${wasm}"

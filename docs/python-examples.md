@@ -18,7 +18,7 @@ scripts/demo-python-examples.sh
 # Real Lambda Feedback package fixtures + adapter/Pyodide package mode.
 scripts/demo-lambda-feedback-fixtures.sh all
 
-# Reactor fast-path bundle matrix (downloads/verifies v1.0.11 artifact, Docker/Linux).
+# Reactor fast-path bundle matrix (downloads/verifies v1.0.13 artifact, Docker/Linux).
 scripts/demo-reactor-lambda-feedback-bundles.sh docker
 ```
 
@@ -26,7 +26,7 @@ Notes:
 
 - `reactor-python` is the recommended Python backend for speed plus snapshot/restore isolation when the evaluator is a single script or a Lambda Feedback package configured with `FUNCTION_LF_ROOT` + `FUNCTION_LF_EVAL_ENTRYPOINT`.
 - Pyodide package mode is the default compatibility path for real Lambda Feedback package evaluators (`evaluation_function/...`, `lf_toolkit`, entrypoint modules), especially when they need SciPy or other heavy packages.
-- The verified `python-reactor.wasm` v1.0.11 artifact includes NumPy/SymPy; extra pure-Python deps such as `mpmath` can be bundled with `FUNCTION_LF_INCLUDE_ROOTS` or supplied as ZIP/directory payloads with `FUNCTION_LF_SYS_PATH`, and small WASI gaps can be handled with narrow polyfills.
+- The verified `python-reactor.wasm` v1.0.13 artifact includes NumPy/SymPy and exports both the generic `evaluate` ABI and legacy `py_exec`/`resp_buf`/`resp_len` compatibility ABI; extra pure-Python deps such as `mpmath` can be bundled with `FUNCTION_LF_INCLUDE_ROOTS` or supplied as ZIP/directory payloads with `FUNCTION_LF_SYS_PATH`, and small WASI gaps can be handled with narrow polyfills.
 - `scipy` is intentionally out of reactor scope; use Pyodide for SciPy-heavy evaluators.
 - `python-wasm` is the old resident backend and should be treated as legacy/deprecated for isolation-sensitive evaluation.
 - `reactor-python` and `python-wasm` are Linux-only in this branch; on macOS the script validates evaluator files directly when possible, then skips backend-specific parts.

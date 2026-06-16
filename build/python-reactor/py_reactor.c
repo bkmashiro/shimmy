@@ -20,6 +20,10 @@
  *   alloc(size) → ptr       Allocate scratch space in WASM linear memory.
  *                           Used by the host to pass request JSON in.
  *
+ *   evaluate(ptr, len) → ptr Call `py_exec(ptr, len)` and return a pointer to a
+ *                           buffer containing a 4-byte little-endian length
+ *                           prefix followed by the JSON response bytes.
+ *
  *   dealloc(ptr)            Free scratch space allocated with alloc().
  *
  *   resp_buf()  → ptr       Address of the response byte buffer (4 MiB).
@@ -72,6 +76,9 @@
 
 static char    _resp_buf[RESP_BUF_SIZE];
 static int32_t _resp_len = 0;
+static uint8_t _evaluate_buf[RESP_BUF_SIZE + 4];
+
+void py_exec(char *req, int32_t req_len);
 
 /* ── Python handler source ───────────────────────────────────────────────── */
 
@@ -151,6 +158,27 @@ char *resp_buf(void) { return _resp_buf; }
 
 __attribute__((export_name("resp_len")))
 int32_t *resp_len(void) { return &_resp_len; }
+
+__attribute__((export_name("evaluate")))
+uint32_t evaluate(char *req, int32_t req_len) {
+    /* Reuse existing py_exec path for runtime behaviour parity. */
+    py_exec(req, req_len);
+
+    /*
+     * Generic Shimmy WASM ABI response format:
+     * [uint32 little-endian length][JSON response bytes].
+     */
+    uint32_t payload_len = _resp_len > 0 ? (uint32_t)_resp_len : 0;
+    _evaluate_buf[0] = (uint8_t)(payload_len & 0xFF);
+    _evaluate_buf[1] = (uint8_t)((payload_len >> 8) & 0xFF);
+    _evaluate_buf[2] = (uint8_t)((payload_len >> 16) & 0xFF);
+    _evaluate_buf[3] = (uint8_t)((payload_len >> 24) & 0xFF);
+    if (payload_len > 0) {
+        memcpy(&_evaluate_buf[4], _resp_buf, payload_len);
+    }
+
+    return (uint32_t)(uintptr_t)&_evaluate_buf[0];
+}
 
 /* ── Exported: request handler ───────────────────────────────────────────── */
 

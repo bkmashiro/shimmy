@@ -12,6 +12,8 @@ package wasm
 //
 //	py_init()           – initialise CPython once; defines _handle_request
 //	py_exec(ptr, len)   – execute one request (returns after each call)
+//	evaluate(ptr, len)   – optional target ABI wrapper around py_exec; returns
+//	                      pointer to [uint32 length][JSON response]
 //	alloc(size) → ptr   – allocate scratch in WASM linear memory
 //	dealloc(ptr)        – free scratch allocated by alloc()
 //	resp_buf() → ptr    – pointer to the 4 MiB response buffer
@@ -87,12 +89,13 @@ type ReactorPythonRunner struct {
 	strategy SnapshotStrategy // snapshot taken after py_init(); restored before each py_exec()
 
 	// Cached exported functions.
-	fnPyInit  api.Function
-	fnPyExec  api.Function
-	fnAlloc   api.Function
-	fnDealloc api.Function
-	fnRespBuf api.Function
-	fnRespLen api.Function
+	fnPyInit   api.Function
+	fnPyExec   api.Function
+	fnEvaluate api.Function // optional target ABI wrapper; falls back to py_exec when absent
+	fnAlloc    api.Function
+	fnDealloc  api.Function
+	fnRespBuf  api.Function
+	fnRespLen  api.Function
 }
 
 // IsHealthy reports whether the runner is initialised and not closed.
@@ -269,6 +272,11 @@ func (r *ReactorPythonRunner) Init(ctx context.Context) error {
 		}
 		*dst = fn
 	}
+	// Newer python-reactor builds expose the generic Shimmy WASM ABI entrypoint
+	// evaluate(ptr, len) -> ptr-to-[len][JSON]. It is optional so older bundled
+	// python-reactor.wasm artifacts that only expose py_exec/resp_buf/resp_len
+	// continue to run.
+	r.fnEvaluate = mod.ExportedFunction("evaluate")
 
 	// Call py_init() to start CPython and define _handle_request.
 	r.log.Info("calling py_init() to initialise CPython (~7-8 s)...")
@@ -308,7 +316,10 @@ func (r *ReactorPythonRunner) Init(ctx context.Context) error {
 }
 
 // SendRequest restores the post-init memory snapshot, writes the request JSON
-// into WASM memory via alloc(), calls py_exec(), and reads the JSON response.
+// into WASM memory via alloc(), executes one request, and reads the JSON
+// response. New python-reactor modules use the same host-facing per-request ABI
+// as generic WASM (alloc + evaluate). Older modules fall back to the historical
+// py_exec + resp_buf/resp_len exports.
 //
 // The script, method, and inputJSON fields follow the same convention as
 // ResidentPythonRunner.SendRequest.
@@ -370,9 +381,32 @@ func (r *ReactorPythonRunner) SendRequest(ctx context.Context, script, method st
 		return nil, fmt.Errorf("reactor python: write request JSON to memory at ptr=%d", reqPtr)
 	}
 
-	// ── Step 4: Execute ───────────────────────────────────────────────────
-	if _, err := r.fnPyExec.Call(execCtx, uint64(reqPtr), uint64(len(reqBytes))); err != nil {
-		if execCtx.Err() != nil {
+	if r.fnEvaluate != nil {
+		return r.callEvaluateABI(execCtx, reqPtr, len(reqBytes))
+	}
+	return r.callPyExecABI(execCtx, reqPtr, len(reqBytes), reqTimeout)
+}
+
+func (r *ReactorPythonRunner) callEvaluateABI(ctx context.Context, reqPtr uint32, reqLen int) (map[string]any, error) {
+	// ── Step 4: Execute via target generic-WASM ABI ───────────────────────
+	evalRes, err := r.fnEvaluate.Call(ctx, uint64(reqPtr), uint64(reqLen))
+	if err != nil {
+		if ctx.Err() != nil {
+			r.closed = true
+			return nil, fmt.Errorf("reactor python: evaluate timed out or was cancelled: %w", ctx.Err())
+		}
+		return nil, fmt.Errorf("reactor python: evaluate: %w\nstderr: %s", err, r.stderrBuf.String())
+	}
+	if len(evalRes) == 0 {
+		return nil, fmt.Errorf("reactor python: evaluate returned no response pointer")
+	}
+	return r.readLengthPrefixedJSONResponse(uint32(evalRes[0]))
+}
+
+func (r *ReactorPythonRunner) callPyExecABI(ctx context.Context, reqPtr uint32, reqLen int, reqTimeout time.Duration) (map[string]any, error) {
+	// ── Step 4: Execute via legacy python-reactor ABI ─────────────────────
+	if _, err := r.fnPyExec.Call(ctx, uint64(reqPtr), uint64(reqLen)); err != nil {
+		if ctx.Err() != nil {
 			// The request context timed out or was cancelled. WithCloseOnContextDone
 			// caused wazero to permanently close the module — mark the runner closed
 			// so the dispatcher discards it rather than returning it to the pool.
@@ -383,11 +417,11 @@ func (r *ReactorPythonRunner) SendRequest(ctx context.Context, script, method st
 	}
 
 	// ── Step 5: Read response ─────────────────────────────────────────────
-	bufPtrRes, err := r.fnRespBuf.Call(execCtx)
+	bufPtrRes, err := r.fnRespBuf.Call(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("reactor python: resp_buf: %w", err)
 	}
-	lenPtrRes, err := r.fnRespLen.Call(execCtx)
+	lenPtrRes, err := r.fnRespLen.Call(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("reactor python: resp_len: %w", err)
 	}
@@ -420,6 +454,33 @@ func (r *ReactorPythonRunner) SendRequest(ctx context.Context, script, method st
 	// to distinguish user-script exceptions from infrastructure failures.
 	// We only promote to a Go error for init-time scripts (runInitScript) where
 	// the result["error"] is always a plain string with no extra fields.
+	return result, nil
+}
+
+func (r *ReactorPythonRunner) readLengthPrefixedJSONResponse(resPtr uint32) (map[string]any, error) {
+	mem := r.mod.Memory()
+	if mem == nil {
+		return nil, fmt.Errorf("reactor python: guest module has no linear memory")
+	}
+	lenBytes, ok := mem.Read(resPtr, 4)
+	if !ok {
+		return nil, fmt.Errorf("reactor python: read evaluate response length at ptr=%d", resPtr)
+	}
+	resLen := binary.LittleEndian.Uint32(lenBytes)
+	if resLen == 0 {
+		return nil, fmt.Errorf("reactor python: evaluate returned empty response")
+	}
+	if uint64(resPtr)+4+uint64(resLen) > uint64(mem.Size()) {
+		return nil, fmt.Errorf("reactor python: evaluate response out of bounds: resPtr=%d resLen=%d memSize=%d", resPtr, resLen, mem.Size())
+	}
+	resBytes, ok := mem.Read(resPtr+4, resLen)
+	if !ok {
+		return nil, fmt.Errorf("reactor python: read evaluate response bytes at ptr=%d len=%d", resPtr+4, resLen)
+	}
+	result, err := parseJSONResponse(string(resBytes))
+	if err != nil {
+		return nil, fmt.Errorf("reactor python: parse evaluate response: %w; raw: %.200s", err, resBytes)
+	}
 	return result, nil
 }
 

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"go.uber.org/zap"
@@ -49,25 +50,7 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 		}
 	}
 
-	switch params.Config.Supervisor.IO.Interface {
-	case supervisor.WasmIO:
-		cfg := wasmBaseConfig()
-		d := wasm.NewDispatcher(cfg, params.Log)
-		if err := d.Start(params.Context); err != nil {
-			return nil, err
-		}
-		return d, nil
-
-	case supervisor.PythonWasmIO:
-		cfg := wasmBaseConfig()
-		cfg.PythonScriptPath = os.Getenv("FUNCTION_WASM_PYTHON_SCRIPT")
-		d := wasm.NewPythonDispatcher(cfg, params.Log)
-		if err := d.Start(params.Context); err != nil {
-			return nil, err
-		}
-		return d, nil
-
-	case supervisor.ReactorPythonIO:
+	newReactorPythonDispatcher := func() (dispatcher.Dispatcher, error) {
 		if os.Getenv("FUNCTION_PYODIDE_ROOT") != "" || os.Getenv("FUNCTION_PYODIDE_EVAL_ENTRYPOINT") != "" {
 			return nil, fmt.Errorf("reactor-python does not support package-style Lambda Feedback entrypoints yet; use FUNCTION_INTERFACE=pyodide with FUNCTION_PYODIDE_ROOT, FUNCTION_PYODIDE_EVAL_ENTRYPOINT, optional FUNCTION_PYODIDE_PREVIEW_ENTRYPOINT, and FUNCTION_PYODIDE_ADAPTER")
 		}
@@ -83,6 +66,47 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 			return nil, err
 		}
 		return d, nil
+	}
+
+	newGenericWasmDispatcher := func() (dispatcher.Dispatcher, error) {
+		cfg := wasmBaseConfig()
+		d := wasm.NewDispatcher(cfg, params.Log)
+		if err := d.Start(params.Context); err != nil {
+			return nil, err
+		}
+		return d, nil
+	}
+
+	validWasmProfiles := []string{"generic", "python-reactor", "reactor-python"}
+	wasmProfile := strings.ToLower(strings.TrimSpace(os.Getenv("FUNCTION_WASM_PROFILE")))
+
+	switch params.Config.Supervisor.IO.Interface {
+	case supervisor.WasmIO:
+		if wasmProfile == "" {
+			wasmProfile = "generic"
+		}
+
+		switch wasmProfile {
+		case "generic":
+			return newGenericWasmDispatcher()
+		case "python-reactor", "reactor-python":
+			return newReactorPythonDispatcher()
+		default:
+			sort.Strings(validWasmProfiles)
+			return nil, fmt.Errorf("unsupported FUNCTION_WASM_PROFILE %q; supported values: %s", wasmProfile, strings.Join(validWasmProfiles, ", "))
+		}
+
+	case supervisor.PythonWasmIO:
+		cfg := wasmBaseConfig()
+		cfg.PythonScriptPath = os.Getenv("FUNCTION_WASM_PYTHON_SCRIPT")
+		d := wasm.NewPythonDispatcher(cfg, params.Log)
+		if err := d.Start(params.Context); err != nil {
+			return nil, err
+		}
+		return d, nil
+
+	case supervisor.ReactorPythonIO:
+		return newReactorPythonDispatcher()
 
 	case supervisor.PyodideIO:
 		// Pyodide uses the rpc dispatcher with stdio transport.

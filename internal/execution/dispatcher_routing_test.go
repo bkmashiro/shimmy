@@ -43,6 +43,97 @@ out.write_text("def evaluation_function(response, answer, params=None):\n    ret
 	return bundler
 }
 
+func TestNewDispatcher_Wasm_GenericProfile_DefaultsToGenericAndErrorsOnMissingModulePath(t *testing.T) {
+	t.Setenv("FUNCTION_WASM_PROFILE", "")
+
+	_, err := execution.NewDispatcher(execution.Params{
+		Context: context.Background(),
+		Config: execution.Config{
+			Supervisor: supervisor.Config{
+				IO: supervisor.IOConfig{
+					Interface: supervisor.WasmIO,
+				},
+			},
+		},
+		Log: zap.NewNop(),
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "wasm: ModulePath must be set")
+}
+
+func TestNewDispatcher_Wasm_PythonReactorProfile_RoutesToReactorPython(t *testing.T) {
+	t.Setenv("FUNCTION_WASM_PROFILE", "python-reactor")
+
+	_, err := execution.NewDispatcher(execution.Params{
+		Context: context.Background(),
+		Config: execution.Config{
+			Supervisor: supervisor.Config{
+				IO: supervisor.IOConfig{
+					Interface: supervisor.WasmIO,
+				},
+			},
+		},
+		Log: zap.NewNop(),
+	})
+
+	require.Error(t, err)
+	if runtime.GOOS != "linux" {
+		assert.Contains(t, err.Error(), "Linux")
+		return
+	}
+	assert.True(t,
+		strings.Contains(err.Error(), "PythonScriptPath") || strings.Contains(err.Error(), "ModulePath must be set") || strings.Contains(err.Error(), "wasmPath"),
+		"expected reactor-python validation error (missing script/wasm path)",
+	)
+}
+
+func TestNewDispatcher_Wasm_UnknownProfileErrorsWithValidValues(t *testing.T) {
+	t.Setenv("FUNCTION_WASM_PROFILE", "ultra-bad-profile")
+
+	_, err := execution.NewDispatcher(execution.Params{
+		Context: context.Background(),
+		Config: execution.Config{
+			Supervisor: supervisor.Config{
+				IO: supervisor.IOConfig{
+					Interface: supervisor.WasmIO,
+				},
+			},
+		},
+		Log: zap.NewNop(),
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unsupported FUNCTION_WASM_PROFILE "ultra-bad-profile"`)
+	assert.Contains(t, err.Error(), "generic")
+	assert.Contains(t, err.Error(), "python-reactor")
+	assert.Contains(t, err.Error(), "reactor-python")
+}
+
+func TestNewDispatcher_ReactorPythonInterface_IgnoresWasmProfile(t *testing.T) {
+	t.Setenv("FUNCTION_WASM_PROFILE", "python-reactor")
+
+	_, err := execution.NewDispatcher(execution.Params{
+		Context: context.Background(),
+		Config: execution.Config{
+			Supervisor: supervisor.Config{
+				IO: supervisor.IOConfig{
+					Interface: supervisor.ReactorPythonIO,
+				},
+			},
+		},
+		Log: zap.NewNop(),
+	})
+
+	require.Error(t, err)
+	if runtime.GOOS != "linux" {
+		assert.Contains(t, err.Error(), "Linux")
+		return
+	}
+	assert.NotContains(t, err.Error(), "unsupported FUNCTION_WASM_PROFILE")
+	assert.Contains(t, err.Error(), "PythonScriptPath")
+}
+
 // ---------------------------------------------------------------------------
 // ScriptFileNeedsHeavyRuntime routing decisions
 // ---------------------------------------------------------------------------

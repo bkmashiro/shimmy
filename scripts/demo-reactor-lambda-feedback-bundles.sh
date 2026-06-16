@@ -89,12 +89,15 @@ run_docker() {
     exit 1
   fi
   echo "==> running reactor bundle matrix in Docker (${GO_IMAGE})"
+  local reactor_mount_dir
+  reactor_mount_dir="$(cd "$(dirname "${REACTOR_WASM}")" && pwd)"
   docker run --rm \
     -v "${ROOT}":/repo \
     -v "${ARTIFACT_DIR}":/artifacts \
+    -v "${reactor_mount_dir}":/reactor:ro \
     -w /repo \
     "${GO_IMAGE}" \
-    bash -lc 'set -euo pipefail; export PATH=/usr/local/go/bin:$PATH; PYTHON_REACTOR_WASM=/artifacts/'"$(basename "${REACTOR_WASM}")"' SHIMMY_LF_PURE_PY_DEPS=/artifacts/'"$(basename "${PURE_DEPS}")"' SHIMMY_LF_REACTOR_POLYFILLS=/repo/tools/lf-bundle-python/polyfills/reactor go test ./internal/execution/wasm -run TestReactorPythonRunner_LambdaFeedbackBundleMatrix -v'
+    bash -lc 'set -euo pipefail; export PATH=/usr/local/go/bin:$PATH; PYTHON_REACTOR_WASM=/reactor/'"$(basename "${REACTOR_WASM}")"' SHIMMY_LF_PURE_PY_DEPS=/artifacts/'"$(basename "${PURE_DEPS}")"' SHIMMY_LF_REACTOR_POLYFILLS=/repo/tools/lf-bundle-python/polyfills/reactor go test ./internal/execution/wasm -run TestReactorPythonRunner_LambdaFeedbackBundleMatrix -v'
 }
 
 main() {

@@ -8,6 +8,8 @@ This document separates three concepts that are easy to conflate:
 
 The important rule is: **do not create one `FUNCTION_INTERFACE` value per source language**.
 
+For copy-pasteable launch configurations, see [deployment-recipes.md](deployment-recipes.md).
+
 ## 1. Runtime interface
 
 `FUNCTION_INTERFACE` should describe the execution and communication boundary, not the language used to author the evaluator.
@@ -25,13 +27,13 @@ The important rule is: **do not create one `FUNCTION_INTERFACE` value per source
 
 Once `FUNCTION_INTERFACE=wasm` is selected, Shimmy still needs to know what kind of WASM guest it is loading.
 
-**Target deployment recipe for Python-reactor on WASM**:
+**Preferred deployment recipe for Python-reactor on WASM**:
 
 ```bash
 FUNCTION_INTERFACE=wasm
 FUNCTION_WASM_PROFILE=python-reactor
+FUNCTION_WASM_MODULE=/path/to/python-reactor.wasm
 FUNCTION_WASM_PYTHON_SCRIPT=/path/to/eval.py
-FUNCTION_COMMAND=/path/to/python-reactor.wasm
 ```
 
 Legacy compatibility mode is still accepted for now:
@@ -45,7 +47,7 @@ FUNCTION_COMMAND=/path/to/python-reactor.wasm
 | Profile | What Shimmy receives | Runtime expectation |
 |---|---|---|
 | `generic` | A pre-built `.wasm` module. | Exposes the Shimmy `alloc` / `evaluate` ABI directly. Source language is irrelevant at runtime. |
-| `python-reactor` | A CPython-WASI reactor module plus evaluator script/package config. | Host initializes Python, loads evaluator code, snapshots post-init memory, restores after requests. |
+| `python-reactor` | A CPython-WASI reactor module plus evaluator script/package config. | Host initializes Python, loads evaluator code, snapshots post-init memory, restores after requests. Current `v1.0.13` artifact exports the same host-facing `alloc` / `evaluate` ABI and retains legacy `py_exec` exports. |
 | `js-javy` / future JS profile | A WASI module produced by a JS compiler/bundler. | Needs a clear ABI adapter; current JS demo still uses an RPC/subprocess-style route. |
 
 The repository now accepts `FUNCTION_INTERFACE=wasm` + `FUNCTION_WASM_PROFILE` for profile selection and keeps `FUNCTION_INTERFACE=reactor-python` as a compatibility alias.
@@ -71,9 +73,9 @@ The generic WASM backend already demonstrates the runtime side: if you provide a
 
 What is not yet complete/polished:
 
-- a fully documented recipe for all supported languages and package workflows;
+- Lambda/AWS smoke deployment guidance for the recommended recipes;
 - JS/Javy integration with the generic in-process ABI instead of the current RPC/subprocess-style demo;
-- production-ready docs that collapse the many path-specific env vars into a small number of recipes.
+- more regression coverage for the legacy `py_exec` fallback path.
 
 ## Recommended documentation language
 

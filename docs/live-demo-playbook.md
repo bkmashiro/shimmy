@@ -200,11 +200,12 @@ Suggested explanation:
 
 ## Lambda Feedback package-mode configuration
 
-For the common `reactor-python` Lambda Feedback layout, the minimal deployment
-configuration is:
+For the common `python-reactor` Lambda Feedback layout, the minimal deployment
+configuration uses the WASM backend plus an explicit profile:
 
 ```bash
-FUNCTION_INTERFACE=reactor-python
+FUNCTION_INTERFACE=wasm
+FUNCTION_WASM_PROFILE=python-reactor
 FUNCTION_WASM_MODULE=/opt/python-reactor.wasm
 FUNCTION_LF_ROOT=/var/task
 ```
@@ -222,7 +223,8 @@ bundle output      = temporary file
 For more complex packages, keep the environment small with one JSON config file:
 
 ```bash
-FUNCTION_INTERFACE=reactor-python
+FUNCTION_INTERFACE=wasm
+FUNCTION_WASM_PROFILE=python-reactor
 FUNCTION_WASM_MODULE=/opt/python-reactor.wasm
 FUNCTION_LF_CONFIG=/var/task/shimmy-lf.json
 ```

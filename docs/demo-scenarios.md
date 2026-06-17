@@ -68,14 +68,15 @@ evaluation functions look like.
 
 ## Python / NumPy / SymPy demos
 
-The current `reactor-python` backend is intentionally Linux-only in this branch
-because its snapshot strategies depend on Linux process/memory semantics. On
-Linux, realistic Python scenarios can be run with the existing CPython-WASI
+The current `python-reactor` WASM profile is intentionally Linux-only in this
+branch because its snapshot strategies depend on Linux process/memory semantics.
+On Linux, realistic Python scenarios can be run with the existing CPython-WASI
 artifact:
 
 ```bash
-FUNCTION_INTERFACE=reactor-python \
-FUNCTION_COMMAND=$PWD/internal/execution/wasm/testdata/python-reactor.wasm \
+FUNCTION_INTERFACE=wasm \
+FUNCTION_WASM_PROFILE=python-reactor \
+FUNCTION_WASM_MODULE=$PWD/internal/execution/wasm/testdata/python-reactor.wasm \
 FUNCTION_WASM_PYTHON_SCRIPT=$PWD/examples/eval-numpy/eval.py \
 FUNCTION_WASM_MAX_MEMORY_PAGES=8192 \
 FUNCTION_MAX_PROCS=1 \
@@ -97,10 +98,10 @@ Good real Lambda Feedback candidates for Python/WASM demo scripts:
 
 | Source repo | Why it is useful | WASM path |
 |---|---|---|
-| `lambda-feedback/IsSimilar` | numeric tolerance grading using NumPy scalar helpers | reactor-python / NumPy |
-| `lambda-feedback/ArrayEqual` | array/matrix comparison using `numpy.allclose` | reactor-python / NumPy |
-| `lambda-feedback/SymbolicEqual` | symbolic algebra with SymPy | reactor-python / SymPy |
-| `lambda-feedback/compareBoolean` | boolean expression parsing + SymPy logic | reactor-python / SymPy |
+| `lambda-feedback/IsSimilar` | numeric tolerance grading using NumPy scalar helpers | python-reactor / NumPy |
+| `lambda-feedback/ArrayEqual` | array/matrix comparison using `numpy.allclose` | python-reactor / NumPy |
+| `lambda-feedback/SymbolicEqual` | symbolic algebra with SymPy | python-reactor / SymPy |
+| `lambda-feedback/compareBoolean` | boolean expression parsing + SymPy logic | python-reactor / SymPy |
 | `lambda-feedback/evaluatePython` | code runner / sandbox story | separate security demo; not a pure evaluator port |
 
 ## Non-WASM fallback language demos

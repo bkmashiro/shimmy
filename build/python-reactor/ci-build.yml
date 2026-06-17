@@ -1,5 +1,12 @@
 # .github/workflows/build-python-reactor.yml
 #
+# HISTORICAL / REFERENCE ONLY.
+# The active python-reactor.wasm build lives in:
+#   https://github.com/bkmashiro/webassembly-language-runtimes
+#   .github/workflows/build-python-reactor.yml
+# Do not use this file as the source of truth for current artifacts.
+# See build/python-reactor/README.md.
+#
 # Builds python-reactor.wasm — reactor-mode CPython 3.12 for shimmy-wasm.
 #
 # Exports: py_init, py_exec, alloc, dealloc, resp_buf, resp_len

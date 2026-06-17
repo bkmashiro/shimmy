@@ -143,7 +143,8 @@ run_plain_reactor() {
     cd "${ROOT}"
     exec env \
       LOG_LEVEL=error \
-      FUNCTION_INTERFACE=reactor-python \
+      FUNCTION_INTERFACE=wasm \
+      FUNCTION_WASM_PROFILE=python-reactor \
       FUNCTION_WASM_MODULE="${wasm}" \
       FUNCTION_WASM_PYTHON_SCRIPT="${ROOT}/examples/eval-python/eval.py" \
       FUNCTION_WASM_MAX_MEMORY_PAGES=4096 \
@@ -178,7 +179,8 @@ run_numpy_reactor() {
     cd "${ROOT}"
     exec env \
       LOG_LEVEL=error \
-      FUNCTION_INTERFACE=reactor-python \
+      FUNCTION_INTERFACE=wasm \
+      FUNCTION_WASM_PROFILE=python-reactor \
       FUNCTION_WASM_MODULE="${wasm}" \
       FUNCTION_WASM_PYTHON_SCRIPT="${ROOT}/examples/eval-numpy/eval.py" \
       FUNCTION_WASM_MAX_MEMORY_PAGES=4096 \

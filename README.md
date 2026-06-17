@@ -192,7 +192,9 @@ important naming rule for the WASM work is that `--interface` names the executio
 boundary, not the evaluator source language: avoid adding one mode per language
 such as `rust-wasm`, `go-wasm`, or `js-wasm`. See
 [`docs/wasm-backend-model.md`](docs/wasm-backend-model.md) for the runtime
-interface / WASM profile / build recipe split.
+interface / WASM profile / build recipe split, and
+[`docs/deployment-recipes.md`](docs/deployment-recipes.md) for the recommended
+`FUNCTION_*` environment combinations.
 
 #### RPC (`--interface rpc`, default)
 
@@ -264,7 +266,7 @@ Language-specific work belongs in build/deployment recipes:
 - Python: CPython-WASI reactor or Pyodide compatibility lane, depending on package needs
 - JavaScript: future Javy/QuickJS-to-WASI integration with a Shimmy ABI adapter
 
-The current branch has a working generic WASM runtime path and prototype Python
-routes, but the profile/config surface is not fully polished yet. The target
-model is one `wasm` execution backend plus explicit WASM profiles and build
-recipes, not one `FUNCTION_INTERFACE` value per source language.
+For Python fast-path deployments, prefer `FUNCTION_INTERFACE=wasm` plus
+`FUNCTION_WASM_PROFILE=python-reactor` and a fixed `python-reactor.wasm`
+artifact. `FUNCTION_INTERFACE=reactor-python` remains a compatibility alias, not
+the recommended spelling for new deployment docs.

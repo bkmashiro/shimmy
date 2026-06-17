@@ -1,5 +1,10 @@
 /*
- * py_reactor.c – CPython 3.12 WASM reactor exports for shimmy-wasm
+ * py_reactor.c – CPython WASM reactor exports for shimmy-wasm
+ *
+ * HISTORICAL / REFERENCE ONLY.
+ * The active reactor source now lives in bkmashiro/webassembly-language-runtimes
+ * under python/reactor/py_reactor.c. Update that repository and publish a
+ * release when changing the real python-reactor.wasm artifact.
  *
  * This file is compiled against libpython3.12-aio.a (the pre-built static
  * library from vmware-labs/webassembly-language-runtimes) and linked with

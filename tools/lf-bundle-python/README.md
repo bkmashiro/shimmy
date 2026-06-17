@@ -34,22 +34,24 @@ python3 tools/lf-bundle-python/lf_bundle_python.py \
   --out /tmp/boilerplate.bundle.py
 ```
 
-Use the output with reactor-python as the normal single-file script:
+Use the output with the python-reactor WASM profile as the normal single-file script:
 
 ```bash
-FUNCTION_INTERFACE=reactor-python \
-FUNCTION_COMMAND=/path/to/python-reactor.wasm \
+FUNCTION_INTERFACE=wasm \
+FUNCTION_WASM_PROFILE=python-reactor \
+FUNCTION_WASM_MODULE=/path/to/python-reactor.wasm \
 FUNCTION_WASM_PYTHON_SCRIPT=/tmp/boilerplate.bundle.py \
 ./shimmy serve
 ```
 
-Shimmy can also run this packaging step automatically during reactor-python
+Shimmy can also run this packaging step automatically during python-reactor
 startup for Lambda Feedback package-style evaluators. The fast path only needs
 the package root; Shimmy uses Lambda Feedback's standard entrypoints and repo
 local bundler/adapter defaults:
 
 ```bash
-FUNCTION_INTERFACE=reactor-python \
+FUNCTION_INTERFACE=wasm \
+FUNCTION_WASM_PROFILE=python-reactor \
 FUNCTION_WASM_MODULE=/path/to/python-reactor.wasm \
 FUNCTION_LF_ROOT=examples/lambda-feedback-fixtures/boilerplate-python \
 ./shimmy serve
@@ -67,7 +69,8 @@ Default startup values:
 Override only the pieces that differ:
 
 ```bash
-FUNCTION_INTERFACE=reactor-python \
+FUNCTION_INTERFACE=wasm \
+FUNCTION_WASM_PROFILE=python-reactor \
 FUNCTION_WASM_MODULE=/path/to/python-reactor.wasm \
 FUNCTION_LF_ROOT=examples/lambda-feedback-fixtures/boilerplate-python \
 FUNCTION_LF_EVAL_ENTRYPOINT=evaluation_function.evaluation:evaluation_function \
@@ -81,7 +84,8 @@ For dependency-heavy packages, put the knobs in one JSON file instead of a long
 env list:
 
 ```bash
-FUNCTION_INTERFACE=reactor-python \
+FUNCTION_INTERFACE=wasm \
+FUNCTION_WASM_PROFILE=python-reactor \
 FUNCTION_WASM_MODULE=/path/to/python-reactor.wasm \
 FUNCTION_LF_CONFIG=/var/task/shimmy-lf.json \
 ./shimmy serve

@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/python-reactor-artifact.env
+source "${ROOT}/scripts/python-reactor-artifact.env"
 HOST="127.0.0.1"
 BIN="${ROOT}/bin/shimmy-demo"
 LOG_DIR="${ROOT}/.demo-logs"
@@ -119,7 +121,7 @@ ensure_reactor_wasm() {
     echo "==> Downloading python-reactor.wasm"
     mkdir -p "$(dirname "${wasm}")"
     curl -fsSL \
-      https://github.com/bkmashiro/webassembly-language-runtimes/releases/download/v1.0.13/python-reactor.wasm \
+      "${SHIMMY_REACTOR_URL}" \
       -o "${wasm}"
   fi
   printf '%s\n' "${wasm}"

@@ -23,7 +23,7 @@ This page is the short version of the current runtime/profile/env surface. Use i
 
 ## Artifact policy for `python-reactor.wasm`
 
-Source of truth: `bkmashiro/webassembly-language-runtimes`, workflow `build-python-reactor.yml`.
+Source of truth: `bkmashiro/webassembly-language-runtimes`, workflow `build-python-reactor.yml`. The local pin used by scripts lives in `scripts/python-reactor-artifact.env`; verify it with `scripts/verify-python-reactor-artifact.sh`.
 
 Current artifact used by this branch:
 
@@ -34,7 +34,7 @@ sha256:  4c5fea0b3a6a31a54ea83f8f93a7c912627b4cf5fc6516ee8e50159bb7c04d4c
 exports: py_init, evaluate, py_exec, alloc, dealloc, resp_buf, resp_len
 ```
 
-The checked-in copies under `internal/execution/wasm/testdata/` and `build/python-reactor/artifacts/` are Git LFS copies of that release asset. They are consumers/test fixtures, not the build source of truth.
+The checked-in copies under `internal/execution/wasm/testdata/` and `build/python-reactor/artifacts/` are Git LFS copies of that release asset. They are consumers/test fixtures, not the build source of truth. For Lambda Feedback handoff smoke, use [lambda-feedback-handoff.md](lambda-feedback-handoff.md).
 
 ## Examples
 

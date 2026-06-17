@@ -2,10 +2,12 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ARTIFACT_DIR="${SHIMMY_REACTOR_ARTIFACT_DIR:-/tmp/shimmy-reactor-artifacts}"
-REACTOR_VERSION="${SHIMMY_REACTOR_VERSION:-v1.0.13}"
+# shellcheck source=scripts/python-reactor-artifact.env
+source "${ROOT}/scripts/python-reactor-artifact.env"
+ARTIFACT_DIR="${SHIMMY_REACTOR_ARTIFACT_DIR}"
+REACTOR_VERSION="${SHIMMY_REACTOR_VERSION}"
 REACTOR_WASM="${PYTHON_REACTOR_WASM:-${ARTIFACT_DIR}/python-reactor-${REACTOR_VERSION}.wasm}"
-EXPECTED_SHA256="${SHIMMY_REACTOR_SHA256:-4c5fea0b3a6a31a54ea83f8f93a7c912627b4cf5fc6516ee8e50159bb7c04d4c}"
+EXPECTED_SHA256="${SHIMMY_REACTOR_SHA256}"
 PURE_DEPS="${SHIMMY_LF_PURE_PY_DEPS:-${ARTIFACT_DIR}/pure-python-deps}"
 POLYFILLS="${ROOT}/tools/lf-bundle-python/polyfills/reactor"
 GO_IMAGE="${SHIMMY_REACTOR_GO_IMAGE:-golang:1.24}"
@@ -28,7 +30,7 @@ fetch_reactor() {
     return 0
   fi
 
-  local url="https://github.com/bkmashiro/webassembly-language-runtimes/releases/download/${REACTOR_VERSION}/python-reactor.wasm"
+  local url="${SHIMMY_REACTOR_URL}"
   echo "==> downloading ${url}"
   if need curl; then
     curl -fL "${url}" -o "${REACTOR_WASM}"

@@ -78,43 +78,6 @@ if result.get("is_correct") is not True:
 PY
 }
 
-run_plain_python_direct() {
-  python3 - <<'PY'
-import importlib.util
-import sys
-from pathlib import Path
-sys.dont_write_bytecode = True
-p = Path('examples/eval-python/eval.py').resolve()
-spec = importlib.util.spec_from_file_location('eval_python', p)
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
-result = mod.evaluation_function('3.14159', '3.1416', {'tolerance': 0.001})
-assert result['is_correct'] is True, result
-print(result)
-PY
-}
-
-run_numpy_direct_if_available() {
-  python3 - <<'PY'
-import importlib.util
-import sys
-from pathlib import Path
-sys.dont_write_bytecode = True
-try:
-    import numpy  # noqa: F401
-except Exception as exc:
-    print(f"    host NumPy unavailable; skipping direct fallback: {exc}")
-    raise SystemExit(0)
-p = Path('examples/eval-numpy/eval.py').resolve()
-spec = importlib.util.spec_from_file_location('eval_numpy', p)
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
-result = mod.evaluation_function('1,2,3.000001', '1,2,3', {'rtol': 0.00001})
-assert result['is_correct'] is True, result
-print(result)
-PY
-}
-
 ensure_reactor_wasm() {
   local wasm="${ROOT}/internal/execution/wasm/testdata/python-reactor.wasm"
   if [[ ! -f "${wasm}" ]]; then
@@ -132,9 +95,8 @@ run_plain_reactor() {
   echo "==> Plain Python route: examples/eval-python via reactor-python"
   echo '    sample: response="3.14159", answer="3.1416", params={"tolerance":0.001}'
   if [[ "$(uname -s)" != "Linux" ]]; then
-    echo "    reactor-python backend is Linux-only in this branch; validating evaluator directly on host Python"
-    (cd "${ROOT}" && run_plain_python_direct)
-    echo "    ✓ plain Python evaluator accepted sample input"
+    echo "    skipped: reactor-python backend is Linux-only in this branch"
+    echo "    run real reactor-python smoke with: ./scripts/smoke-python-reactor-handoff.sh docker"
     return 0
   fi
 
@@ -167,8 +129,8 @@ run_numpy_reactor() {
   if [[ "$(uname -s)" != "Linux" ]]; then
     echo
     echo "==> NumPy route: examples/eval-numpy via reactor-python"
-    echo "    reactor-python backend is Linux-only in this branch; validating evaluator directly if host NumPy exists"
-    (cd "${ROOT}" && run_numpy_direct_if_available)
+    echo "    skipped: reactor-python backend is Linux-only in this branch"
+    echo "    run real reactor-python smoke with: ./scripts/smoke-python-reactor-handoff.sh docker"
     return 0
   fi
   local wasm p base log pid resp

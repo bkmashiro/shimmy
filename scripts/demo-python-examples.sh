@@ -5,8 +5,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=scripts/python-reactor-artifact.env
 source "${ROOT}/scripts/python-reactor-artifact.env"
 HOST="127.0.0.1"
-BIN="${ROOT}/bin/shimmy-demo"
+BIN="${SHIMMY_DEMO_BIN:-${ROOT}/bin/shimmy-demo}"
 LOG_DIR="${ROOT}/.demo-logs"
+REACTOR_DOCKER="${SHIMMY_DEMO_REACTOR_DOCKER:-0}"
+GO_IMAGE="${SHIMMY_REACTOR_GO_IMAGE:-golang:1.24}"
 mkdir -p "${LOG_DIR}"
 
 need() { command -v "$1" >/dev/null 2>&1; }
@@ -88,6 +90,28 @@ ensure_reactor_wasm() {
       -o "${wasm}"
   fi
   printf '%s\n' "${wasm}"
+}
+
+run_reactor_examples_docker() {
+  if ! need docker; then
+    echo "error: Docker is required when SHIMMY_DEMO_REACTOR_DOCKER=1" >&2
+    exit 1
+  fi
+
+  echo
+  echo "==> Reactor-python examples via Docker (${GO_IMAGE})"
+  echo "    running only the reactor-python portion inside Linux; host Pyodide demo will run afterwards"
+  docker run --rm \
+    -v "${ROOT}":/repo \
+    -v "${SHIMMY_REACTOR_ARTIFACT_DIR}":/artifacts \
+    -v shimmy-go-mod-cache:/go/pkg/mod \
+    -v shimmy-go-build-cache:/root/.cache/go-build \
+    -w /repo \
+    -e SHIMMY_REACTOR_ARTIFACT_DIR=/artifacts \
+    -e SHIMMY_DEMO_REACTOR_DOCKER=0 \
+    -e SHIMMY_DEMO_BIN=/tmp/shimmy-demo \
+    "${GO_IMAGE}" \
+    bash -lc 'set -euo pipefail; export PATH=/usr/local/go/bin:$PATH; if ! command -v python3 >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then apt-get update >/dev/null && apt-get install -y --no-install-recommends python3 curl ca-certificates >/dev/null; fi; ./scripts/demo-python-examples.sh reactor-only'
 }
 
 run_plain_reactor() {
@@ -197,16 +221,42 @@ run_scipy_pyodide() {
 }
 
 main() {
+  local mode="${1:-all}"
   if ! need go || ! need curl || ! need python3; then
     echo "error: go, curl, and python3 are required" >&2
     exit 1
   fi
 
+  case "${mode}" in
+    all|reactor-only) ;;
+    -h|--help)
+      echo "usage: $0 [all|reactor-only]" >&2
+      echo "set SHIMMY_DEMO_REACTOR_DOCKER=1 on macOS to run reactor-python examples in Docker" >&2
+      exit 0
+      ;;
+    *)
+      echo "usage: $0 [all|reactor-only]" >&2
+      exit 1
+      ;;
+  esac
+
   echo "==> Building shimmy demo binary"
   (cd "${ROOT}" && go build -trimpath -buildvcs=false -o "${BIN}" .)
 
-  run_plain_reactor
-  run_numpy_reactor
+  if [[ "${mode}" == "reactor-only" ]]; then
+    run_plain_reactor
+    run_numpy_reactor
+    echo
+    echo "✅ Reactor-python example demos completed. Logs: ${LOG_DIR}"
+    return 0
+  fi
+
+  if [[ "$(uname -s)" != "Linux" && "${REACTOR_DOCKER}" == "1" ]]; then
+    run_reactor_examples_docker
+  else
+    run_plain_reactor
+    run_numpy_reactor
+  fi
   run_scipy_pyodide
 
   echo

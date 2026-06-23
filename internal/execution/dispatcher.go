@@ -39,6 +39,9 @@ type Params struct {
 func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 	switch params.Config.Supervisor.IO.Interface {
 	case supervisor.RpcIO:
+		if err := requireProcessWorkerCommand(params.Config.Supervisor); err != nil {
+			return nil, err
+		}
 		return dispatcher.NewDedicatedDispatcher(
 			dispatcher.DedicatedDispatcherParams{
 				Config: dispatcher.DedicatedDispatcherConfig{
@@ -72,6 +75,11 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 		return d, nil
 
 	default:
+		if params.Config.Supervisor.IO.Interface == supervisor.FileIO {
+			if err := requireProcessWorkerCommand(params.Config.Supervisor); err != nil {
+				return nil, err
+			}
+		}
 		return dispatcher.NewPooledDispatcher(
 			dispatcher.PooledDispatcherParams{
 				Config: dispatcher.PooledDispatcherConfig{
@@ -83,4 +91,11 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 			},
 		)
 	}
+}
+
+func requireProcessWorkerCommand(cfg supervisor.Config) error {
+	if strings.TrimSpace(cfg.StartParams.Cmd) == "" {
+		return fmt.Errorf("FUNCTION_COMMAND is required when FUNCTION_INTERFACE=%q", cfg.IO.Interface)
+	}
+	return nil
 }

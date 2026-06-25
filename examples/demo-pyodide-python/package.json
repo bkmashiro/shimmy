@@ -1,0 +1,13 @@
+{
+  "name": "shimmy-demo-pyodide-python",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Pyodide/Node.js runner example for Shimmy Python evaluators",
+  "type": "commonjs",
+  "scripts": {
+    "smoke": "node runner.js eval.py"
+  },
+  "dependencies": {
+    "pyodide": "^0.28.3"
+  }
+}

@@ -24,7 +24,7 @@ type SendConfig struct {
 // IOInterface describes the interface used to communicate with the worker.
 type IOConfig struct {
 	// Interface describes the communication between the supervisor
-	// and the worker. It can be "rpc", "file", or "wasm".
+	// and the worker. It can be "rpc", "file", "wasm", or "pyodide".
 	//
 	// If "rpc", the supervisor will communicate with the worker over
 	// a specified transport. The worker is expected to handle incoming
@@ -37,6 +37,10 @@ type IOConfig struct {
 	//
 	// If "wasm", Shimmy loads a pre-built WASI module from FUNCTION_COMMAND
 	// or FUNCTION_WASM_MODULE and calls its internal alloc/evaluate adapter ABI.
+	//
+	// If "pyodide", Shimmy starts a Node.js Pyodide runner and communicates with
+	// it through the existing JSON-RPC stdio adapter. This is intended for
+	// Python evaluators that depend on Pyodide-provided packages.
 	//
 	// Default is "rpc".
 	Interface IOInterface `conf:"interface"`

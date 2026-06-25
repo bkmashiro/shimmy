@@ -19,6 +19,11 @@ const (
 
 	// WasmIO describes in-process execution of a pre-built WASI module.
 	WasmIO IOInterface = "wasm"
+
+	// PyodideIO describes execution of Python eval functions via Pyodide
+	// (CPython compiled to Emscripten WASM) running inside Node.js. The runner
+	// speaks the same JSON-RPC-over-stdio protocol as the existing rpc backend.
+	PyodideIO IOInterface = "pyodide"
 )
 
 // IOTransport describes the transport mechanism used to communicate with

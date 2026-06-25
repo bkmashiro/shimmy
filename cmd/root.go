@@ -47,7 +47,7 @@ functions on arbitrary, serverless platforms.`
 			&cli.StringFlag{
 				Name:     "interface",
 				Aliases:  []string{"i"},
-				Usage:    "the interface to use for worker communication. Options: rpc, file, wasm.",
+				Usage:    "the interface to use for worker communication. Options: rpc, file, wasm, pyodide.",
 				Value:    "rpc",
 				Category: "function",
 				EnvVars:  []string{"FUNCTION_INTERFACE"},

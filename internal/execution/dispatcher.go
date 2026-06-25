@@ -74,6 +74,9 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 		}
 		return d, nil
 
+	case supervisor.PyodideIO:
+		return newPyodideDispatcher(params)
+
 	default:
 		if params.Config.Supervisor.IO.Interface == supervisor.FileIO {
 			if err := requireProcessWorkerCommand(params.Config.Supervisor); err != nil {
@@ -98,4 +101,39 @@ func requireProcessWorkerCommand(cfg supervisor.Config) error {
 		return fmt.Errorf("FUNCTION_COMMAND is required when FUNCTION_INTERFACE=%q", cfg.IO.Interface)
 	}
 	return nil
+}
+
+func newPyodideDispatcher(params Params) (dispatcher.Dispatcher, error) {
+	runnerPath := strings.TrimSpace(os.Getenv("FUNCTION_PYODIDE_RUNNER"))
+	if runnerPath == "" {
+		runnerPath = "runner.js"
+	}
+
+	pyodideScriptPath := strings.TrimSpace(os.Getenv("FUNCTION_PYODIDE_SCRIPT"))
+	pyodideRoot := strings.TrimSpace(os.Getenv("FUNCTION_PYODIDE_ROOT"))
+	pyodideEvalEntrypoint := strings.TrimSpace(os.Getenv("FUNCTION_PYODIDE_EVAL_ENTRYPOINT"))
+	pyodidePackageMode := pyodideRoot != "" && pyodideEvalEntrypoint != ""
+
+	pyodideSupervisorCfg := params.Config.Supervisor
+	pyodideSupervisorCfg.IO.Interface = supervisor.RpcIO
+	pyodideSupervisorCfg.IO.Rpc.Transport = supervisor.StdioTransport
+	pyodideSupervisorCfg.StartParams.Cmd = "node"
+	if pyodidePackageMode {
+		pyodideSupervisorCfg.StartParams.Args = []string{runnerPath}
+	} else {
+		if pyodideScriptPath == "" {
+			return nil, fmt.Errorf("pyodide: FUNCTION_PYODIDE_SCRIPT must be set, or provide FUNCTION_PYODIDE_ROOT and FUNCTION_PYODIDE_EVAL_ENTRYPOINT")
+		}
+		pyodideSupervisorCfg.StartParams.Args = []string{runnerPath, pyodideScriptPath}
+	}
+
+	return dispatcher.NewDedicatedDispatcher(
+		dispatcher.DedicatedDispatcherParams{
+			Config: dispatcher.DedicatedDispatcherConfig{
+				Supervisor: pyodideSupervisorCfg,
+			},
+			Context: params.Context,
+			Log:     params.Log,
+		},
+	)
 }

@@ -62,7 +62,7 @@ GLOBAL OPTIONS:
    --command value, -c value                        the command to invoke to start the worker process, or the WASM module path when --interface=wasm. [$FUNCTION_COMMAND]
    --cwd value, -d value                            the working directory for the worker process. [$FUNCTION_WORKING_DIR]
    --env value, -e value [ --env value, -e value ]  additional environment variables for the worker process. [$FUNCTION_ENV]
-   --interface value, -i value                      the interface to use for worker communication. Options: rpc, file, wasm. (default: "rpc") [$FUNCTION_INTERFACE]
+   --interface value, -i value                      the interface to use for worker communication. Options: rpc, file, wasm, pyodide. (default: "rpc") [$FUNCTION_INTERFACE]
    --max-workers value, -n value                    the maximum number of worker processes to run concurrently. (default: number of CPU cores) [$FUNCTION_MAX_PROCS]
 
    rpc
@@ -323,7 +323,7 @@ scripts; the runtime boundary remains the pre-built `eval.wasm` module.
 
 The backend keeps a warm module instance pool and restores a full linear-memory
 snapshot after each request. This gives warm reuse without leaking guest mutable
-state between requests. Dirty-page restore, Python runtimes, Pyodide, and package
+state between requests. Dirty-page restore, Python reactor runtimes, and package
 bundling are intentionally out of scope for this generic backend.
 
 Try the state-isolation examples. Linux, or a Linux container, is the reference
@@ -337,6 +337,40 @@ separate profile/follow-up.
 scripts/demo-wasm.sh
 scripts/demo-cpp-wasm.sh
 go test ./internal/execution/wasm -run 'Test(GoStateful|RustCompare|CppCompare|GoPackage|RustPackage|CppPackage)Example_CompilesAndRunsThroughDispatcher' -v
+```
+
+#### Pyodide Python (`--interface pyodide`, opt-in)
+
+The Pyodide interface is a compatibility backend for Python evaluators that need
+Pyodide's Node.js-hosted CPython/WebAssembly runtime and package ecosystem. It
+is intentionally separate from the generic in-process wazero backend above:
+Shimmy starts a Node.js runner and communicates with it through the existing
+JSON-RPC-over-stdio worker path.
+
+Run a Python evaluator script with:
+
+```shell
+cd examples/demo-pyodide-python
+npm install
+cd ../..
+
+FUNCTION_INTERFACE=pyodide \
+FUNCTION_PYODIDE_RUNNER=$(pwd)/examples/demo-pyodide-python/runner.js \
+FUNCTION_PYODIDE_SCRIPT=$(pwd)/examples/demo-pyodide-python/eval.py \
+shimmy serve
+```
+
+`FUNCTION_COMMAND` is not required for `--interface pyodide`; Shimmy constructs
+the `node <runner> <script>` worker command internally. Existing `rpc` and
+`file` process backends still require `FUNCTION_COMMAND`.
+
+The included demo uses a pure-Python evaluator to keep the smoke test fast, but
+it executes in the same Pyodide runtime path that can load Pyodide packages via
+`FUNCTION_PYODIDE_PACKAGES`.
+
+```shell
+scripts/demo-pyodide-python.sh
+go test ./internal/execution -run TestPyodidePythonExample_RunsThroughDispatcher -v
 ```
 
 ### Sandboxed Execution (Linux only, experimental)

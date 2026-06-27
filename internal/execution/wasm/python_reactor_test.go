@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -76,7 +77,13 @@ func TestReactorPythonDispatcher_StartReportsInvalidModuleCompile(t *testing.T) 
 	if err == nil {
 		t.Fatal("expected invalid module compile error")
 	}
-	if got, want := err.Error(), "compile module"; !strings.Contains(got, want) {
-		t.Fatalf("expected error to contain %q, got %q", want, got)
+	if got := err.Error(); runtime.GOOS == "linux" {
+		if want := "compile module"; !strings.Contains(got, want) {
+			t.Fatalf("expected error to contain %q, got %q", want, got)
+		}
+	} else {
+		if want := "python-reactor env module is only supported on Linux"; !strings.Contains(got, want) {
+			t.Fatalf("expected error to contain %q, got %q", want, got)
+		}
 	}
 }

@@ -117,6 +117,10 @@ func (d *ReactorPythonDispatcher) Start(ctx context.Context) error {
 		_ = rt.Close(ctx)
 		return fmt.Errorf("reactor-python: instantiate wasi: %w", err)
 	}
+	if err := instantiateEnvModule(ctx, rt); err != nil {
+		_ = rt.Close(ctx)
+		return fmt.Errorf("reactor-python: instantiate env: %w", err)
+	}
 
 	compiled, err := rt.CompileModule(ctx, wasmBytes)
 	if err != nil {

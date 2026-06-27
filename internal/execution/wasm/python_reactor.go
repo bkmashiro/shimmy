@@ -1,6 +1,7 @@
 package wasm
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -400,7 +401,21 @@ func (r *ReactorPythonRunner) Start(ctx context.Context) error {
 
 	r.log.Info("instantiating python-reactor module")
 
-	modCfg := r.modCfg.WithName("").WithStartFunctions("_initialize")
+	pythonPath := "/usr/lib/python3.14/site-packages"
+	if v := os.Getenv("FUNCTION_WASM_PYTHON_PATH"); v != "" {
+		pythonPath = v
+	}
+	var stderr bytes.Buffer
+	modCfg := r.modCfg.
+		WithName("").
+		WithStartFunctions("_initialize").
+		WithEnv("PYTHONHOME", "/usr").
+		WithEnv("PYTHONDONTWRITEBYTECODE", "1").
+		WithEnv("PYTHONPATH", pythonPath).
+		WithStderr(&stderr)
+	if len(r.cfg.AllowedPaths) > 0 {
+		modCfg = modCfg.WithEnv("PYTHONPATH", pythonPath+":"+strings.Join(r.cfg.AllowedPaths, ":"))
+	}
 	mod, err := r.rt.InstantiateModule(ctx, r.compiled, modCfg)
 	if err != nil {
 		return fmt.Errorf("reactor-python: instantiate module: %w", err)
@@ -409,7 +424,7 @@ func (r *ReactorPythonRunner) Start(ctx context.Context) error {
 	if fnPyInit := mod.ExportedFunction("py_init"); fnPyInit != nil {
 		if _, err := fnPyInit.Call(ctx); err != nil {
 			_ = mod.Close(ctx)
-			return fmt.Errorf("reactor-python: py_init: %w", err)
+			return fmt.Errorf("reactor-python: py_init: %w\nstderr: %s", err, stderr.String())
 		}
 	}
 

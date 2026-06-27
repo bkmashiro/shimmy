@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"go.uber.org/zap"
@@ -119,10 +120,150 @@ func validatePythonReactorConfig(cfg *wasm.Config) error {
 	if strings.TrimSpace(cfg.ModulePath) == "" {
 		return fmt.Errorf("reactor-python: FUNCTION_WASM_MODULE is required when FUNCTION_WASM_PROFILE=python-reactor")
 	}
-	if cfg.PythonScriptPath == "" {
-		return fmt.Errorf("reactor-python: FUNCTION_WASM_PYTHON_SCRIPT is required when FUNCTION_WASM_PROFILE=python-reactor")
+	if cfg.PythonScriptPath != "" {
+		return nil
+	}
+
+	packageRoot := strings.TrimSpace(os.Getenv("FUNCTION_LF_ROOT"))
+	if packageRoot == "" {
+		return fmt.Errorf("reactor-python: FUNCTION_WASM_PYTHON_SCRIPT is required, or provide FUNCTION_LF_ROOT and FUNCTION_LF_EVAL_ENTRYPOINT for package mode")
+	}
+	evalEntrypoint := strings.TrimSpace(os.Getenv("FUNCTION_LF_EVAL_ENTRYPOINT"))
+	if evalEntrypoint == "" {
+		evalEntrypoint = "evaluation_function.evaluation:evaluation_function"
+	}
+	previewEntrypoint := strings.TrimSpace(os.Getenv("FUNCTION_LF_PREVIEW_ENTRYPOINT"))
+	if previewEntrypoint == "" {
+		previewEntrypoint = "evaluation_function.preview:preview_function"
+	}
+
+	bundle, err := writePythonReactorPackageBundle(packageRoot, evalEntrypoint, previewEntrypoint)
+	if err != nil {
+		return err
+	}
+	cfg.PythonScriptPath = bundle
+	cfg.AllowedPaths = appendUniqueNonEmpty(cfg.AllowedPaths, packageRoot)
+	if includeRoots := splitEnvList(os.Getenv("FUNCTION_LF_INCLUDE_ROOTS")); len(includeRoots) > 0 {
+		cfg.AllowedPaths = appendUniqueNonEmpty(cfg.AllowedPaths, includeRoots...)
 	}
 	return nil
+}
+
+func writePythonReactorPackageBundle(root, evalEntrypoint, previewEntrypoint string) (string, error) {
+	out := strings.TrimSpace(os.Getenv("FUNCTION_LF_BUNDLE_OUT"))
+	var f *os.File
+	var err error
+	if out == "" {
+		f, err = os.CreateTemp("", "shimmy-reactor-lf-*.py")
+	} else {
+		f, err = os.Create(out)
+	}
+	if err != nil {
+		return "", fmt.Errorf("reactor-python: create package entrypoint bundle: %w", err)
+	}
+	defer f.Close()
+
+	script := fmt.Sprintf(`
+import dataclasses
+import importlib
+import inspect
+import sys
+
+_ROOT = %s
+_EVAL_ENTRYPOINT = %s
+_PREVIEW_ENTRYPOINT = %s
+
+if _ROOT and _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
+
+def _load_entrypoint(spec):
+    if not spec or ':' not in spec:
+        raise ValueError('Entrypoint must use module:function format')
+    module_name, symbol_name = spec.rsplit(':', 1)
+    module = importlib.import_module(module_name)
+    return getattr(module, symbol_name)
+
+
+def _normalize(value):
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {k: _normalize(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_normalize(v) for v in value]
+    if hasattr(value, 'model_dump') and callable(getattr(value, 'model_dump')):
+        return _normalize(value.model_dump())
+    if hasattr(value, 'dict') and callable(getattr(value, 'dict')):
+        return _normalize(value.dict())
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return _normalize(dataclasses.asdict(value))
+    fields = vars(value) if hasattr(value, '__dict__') else None
+    if isinstance(fields, dict):
+        return {k: _normalize(v) for k, v in fields.items() if not k.startswith('_')}
+    return value
+
+
+def _normalize_result(value):
+    value = _normalize(value)
+    if isinstance(value, dict):
+        return value
+    return {'value': value}
+
+
+def _call(fn, method, response, answer=None, params=None):
+    if params is None:
+        params = {}
+    if method == 'preview':
+        try:
+            sig = inspect.signature(fn)
+            positional = [
+                p for p in sig.parameters.values()
+                if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+            ]
+            has_varargs = any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in sig.parameters.values())
+            if not has_varargs and len(positional) == 2:
+                return fn(response, params)
+        except (TypeError, ValueError):
+            pass
+    return fn(response, answer, params)
+
+
+def evaluation_function(response, answer, params=None):
+    return _normalize_result(_call(_load_entrypoint(_EVAL_ENTRYPOINT), 'eval', response, answer, params))
+
+
+def preview_function(response, answer=None, params=None):
+    return _normalize_result(_call(_load_entrypoint(_PREVIEW_ENTRYPOINT), 'preview', response, answer, params))
+`, strconv.Quote(root), strconv.Quote(evalEntrypoint), strconv.Quote(previewEntrypoint))
+	if _, err := f.WriteString(script); err != nil {
+		return "", fmt.Errorf("reactor-python: write package entrypoint bundle: %w", err)
+	}
+	return f.Name(), nil
+}
+
+func splitEnvList(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return strings.Split(value, ",")
+}
+
+func appendUniqueNonEmpty(base []string, values ...string) []string {
+	seen := make(map[string]struct{}, len(base)+len(values))
+	out := make([]string, 0, len(base)+len(values))
+	for _, v := range append(base, values...) {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	return out
 }
 
 func newPyodideDispatcher(params Params) (dispatcher.Dispatcher, error) {

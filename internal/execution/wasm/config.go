@@ -37,6 +37,10 @@ type Config struct {
 	// CompileCacheDir enables wazero's on-disk compilation cache when set via
 	// FUNCTION_WASM_COMPILE_CACHE.
 	CompileCacheDir string
+
+	// PythonScriptPath is the Python evaluator script loaded by the
+	// python-reactor WASM profile. Set with FUNCTION_WASM_PYTHON_SCRIPT.
+	PythonScriptPath string
 }
 
 func (c *Config) applyDefaults() {
@@ -68,6 +72,9 @@ func (c *Config) applyEnv() {
 	}
 	if v := os.Getenv("FUNCTION_WASM_COMPILE_CACHE"); v != "" {
 		c.CompileCacheDir = v
+	}
+	if v := os.Getenv("FUNCTION_WASM_PYTHON_SCRIPT"); v != "" {
+		c.PythonScriptPath = v
 	}
 }
 

@@ -41,6 +41,75 @@ func TestNewDispatcher_RequiresCommandForProcessInterfaces(t *testing.T) {
 	}
 }
 
+func TestNewDispatcher_WasmPythonReactorRequiresScript(t *testing.T) {
+	t.Setenv("FUNCTION_WASM_PROFILE", "python-reactor")
+	t.Setenv("FUNCTION_WASM_MODULE", "/tmp/python-reactor.wasm")
+	t.Setenv("FUNCTION_WASM_PYTHON_SCRIPT", "")
+
+	_, err := NewDispatcher(Params{
+		Context: context.Background(),
+		Config: Config{
+			MaxWorkers: 1,
+			Supervisor: supervisor.Config{
+				IO: supervisor.IOConfig{Interface: supervisor.WasmIO},
+			},
+		},
+		Log: zap.NewNop(),
+	})
+	if err == nil {
+		t.Fatal("expected python-reactor script config error")
+	}
+	if got, want := err.Error(), "FUNCTION_WASM_PYTHON_SCRIPT"; !strings.Contains(got, want) {
+		t.Fatalf("expected error to contain %q, got %q", want, got)
+	}
+}
+
+func TestNewDispatcher_WasmPythonReactorRequiresModule(t *testing.T) {
+	t.Setenv("FUNCTION_WASM_PROFILE", "python-reactor")
+	t.Setenv("FUNCTION_WASM_MODULE", "")
+	t.Setenv("FUNCTION_WASM_PYTHON_SCRIPT", "/tmp/eval.py")
+
+	_, err := NewDispatcher(Params{
+		Context: context.Background(),
+		Config: Config{
+			MaxWorkers: 1,
+			Supervisor: supervisor.Config{
+				IO: supervisor.IOConfig{Interface: supervisor.WasmIO},
+			},
+		},
+		Log: zap.NewNop(),
+	})
+	if err == nil {
+		t.Fatal("expected python-reactor module config error")
+	}
+	if got, want := err.Error(), "FUNCTION_WASM_MODULE"; !strings.Contains(got, want) {
+		t.Fatalf("expected error to contain %q, got %q", want, got)
+	}
+}
+
+func TestNewDispatcher_WasmPythonReactorValidConfigReturnsDispatcher(t *testing.T) {
+	t.Setenv("FUNCTION_WASM_PROFILE", "python-reactor")
+	t.Setenv("FUNCTION_WASM_MODULE", "/tmp/python-reactor.wasm")
+	t.Setenv("FUNCTION_WASM_PYTHON_SCRIPT", "/tmp/eval.py")
+
+	d, err := NewDispatcher(Params{
+		Context: context.Background(),
+		Config: Config{
+			MaxWorkers: 1,
+			Supervisor: supervisor.Config{
+				IO: supervisor.IOConfig{Interface: supervisor.WasmIO},
+			},
+		},
+		Log: zap.NewNop(),
+	})
+	if err != nil {
+		t.Fatalf("expected python-reactor dispatcher config to pass, got %v", err)
+	}
+	if d == nil {
+		t.Fatal("expected dispatcher")
+	}
+}
+
 func TestNewDispatcher_PyodideRequiresScriptOrPackageConfig(t *testing.T) {
 	t.Setenv("FUNCTION_PYODIDE_RUNNER", "/tmp/runner.js")
 	t.Setenv("FUNCTION_PYODIDE_SCRIPT", "")

@@ -57,22 +57,30 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 		if wasmProfile == "" {
 			wasmProfile = "generic"
 		}
-		if wasmProfile != "generic" {
-			validProfiles := []string{"generic"}
-			sort.Strings(validProfiles)
-			return nil, fmt.Errorf("unsupported FUNCTION_WASM_PROFILE %q; supported values: %s", wasmProfile, strings.Join(validProfiles, ", "))
-		}
 
 		cfg := wasm.Config{
 			ModulePath:   params.Config.Supervisor.StartParams.Cmd,
 			MaxInstances: params.Config.MaxWorkers,
 			Timeout:      params.Config.Supervisor.SendParams.Timeout,
 		}
-		d := wasm.NewDispatcher(cfg, params.Log)
-		if err := d.Start(params.Context); err != nil {
-			return nil, err
+
+		switch wasmProfile {
+		case "generic":
+			d := wasm.NewDispatcher(cfg, params.Log)
+			if err := d.Start(params.Context); err != nil {
+				return nil, err
+			}
+			return d, nil
+		case "python-reactor":
+			if err := validatePythonReactorConfig(&cfg); err != nil {
+				return nil, err
+			}
+			return wasm.NewReactorPythonDispatcher(cfg, params.Log), nil
+		default:
+			validProfiles := []string{"generic", "python-reactor"}
+			sort.Strings(validProfiles)
+			return nil, fmt.Errorf("unsupported FUNCTION_WASM_PROFILE %q; supported values: %s", wasmProfile, strings.Join(validProfiles, ", "))
 		}
-		return d, nil
 
 	case supervisor.PyodideIO:
 		return newPyodideDispatcher(params)
@@ -99,6 +107,20 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 func requireProcessWorkerCommand(cfg supervisor.Config) error {
 	if strings.TrimSpace(cfg.StartParams.Cmd) == "" {
 		return fmt.Errorf("FUNCTION_COMMAND is required when FUNCTION_INTERFACE=%q", cfg.IO.Interface)
+	}
+	return nil
+}
+
+func validatePythonReactorConfig(cfg *wasm.Config) error {
+	if v := strings.TrimSpace(os.Getenv("FUNCTION_WASM_MODULE")); v != "" {
+		cfg.ModulePath = v
+	}
+	cfg.PythonScriptPath = strings.TrimSpace(os.Getenv("FUNCTION_WASM_PYTHON_SCRIPT"))
+	if strings.TrimSpace(cfg.ModulePath) == "" {
+		return fmt.Errorf("reactor-python: FUNCTION_WASM_MODULE is required when FUNCTION_WASM_PROFILE=python-reactor")
+	}
+	if cfg.PythonScriptPath == "" {
+		return fmt.Errorf("reactor-python: FUNCTION_WASM_PYTHON_SCRIPT is required when FUNCTION_WASM_PROFILE=python-reactor")
 	}
 	return nil
 }

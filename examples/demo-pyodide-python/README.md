@@ -33,6 +33,13 @@ The demo script from the repository root does this end-to-end:
 ./scripts/demo-pyodide-python.sh
 ```
 
-The example evaluator keeps a global `invocation_count`. Legacy script mode
-executes the evaluator source in a fresh Python namespace for every request, so
-two requests should both report `guest_invocation_count: 1`.
+A package-shaped evaluator example is available at `examples/demo-pyodide-package`:
+
+```bash
+./scripts/demo-pyodide-package.sh
+```
+
+Both examples keep a global invocation counter. Legacy script mode executes the
+evaluator source in a fresh Python namespace for every request; package mode
+reloads evaluator modules for every request. In both cases, two requests should
+report `guest_invocation_count: 1`.

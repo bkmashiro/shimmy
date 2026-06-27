@@ -372,28 +372,34 @@ _preview_entrypoint = __preview_entrypoint__
 if not _eval_entrypoint:
     raise RuntimeError("FUNCTION_PYODIDE_EVAL_ENTRYPOINT is required in package mode")
 
-_eval_fn = lf_adapter.load_entrypoint(_eval_entrypoint)
-_preview_fn = lf_adapter.load_entrypoint(_preview_entrypoint) if _preview_entrypoint else None
+def __lf_clear_evaluator_modules():
+    """Drop evaluator modules so each request sees a fresh package namespace."""
+    for name, module in list(sys.modules.items()):
+        module_file = getattr(module, "__file__", "")
+        if isinstance(module_file, str) and module_file.startswith("${VFS_ROOT}/"):
+            del sys.modules[name]
+    importlib.invalidate_caches()
 
 
 def __lf_invoke(method, response, answer, params):
-    if method == "preview" and _preview_fn is not None:
-        fn = _preview_fn
+    __lf_clear_evaluator_modules()
+    normalized_method = "preview" if method == "preview" else "eval"
+
+    if normalized_method == "preview" and _preview_entrypoint:
+        fn = lf_adapter.load_entrypoint(_preview_entrypoint)
     else:
-        fn = _eval_fn
+        fn = lf_adapter.load_entrypoint(_eval_entrypoint)
 
     if fn is None:
         raise RuntimeError("No evaluation function available")
 
-    payload = {"response": response, "answer": answer, "params": params}
-    normalized_method = "preview" if method == "preview" else "eval"
     return lf_adapter.normalize_result(
         lf_adapter.call_function(
             fn,
             normalized_method,
-            payload["response"],
-            payload["answer"],
-            payload["params"],
+            response,
+            answer,
+            params,
         )
     )
     `

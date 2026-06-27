@@ -364,13 +364,30 @@ shimmy serve
 the `node <runner> <script>` worker command internally. Existing `rpc` and
 `file` process backends still require `FUNCTION_COMMAND`.
 
-The included demo uses a pure-Python evaluator to keep the smoke test fast, but
-it executes in the same Pyodide runtime path that can load Pyodide packages via
-`FUNCTION_PYODIDE_PACKAGES`.
+The included script demo uses a pure-Python evaluator to keep the smoke test
+fast, but it executes in the same Pyodide runtime path that can load Pyodide
+packages via `FUNCTION_PYODIDE_PACKAGES`.
+
+Pyodide can also run a package-shaped Lambda Feedback evaluator by mounting a
+package root and naming its entrypoints:
+
+```shell
+FUNCTION_INTERFACE=pyodide \
+FUNCTION_PYODIDE_RUNNER=$(pwd)/examples/demo-pyodide-python/runner.js \
+FUNCTION_PYODIDE_ROOT=$(pwd)/examples/demo-pyodide-package \
+FUNCTION_PYODIDE_EVAL_ENTRYPOINT=evaluation_function.evaluation:evaluation_function \
+FUNCTION_PYODIDE_PREVIEW_ENTRYPOINT=evaluation_function.preview:preview_function \
+FUNCTION_PYODIDE_ADAPTER=$(pwd)/examples/lambda-feedback-adapter/lf_compat_adapter.py \
+shimmy serve
+```
+
+The package-mode runner reloads evaluator modules for each request so package
+module globals do not leak across warm calls.
 
 ```shell
 scripts/demo-pyodide-python.sh
-go test ./internal/execution -run TestPyodidePythonExample_RunsThroughDispatcher -v
+scripts/demo-pyodide-package.sh
+go test ./internal/execution -run 'TestPyodidePython(Example|PackageExample)_RunsThroughDispatcher' -v
 ```
 
 ### Sandboxed Execution (Linux only, experimental)

@@ -50,7 +50,11 @@ def evaluation_function(response, answer, params=None):
 	t.Setenv("FUNCTION_WASM_MODULE", wasmPath)
 	t.Setenv("FUNCTION_WASM_PYTHON_SCRIPT", "")
 	t.Setenv("FUNCTION_WASM_MAX_MEMORY_PAGES", "8192")
-	t.Setenv("FUNCTION_WASM_COMPILE_CACHE", filepath.Join(t.TempDir(), "wazero-cache"))
+	cacheDir := os.Getenv("FUNCTION_WASM_COMPILE_CACHE")
+	if cacheDir == "" {
+		cacheDir = filepath.Join(t.TempDir(), "wazero-cache")
+	}
+	t.Setenv("FUNCTION_WASM_COMPILE_CACHE", cacheDir)
 	t.Setenv("FUNCTION_LF_ROOT", root)
 	t.Setenv("FUNCTION_LF_EVAL_ENTRYPOINT", "evaluation_function.evaluation:evaluation_function")
 	t.Setenv("FUNCTION_LF_PREVIEW_ENTRYPOINT", "")

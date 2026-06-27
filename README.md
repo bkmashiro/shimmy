@@ -390,6 +390,48 @@ scripts/demo-pyodide-package.sh
 go test ./internal/execution -run 'TestPyodidePython(Example|PackageExample)_RunsThroughDispatcher' -v
 ```
 
+#### Python reactor profile (`FUNCTION_WASM_PROFILE=python-reactor`, opt-in)
+
+The python-reactor profile is a follow-up compatibility path for Python
+evaluators that can run inside a reactor-mode CPython WASM artifact. It still
+uses the wazero WASM boundary, warm instance pool, and memory snapshot/restore,
+but the guest module is a pre-warmed CPython runtime plus adapter code rather
+than a language-specific evaluator compiled directly to `eval.wasm`.
+
+The large `python-reactor.wasm` artifact is intentionally not checked in. Provide
+one explicitly when running the optional smoke:
+
+```shell
+PYTHON_REACTOR_WASM=/path/to/python-reactor.wasm \
+  scripts/demo-python-reactor-package.sh
+```
+
+Manual package-mode configuration:
+
+```shell
+FUNCTION_INTERFACE=wasm \
+FUNCTION_WASM_PROFILE=python-reactor \
+FUNCTION_WASM_MODULE=/path/to/python-reactor.wasm \
+FUNCTION_WASM_MAX_MEMORY_PAGES=8192 \
+FUNCTION_LF_ROOT=$(pwd)/examples/demo-python-reactor-package \
+FUNCTION_LF_EVAL_ENTRYPOINT=evaluation_function.evaluation:evaluation_function \
+FUNCTION_LF_PREVIEW_ENTRYPOINT=evaluation_function.preview:preview_function \
+shimmy serve
+```
+
+If `FUNCTION_WASM_PYTHON_SCRIPT` is set, Shimmy loads that script directly. If it
+is unset and `FUNCTION_LF_ROOT` is set, Shimmy generates a tiny compatibility
+script that imports the named package entrypoints and mounts the package root
+read-only into WASI. The optional Linux smoke and tests assert that package
+module globals reset across warm requests.
+
+```shell
+go test ./internal/execution ./internal/execution/wasm \
+  -run 'TestPythonReactorPackageEntrypoint_OptionalArtifactSmoke|TestReactorPythonDispatcher_OptionalArtifactSmoke'
+```
+
+Without `PYTHON_REACTOR_WASM`, these artifact smoke tests skip.
+
 ### Sandboxed Execution (Linux only, experimental)
 
 Shimmy can wrap each worker process in an [nsjail](https://github.com/google/nsjail) sandbox to safely execute arbitrary, untrusted code. The sandbox provides:

@@ -432,6 +432,10 @@ go test ./internal/execution ./internal/execution/wasm \
 
 Without `PYTHON_REACTOR_WASM`, these artifact smoke tests skip.
 
+For a side-by-side decision table and reviewer checklist across the generic WASM,
+Pyodide, and python-reactor paths, see
+[`docs/wasm-python-backends.md`](docs/wasm-python-backends.md).
+
 ### Sandboxed Execution (Linux only, experimental)
 
 Shimmy can wrap each worker process in an [nsjail](https://github.com/google/nsjail) sandbox to safely execute arbitrary, untrusted code. The sandbox provides:

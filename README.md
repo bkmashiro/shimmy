@@ -332,9 +332,10 @@ the same toolchain is installed, but CI/reviewer instructions should assume
 Linux by default. These are intentionally small synthetic evaluators for the
 Go/C++ artifact path. Pyodide and reactor-python are compatibility lanes in the
 same benchmark: Pyodide runs when `node` plus `examples/eval-pyodide`'s
-`node_modules/pyodide` are available; reactor-python rows are skipped unless a
-Linux host has a `python-reactor.wasm` artifact via `PYTHON_REACTOR_WASM` or
-`internal/execution/wasm/testdata/python-reactor.wasm`.
+`node_modules/pyodide` are available; reactor-python rows use the pinned
+`v1.0.13` fixture from `bkmashiro/webassembly-language-runtimes` downloaded to
+`internal/execution/wasm/testdata/python-reactor.wasm`, or an override supplied
+through `PYTHON_REACTOR_WASM`.
 
 Minimum toolchains for the example commands below:
 

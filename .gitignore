@@ -35,3 +35,6 @@ go.work
 
 # Local .env files
 *.local.idea/
+
+# Large local/downloaded reactor fixture
+internal/execution/wasm/testdata/python-reactor.wasm

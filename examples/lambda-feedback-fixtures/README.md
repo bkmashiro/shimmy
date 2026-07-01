@@ -37,6 +37,3 @@ context: per-request temporary cwd, cwd/`sys.path`/environment restore, evaluato
 stdout/stderr capture, and cleanup of modules imported from the evaluator root.
 This reduces accidental pollution in demos and CI. It is not a security sandbox;
 malicious native Python evaluators still require a real isolation boundary.
-
-See `docs/lambda-feedback-hygiene-roadmap.md` for the backend-independent
-hygiene/compatibility follow-up track.

@@ -45,11 +45,11 @@ def resolve_config(command: str, request_params: dict[str, Any]) -> tuple[str, s
     raw_params = request_params.get("params")
     evaluator_params = dict(raw_params) if isinstance(raw_params, dict) else {}
 
-    root = pop_first(evaluator_params, ("_lf_root", "root")) or os.getenv("LF_EVAL_ROOT")
+    root = pop_first(evaluator_params, ("_lf_root", "root")) or first_env("FUNCTION_LF_ROOT", "LF_EVAL_ROOT")
     entrypoint = (
         pop_first(evaluator_params, ("_lf_entrypoint", "entrypoint"))
-        or os.getenv(f"LF_{command.upper()}_ENTRYPOINT")
-        or os.getenv("LF_ENTRYPOINT")
+        or first_env(f"FUNCTION_LF_{command.upper()}_ENTRYPOINT", f"LF_{command.upper()}_ENTRYPOINT")
+        or first_env("FUNCTION_LF_ENTRYPOINT", "LF_ENTRYPOINT")
     )
 
     missing = []
@@ -61,6 +61,14 @@ def resolve_config(command: str, request_params: dict[str, Any]) -> tuple[str, s
         raise ValueError(f"missing evaluator params: {', '.join(sorted(missing))}")
 
     return str(root), str(entrypoint), evaluator_params
+
+
+def first_env(*names: str) -> str | None:
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value
+    return None
 
 
 def pop_first(data: dict[str, Any], keys: tuple[str, ...]) -> Any:

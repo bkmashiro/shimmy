@@ -19,6 +19,25 @@ RELATIVE_ROOT = ROOT / "lambda-feedback-fixtures" / "relative-preview"
 
 
 class LFFileWorkerTest(unittest.TestCase):
+    def with_env(self, updates, removed=()):
+        class EnvGuard:
+            def __enter__(inner_self):
+                keys = set(updates) | set(removed)
+                inner_self.old_env = {key: os.environ.get(key) for key in keys}
+                for key in removed:
+                    os.environ.pop(key, None)
+                for key, value in updates.items():
+                    os.environ[key] = value
+
+            def __exit__(inner_self, exc_type, exc, tb):
+                for key, value in inner_self.old_env.items():
+                    if value is None:
+                        os.environ.pop(key, None)
+                    else:
+                        os.environ[key] = value
+
+        return EnvGuard()
+
     def test_handle_message_wraps_eval_result_for_shimmy_file_adapter(self):
         message = {
             "command": "eval",
@@ -56,22 +75,50 @@ class LFFileWorkerTest(unittest.TestCase):
         self.assertNotIn("result", result)
 
     def test_handle_message_uses_environment_entrypoint_config(self):
-        old_env = {key: os.environ.get(key) for key in ("LF_EVAL_ROOT", "LF_EVAL_ENTRYPOINT", "LF_ENTRYPOINT")}
-        try:
-            os.environ["LF_EVAL_ROOT"] = str(BOILERPLATE_ROOT)
-            os.environ["LF_EVAL_ENTRYPOINT"] = "evaluation_function.main:evaluation_function"
-            os.environ.pop("LF_ENTRYPOINT", None)
+        with self.with_env(
+            {
+                "LF_EVAL_ROOT": str(BOILERPLATE_ROOT),
+                "LF_EVAL_ENTRYPOINT": "evaluation_function.main:evaluation_function",
+            },
+            removed=("LF_ENTRYPOINT",),
+        ):
             result = lf_file_worker.handle_message(
                 {"command": "eval", "params": {"response": "42", "answer": "42", "params": {}}}
             )
-        finally:
-            for key, value in old_env.items():
-                if value is None:
-                    os.environ.pop(key, None)
-                else:
-                    os.environ[key] = value
 
         self.assertEqual(result, {"command": "eval", "result": {"is_correct": True, "feedback": "Correct"}})
+
+    def test_handle_message_prefers_function_lf_env_names_for_package_mode(self):
+        with self.with_env(
+            {
+                "FUNCTION_LF_ROOT": str(BOILERPLATE_ROOT),
+                "FUNCTION_LF_EVAL_ENTRYPOINT": "evaluation_function.main:evaluation_function",
+            },
+            removed=("LF_EVAL_ROOT", "LF_EVAL_ENTRYPOINT", "LF_ENTRYPOINT"),
+        ):
+            result = lf_file_worker.handle_message(
+                {"command": "eval", "params": {"response": "42", "answer": "42", "params": {}}}
+            )
+
+        self.assertEqual(result, {"command": "eval", "result": {"is_correct": True, "feedback": "Correct"}})
+
+    def test_handle_message_uses_command_specific_function_lf_preview_entrypoint(self):
+        with self.with_env(
+            {
+                "FUNCTION_LF_ROOT": str(BOILERPLATE_ROOT),
+                "FUNCTION_LF_EVAL_ENTRYPOINT": "evaluation_function.main:evaluation_function",
+                "FUNCTION_LF_PREVIEW_ENTRYPOINT": "evaluation_function.main:preview_function",
+            },
+            removed=("LF_EVAL_ROOT", "LF_EVAL_ENTRYPOINT", "LF_PREVIEW_ENTRYPOINT", "LF_ENTRYPOINT"),
+        ):
+            result = lf_file_worker.handle_message(
+                {"command": "preview", "params": {"response": "draft", "params": {"expected": "answer"}}}
+            )
+
+        self.assertEqual(
+            result,
+            {"command": "preview", "result": {"preview": {"response": "draft", "expected": "answer"}}},
+        )
 
     def test_cli_reads_request_file_and_writes_response_file(self):
         with tempfile.TemporaryDirectory() as tmp:

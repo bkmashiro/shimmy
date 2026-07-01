@@ -33,12 +33,17 @@ class BenchmarkMatrixTests(unittest.TestCase):
         self.assertIn(("python-file-env", "heavy", "eval", "none"), keys)
         self.assertIn(("python-file-request", "light", "eval", "none"), keys)
         self.assertIn(("python-file-request", "heavy", "eval", "none"), keys)
+        self.assertIn(("python-pyodide", "light", "eval", "none"), keys)
+        self.assertIn(("python-reactor", "light", "eval", "full"), keys)
         self.assertIn(("generic-wasm-go", "light", "eval", "full"), keys)
         self.assertIn(("generic-wasm-go", "heavy", "eval", "full"), keys)
         self.assertIn(("generic-wasm-go", "light", "eval", "off"), keys)
 
         preview_runtimes = {case.runtime.id for case in cases if case.payload.command == "preview"}
-        self.assertEqual({"python-file-env", "python-file-request", "generic-wasm-go"}, preview_runtimes)
+        self.assertEqual(
+            {"python-file-env", "python-file-request", "python-pyodide", "python-reactor", "generic-wasm-go"},
+            preview_runtimes,
+        )
 
     def test_deep_profile_adds_medium_and_uffd_placeholder_without_enabling_ci(self):
         bench = load_benchmark_module()

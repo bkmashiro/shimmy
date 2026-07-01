@@ -330,8 +330,11 @@ Try the state-isolation examples. Linux, or a Linux container, is the reference
 environment for evaluator build/test recipes. The scripts also run on macOS when
 the same toolchain is installed, but CI/reviewer instructions should assume
 Linux by default. These are intentionally small synthetic evaluators for the
-Go/C++ artifact path; real language/runtime packaging such as Pyodide is a
-separate profile/follow-up.
+Go/C++ artifact path. Pyodide and reactor-python are compatibility lanes in the
+same benchmark: Pyodide runs when `node` plus `examples/eval-pyodide`'s
+`node_modules/pyodide` are available; reactor-python rows are skipped unless a
+Linux host has a `python-reactor.wasm` artifact via `PYTHON_REACTOR_WASM` or
+`internal/execution/wasm/testdata/python-reactor.wasm`.
 
 Minimum toolchains for the example commands below:
 
@@ -339,11 +342,13 @@ Minimum toolchains for the example commands below:
   and `python3`.
 - `scripts/demo-cpp-wasm.sh`: the same tools plus `zig` and `file`.
 - `scripts/benchmark-e2e.py`: Go with `GOOS=wasip1 GOARCH=wasm` support and
-  `python3`; it builds the stateful WASM demo, starts real Shimmy HTTP servers,
-  and compares Python file-worker env/request package paths against the generic
-  WASM path across light/heavy eval payloads plus preview smoke. The `deep`
-  profile adds medium payload rows and records `uffd` as skipped until a real
-  dirty-page strategy is wired.
+  `python3`; optional `node` plus `npm install` in `examples/eval-pyodide` for
+  Pyodide rows; optional Linux `python-reactor.wasm` artifact for
+  reactor-python rows. It builds the stateful WASM demo, starts real Shimmy HTTP
+  servers, and compares Python file-worker env/request package paths, Pyodide,
+  reactor-python, and generic WASM across light/heavy eval payloads plus preview
+  smoke. The `deep` profile adds medium payload rows and records `uffd` as
+  skipped until a real dirty-page strategy is wired.
 - `scripts/benchmark-wasm-e2e.py`: legacy WASM-only benchmark kept as a narrow
   smoke for the generic WASM path.
 - Rust example tests: `rustc`/`cargo` plus

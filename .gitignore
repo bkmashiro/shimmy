@@ -20,7 +20,14 @@ lcov.info
 __pycache__/
 *.py[cod]
 
-# Dependency directories (remove the comment below to include it)
+# Local benchmark outputs
+.benchmark-*/
+benchmark-*.json
+examples/demo-stateful/eval.wasm
+target/
+
+# Dependency directories
+node_modules/
 # vendor/
 
 # Go workspace file

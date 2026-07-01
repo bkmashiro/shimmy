@@ -8,6 +8,10 @@ happy path:
   with package root/entrypoints supplied by environment variables.
 * python-file-request: the same file worker with package root/entrypoint supplied
   per request, mirroring dynamic evaluator package selection.
+* python-pyodide: the historical Pyodide/Node compatibility runner, skipped
+  when node_modules are not installed.
+* python-reactor: the historical reactor-mode CPython/WASI runtime, skipped
+  when the large reactor artifact is not present.
 * generic-wasm-go: the generic WASM ABI using the stateful Go/WASI demo module.
 
 The default CI profile stays small. The deep profile adds medium payloads and an
@@ -22,6 +26,7 @@ import json
 import os
 import shutil
 import socket
+import platform
 import statistics
 import subprocess
 import sys
@@ -40,6 +45,11 @@ BOILERPLATE_ROOT = ROOT / "examples" / "lambda-feedback-fixtures" / "boilerplate
 RELATIVE_ROOT = ROOT / "examples" / "lambda-feedback-fixtures" / "relative-preview"
 DEMO_WASM_DIR = ROOT / "examples" / "demo-stateful"
 WASM = DEMO_WASM_DIR / "eval.wasm"
+PYODIDE_DIR = ROOT / "examples" / "eval-pyodide"
+PYODIDE_RUNNER = PYODIDE_DIR / "runner.js"
+PYODIDE_NODE_MODULE = PYODIDE_DIR / "node_modules" / "pyodide"
+REACTOR_SCRIPT = ROOT / "examples" / "python-reactor-lf" / "evaluator.py"
+DEFAULT_REACTOR_WASM = ROOT / "internal" / "execution" / "wasm" / "testdata" / "python-reactor.wasm"
 LOG_DIR = ROOT / ".benchmark-e2e-logs"
 
 
@@ -87,6 +97,18 @@ RUNTIMES: dict[str, RuntimeSpec] = {
         language="python",
         interface="file",
         description="Python LF fixture through file worker; root/entrypoint from request params",
+    ),
+    "python-pyodide": RuntimeSpec(
+        id="python-pyodide",
+        language="python",
+        interface="pyodide",
+        description="Python LF fixture through the Pyodide/Node compatibility runner",
+    ),
+    "python-reactor": RuntimeSpec(
+        id="python-reactor",
+        language="python-wasi",
+        interface="wasm",
+        description="Python LF fixture through the reactor-mode CPython/WASI runtime",
     ),
     "generic-wasm-go": RuntimeSpec(
         id="generic-wasm-go",
@@ -207,7 +229,7 @@ def all_cases() -> list[BenchmarkCase]:
     cases: list[BenchmarkCase] = []
     for runtime in RUNTIMES.values():
         snapshots = ["none"]
-        if runtime.id == "generic-wasm-go":
+        if runtime.id in {"generic-wasm-go", "python-reactor"}:
             snapshots = ["full", "off"]
         for payload in payloads_for_runtime(runtime.id):
             for snapshot in snapshots:
@@ -215,7 +237,15 @@ def all_cases() -> list[BenchmarkCase]:
                 if snapshot == "off" and not (payload.command == "eval" and payload.size == "light"):
                     continue
                 profile = "deep" if payload.size == "medium" else "ci"
-                cases.append(BenchmarkCase(runtime=runtime, payload=payload, snapshot=snapshot, profile=profile))
+                cases.append(
+                    BenchmarkCase(
+                        runtime=runtime,
+                        payload=payload,
+                        snapshot=snapshot,
+                        profile=profile,
+                        skip_reason=runtime_skip_reason(runtime.id),
+                    )
+                )
         if runtime.id == "generic-wasm-go":
             cases.append(
                 BenchmarkCase(
@@ -279,6 +309,29 @@ def python_bin() -> str:
     return os.environ.get("PYTHON_BIN") or os.environ.get("PYTHON") or shutil.which("python3") or sys.executable
 
 
+def reactor_wasm_path() -> Path:
+    return Path(os.environ.get("FUNCTION_WASM_MODULE") or os.environ.get("PYTHON_REACTOR_WASM") or DEFAULT_REACTOR_WASM)
+
+
+def runtime_skip_reason(runtime_id: str) -> str | None:
+    if runtime_id == "python-pyodide":
+        if shutil.which("node") is None:
+            return "node is not installed"
+        if not PYODIDE_RUNNER.exists():
+            return f"Pyodide runner missing: {PYODIDE_RUNNER}"
+        if not PYODIDE_NODE_MODULE.exists():
+            return "Pyodide node_modules are not installed; run npm install in examples/eval-pyodide"
+    if runtime_id == "python-reactor":
+        if platform.system().lower() != "linux":
+            return "reactor-python is Linux-only in this branch"
+        wasm_path = reactor_wasm_path()
+        if not wasm_path.exists():
+            return f"python-reactor.wasm missing: set PYTHON_REACTOR_WASM or place artifact at {DEFAULT_REACTOR_WASM}"
+        if not REACTOR_SCRIPT.exists():
+            return f"reactor benchmark script missing: {REACTOR_SCRIPT}"
+    return None
+
+
 class Server:
     def __init__(self, runtime: RuntimeSpec, snapshot: str) -> None:
         self.runtime = runtime
@@ -297,13 +350,22 @@ class Server:
         env.update({"LOG_LEVEL": "error", "FUNCTION_MAX_PROCS": "1", "FUNCTION_TIMEOUT": "15s"})
 
         if self.runtime.interface == "wasm":
-            env.update(
-                {
-                    "FUNCTION_INTERFACE": "wasm",
-                    "FUNCTION_WASM_MODULE": str(WASM),
-                    "FUNCTION_WASM_SNAPSHOT_STRATEGY": self.snapshot,
-                }
-            )
+            module_path = WASM
+            extra_env = {"FUNCTION_WASM_SNAPSHOT_STRATEGY": self.snapshot}
+            if self.runtime.id == "python-reactor":
+                module_path = reactor_wasm_path()
+                extra_env.update(
+                    {
+                        "FUNCTION_WASM_PROFILE": "python-reactor",
+                        "FUNCTION_WASM_MODULE": str(module_path),
+                        "FUNCTION_WASM_PYTHON_SCRIPT": str(REACTOR_SCRIPT),
+                        "FUNCTION_WASM_COMPILE_CACHE": str(ROOT / ".benchmark-e2e-wazero-cache"),
+                        "FUNCTION_WASM_MAX_MEMORY_PAGES": os.environ.get("FUNCTION_WASM_MAX_MEMORY_PAGES", "4096"),
+                    }
+                )
+            else:
+                extra_env["FUNCTION_WASM_MODULE"] = str(module_path)
+            env.update({"FUNCTION_INTERFACE": "wasm", **extra_env})
             cmd = [
                 str(BIN),
                 "--log-level",
@@ -311,7 +373,32 @@ class Server:
                 "--interface",
                 "wasm",
                 "--command",
-                str(WASM),
+                str(module_path),
+                "--max-workers",
+                "1",
+                "serve",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(self.port),
+            ]
+        elif self.runtime.interface == "pyodide":
+            env.update(
+                {
+                    "FUNCTION_INTERFACE": "pyodide",
+                    "FUNCTION_PYODIDE_RUNNER": str(PYODIDE_RUNNER),
+                    "FUNCTION_PYODIDE_ROOT": str(BOILERPLATE_ROOT),
+                    "FUNCTION_PYODIDE_EVAL_ENTRYPOINT": "evaluation_function.main:evaluation_function",
+                    "FUNCTION_PYODIDE_PREVIEW_ENTRYPOINT": "evaluation_function.main:preview_function",
+                    "FUNCTION_PYODIDE_ADAPTER": str(ADAPTER_DIR / "lf_compat_adapter.py"),
+                }
+            )
+            cmd = [
+                str(BIN),
+                "--log-level",
+                "error",
+                "--interface",
+                "pyodide",
                 "--max-workers",
                 "1",
                 "serve",
@@ -413,7 +500,7 @@ def validate_response(case: BenchmarkCase, response: dict[str, Any]) -> dict[str
     if case.payload.command == "eval":
         if case.payload.expected_correct is not None and result.get("is_correct") is not case.payload.expected_correct:
             raise AssertionError(f"{case.name} expected is_correct={case.payload.expected_correct}: {result}")
-        if case.runtime.interface == "wasm":
+        if case.runtime.id == "generic-wasm-go":
             count = result.get("guest_invocation_count")
             isolation_ok = result.get("snapshot_isolation_ok")
             meta["guest_invocation_count"] = count

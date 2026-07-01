@@ -43,6 +43,10 @@ type Config struct {
 	// each request. "full" is the production default; "off" is a benchmark-only
 	// comparison mode that intentionally allows guest state to leak.
 	SnapshotStrategy string
+
+	// PythonScriptPath points at the Python source loaded by the python-reactor
+	// profile. It is intentionally only used by that compatibility lane.
+	PythonScriptPath string
 }
 
 const (
@@ -84,6 +88,9 @@ func (c *Config) applyEnv() error {
 	}
 	if v := os.Getenv("FUNCTION_WASM_COMPILE_CACHE"); v != "" {
 		c.CompileCacheDir = v
+	}
+	if v := os.Getenv("FUNCTION_WASM_PYTHON_SCRIPT"); v != "" {
+		c.PythonScriptPath = v
 	}
 	if v := os.Getenv("FUNCTION_WASM_SNAPSHOT_STRATEGY"); v != "" {
 		switch v {

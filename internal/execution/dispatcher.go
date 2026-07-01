@@ -37,6 +37,38 @@ type Params struct {
 }
 
 func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
+	wasmBaseConfig := func() wasm.Config {
+		return wasm.Config{
+			ModulePath:       params.Config.Supervisor.StartParams.Cmd,
+			MaxInstances:     params.Config.MaxWorkers,
+			Timeout:          params.Config.Supervisor.SendParams.Timeout,
+			SnapshotStrategy: os.Getenv("FUNCTION_WASM_SNAPSHOT_STRATEGY"),
+		}
+	}
+
+	newGenericWasmDispatcher := func() (dispatcher.Dispatcher, error) {
+		cfg := wasmBaseConfig()
+		d := wasm.NewDispatcher(cfg, params.Log)
+		if err := d.Start(params.Context); err != nil {
+			return nil, err
+		}
+		return d, nil
+	}
+
+	newReactorPythonDispatcher := func() (dispatcher.Dispatcher, error) {
+		cfg := wasmBaseConfig()
+		pythonScriptPath, err := reactorPythonScriptPath()
+		if err != nil {
+			return nil, err
+		}
+		cfg.PythonScriptPath = pythonScriptPath
+		d := wasm.NewReactorPythonDispatcher(cfg, params.Log)
+		if err := d.Start(params.Context); err != nil {
+			return nil, err
+		}
+		return d, nil
+	}
+
 	switch params.Config.Supervisor.IO.Interface {
 	case supervisor.RpcIO:
 		if err := requireProcessWorkerCommand(params.Config.Supervisor); err != nil {
@@ -57,23 +89,47 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 		if wasmProfile == "" {
 			wasmProfile = "generic"
 		}
-		if wasmProfile != "generic" {
-			validProfiles := []string{"generic"}
+		switch wasmProfile {
+		case "generic":
+			return newGenericWasmDispatcher()
+		case "python-reactor", "reactor-python":
+			return newReactorPythonDispatcher()
+		default:
+			validProfiles := []string{"generic", "python-reactor", "reactor-python"}
 			sort.Strings(validProfiles)
 			return nil, fmt.Errorf("unsupported FUNCTION_WASM_PROFILE %q; supported values: %s", wasmProfile, strings.Join(validProfiles, ", "))
 		}
 
-		cfg := wasm.Config{
-			ModulePath:       params.Config.Supervisor.StartParams.Cmd,
-			MaxInstances:     params.Config.MaxWorkers,
-			Timeout:          params.Config.Supervisor.SendParams.Timeout,
-			SnapshotStrategy: os.Getenv("FUNCTION_WASM_SNAPSHOT_STRATEGY"),
+	case supervisor.ReactorPythonIO:
+		return newReactorPythonDispatcher()
+
+	case supervisor.PyodideIO:
+		pyodideSupervisorCfg := params.Config.Supervisor
+		pyodideSupervisorCfg.IO.Interface = supervisor.RpcIO
+		pyodideSupervisorCfg.IO.Rpc.Transport = supervisor.StdioTransport
+		pyodideSupervisorCfg.StartParams.Cmd = "node"
+		runnerPath := os.Getenv("FUNCTION_PYODIDE_RUNNER")
+		if runnerPath == "" {
+			runnerPath = "runner.js"
 		}
-		d := wasm.NewDispatcher(cfg, params.Log)
-		if err := d.Start(params.Context); err != nil {
-			return nil, err
+		pyodideScriptPath := os.Getenv("FUNCTION_PYODIDE_SCRIPT")
+		pyodideRoot := os.Getenv("FUNCTION_PYODIDE_ROOT")
+		pyodideEvalEntrypoint := os.Getenv("FUNCTION_PYODIDE_EVAL_ENTRYPOINT")
+		if pyodideRoot != "" && pyodideEvalEntrypoint != "" {
+			pyodideSupervisorCfg.StartParams.Args = []string{runnerPath}
+		} else {
+			if pyodideScriptPath == "" {
+				return nil, fmt.Errorf("pyodide: FUNCTION_PYODIDE_SCRIPT must be set, or set FUNCTION_PYODIDE_ROOT + FUNCTION_PYODIDE_EVAL_ENTRYPOINT")
+			}
+			pyodideSupervisorCfg.StartParams.Args = []string{runnerPath, pyodideScriptPath}
 		}
-		return d, nil
+		return dispatcher.NewDedicatedDispatcher(
+			dispatcher.DedicatedDispatcherParams{
+				Config:  dispatcher.DedicatedDispatcherConfig{Supervisor: pyodideSupervisorCfg},
+				Context: params.Context,
+				Log:     params.Log,
+			},
+		)
 
 	default:
 		if params.Config.Supervisor.IO.Interface == supervisor.FileIO {
@@ -92,6 +148,17 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 			},
 		)
 	}
+}
+
+func reactorPythonScriptPath() (string, error) {
+	if os.Getenv("FUNCTION_LF_ROOT") != "" || os.Getenv("FUNCTION_LF_EVAL_ENTRYPOINT") != "" || os.Getenv("FUNCTION_LF_CONFIG") != "" {
+		return "", fmt.Errorf("reactor-python package bundling is intentionally not ported in this branch; set FUNCTION_WASM_PYTHON_SCRIPT to a pre-bundled script")
+	}
+	script := strings.TrimSpace(os.Getenv("FUNCTION_WASM_PYTHON_SCRIPT"))
+	if script == "" {
+		return "", fmt.Errorf("reactor-python requires FUNCTION_WASM_PYTHON_SCRIPT")
+	}
+	return script, nil
 }
 
 func requireProcessWorkerCommand(cfg supervisor.Config) error {

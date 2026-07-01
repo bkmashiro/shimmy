@@ -19,6 +19,14 @@ const (
 
 	// WasmIO describes in-process execution of a pre-built WASI module.
 	WasmIO IOInterface = "wasm"
+
+	// PyodideIO describes execution of Python eval functions via Pyodide
+	// running inside Node.js. The runner speaks JSON-RPC over stdio.
+	PyodideIO IOInterface = "pyodide"
+
+	// ReactorPythonIO is a compatibility alias for FUNCTION_INTERFACE=wasm with
+	// FUNCTION_WASM_PROFILE=python-reactor.
+	ReactorPythonIO IOInterface = "reactor-python"
 )
 
 // IOTransport describes the transport mechanism used to communicate with

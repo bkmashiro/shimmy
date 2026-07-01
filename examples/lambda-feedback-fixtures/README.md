@@ -10,3 +10,23 @@ repositories while staying deterministic and dependency-light.
 
 They are compatibility fixtures, not production evaluators. The local adapter
 uses the test-only `lf_toolkit` shim under `examples/lambda-feedback-adapter/`.
+
+## Local adapter and Shimmy file-worker smoke
+
+Exercise the backend-independent adapter directly:
+
+```bash
+scripts/demo-lambda-feedback-fixtures.sh all
+```
+
+Exercise the same fixtures through Shimmy's existing `FUNCTION_INTERFACE=file`
+path:
+
+```bash
+scripts/demo-lambda-feedback-file-worker.sh all
+```
+
+The file worker is configured with `LF_EVAL_ROOT`, `LF_EVAL_ENTRYPOINT`, and
+optionally command-specific `LF_EVAL_ENTRYPOINT` / `LF_PREVIEW_ENTRYPOINT` envs.
+Per-request fixture tests may also pass `root` and `entrypoint` inside the
+request `params` object; those keys are removed before calling the evaluator.

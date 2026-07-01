@@ -37,8 +37,9 @@ def load_entrypoint(root: str | Path, entrypoint: str) -> Callable[..., Any]:
         raise EntrypointError(f"entrypoint must be 'module:function', got {entrypoint!r}")
 
     root_path = str(Path(root).resolve())
-    if root_path not in sys.path:
-        sys.path.insert(0, root_path)
+    if root_path in sys.path:
+        sys.path.remove(root_path)
+    sys.path.insert(0, root_path)
 
     _evict_package_modules(module_name, root_path)
     module = importlib.import_module(module_name)

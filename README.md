@@ -28,6 +28,9 @@ As shown in the diagram, the shim allows the evaluation function to be deployed 
 
 ## Usage
 
+If you are writing an evaluator, start with the [Evaluator developer guide](./docs/evaluator-developer-guide.md)
+and the [minimal Python evaluator example](./examples/evaluator-python-minimal/).
+
 `shimmy --help` displays the available command-line options:
 
 ```shell

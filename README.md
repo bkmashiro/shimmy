@@ -338,12 +338,17 @@ Minimum toolchains for the example commands below:
 - `scripts/demo-wasm.sh`: Go with `GOOS=wasip1 GOARCH=wasm` support, `curl`,
   and `python3`.
 - `scripts/demo-cpp-wasm.sh`: the same tools plus `zig` and `file`.
+- `scripts/benchmark-wasm-e2e.py`: Go with `GOOS=wasip1 GOARCH=wasm` support
+  and `python3`; it builds the stateful demo evaluator, starts a real Shimmy
+  HTTP server, and measures short eval, incorrect eval, large string payload,
+  host-side cases, and preview payload classes.
 - Rust example tests: `rustc`/`cargo` plus
   `rustup target add wasm32-unknown-unknown`.
 
 ```shell
 scripts/demo-wasm.sh
 scripts/demo-cpp-wasm.sh
+scripts/benchmark-wasm-e2e.py --iterations 25 --warmup 3
 go test ./internal/execution/wasm -run 'Test(GoStateful|RustCompare|CppCompare|GoPackage|RustPackage|CppPackage)Example_CompilesAndRunsThroughDispatcher' -v
 ```
 

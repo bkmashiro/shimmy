@@ -10,7 +10,7 @@ GOFLAGS = -ldflags "$(GOLDFLAGS)"
 BINARY_NAME ?= shimmy
 CONTAINER_ENGINE ?= docker
 
-.PHONY: all build test test-unit test-sandbox lcov install generate-mocks update-schema
+.PHONY: all build test test-unit test-sandbox benchmark-wasm-e2e lcov install generate-mocks update-schema
 
 all: build
 
@@ -33,6 +33,9 @@ test-sandbox:
 	  -w /workspace \
 	  shimmy-test-sandbox \
 	  go test -v -run 'TestSandboxedWorker' ./internal/execution/worker/...
+
+benchmark-wasm-e2e:
+	scripts/benchmark-wasm-e2e.py $(BENCH_ARGS)
 	
 lcov:
 	gcov2lcov -infile=coverage.out -outfile=lcov.info

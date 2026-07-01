@@ -1,15 +1,15 @@
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Dict, Optional
 
 
 @dataclass
 class Preview:
-    markdown: str | None = None
-    html: str | None = None
-    data: dict[str, Any] | None = None
+    markdown: Optional[str] = None
+    html: Optional[str] = None
+    data: Optional[Dict[str, Any]] = None
 
 
 @dataclass
 class Result:
     preview: Preview
-    metadata: dict[str, Any] | None = None
+    metadata: Optional[Dict[str, Any]] = None

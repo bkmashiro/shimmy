@@ -1,9 +1,9 @@
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Dict, Optional
 
 
 @dataclass
 class Result:
     is_correct: bool
     feedback: str = ""
-    metadata: dict[str, Any] | None = None
+    metadata: Optional[Dict[str, Any]] = None

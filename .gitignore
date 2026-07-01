@@ -16,6 +16,10 @@ bin/
 *.out
 lcov.info
 
+# Python bytecode from local adapter/demo tests
+__pycache__/
+*.py[cod]
+
 # Dependency directories (remove the comment below to include it)
 # vendor/
 

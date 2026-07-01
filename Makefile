@@ -10,7 +10,7 @@ GOFLAGS = -ldflags "$(GOLDFLAGS)"
 BINARY_NAME ?= shimmy
 CONTAINER_ENGINE ?= docker
 
-.PHONY: all build test test-unit test-sandbox benchmark-wasm-e2e lcov install generate-mocks update-schema
+.PHONY: all build test test-unit test-sandbox benchmark-e2e benchmark-e2e-docker benchmark-wasm-e2e lcov install generate-mocks update-schema
 
 all: build
 
@@ -33,6 +33,17 @@ test-sandbox:
 	  -w /workspace \
 	  shimmy-test-sandbox \
 	  go test -v -run 'TestSandboxedWorker' ./internal/execution/worker/...
+
+benchmark-e2e:
+	scripts/benchmark-e2e.py $(BENCH_ARGS)
+
+benchmark-e2e-docker:
+	$(CONTAINER_ENGINE) build --target benchmark-e2e -t shimmy-benchmark-e2e .
+	$(CONTAINER_ENGINE) run --rm \
+	  -v $(shell pwd):/workspace \
+	  -w /workspace \
+	  shimmy-benchmark-e2e \
+	  make benchmark-e2e BENCH_ARGS="$(BENCH_ARGS)"
 
 benchmark-wasm-e2e:
 	scripts/benchmark-wasm-e2e.py $(BENCH_ARGS)

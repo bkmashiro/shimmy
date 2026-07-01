@@ -18,7 +18,7 @@ var respBuf [256 * 1024]byte
 
 // This is deliberately mutable guest state. A non-isolated warm worker would
 // leak it across requests; Shimmy-WASM restores the memory snapshot instead.
-var invocationCount uint32
+var stateBuf [4]byte
 var lastResponse [64]byte
 
 //go:wasmexport alloc
@@ -45,7 +45,8 @@ func evaluate(reqPtr int32, reqLen int32) int32 {
 		return int32(uintptr(unsafe.Pointer(&respBuf[0])))
 	}
 
-	invocationCount++
+	invocationCount := binary.LittleEndian.Uint32(stateBuf[:]) + 1
+	binary.LittleEndian.PutUint32(stateBuf[:], invocationCount)
 	copy(lastResponse[:], req.Params.Response)
 
 	switch req.Method {

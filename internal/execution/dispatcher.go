@@ -64,9 +64,10 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 		}
 
 		cfg := wasm.Config{
-			ModulePath:   params.Config.Supervisor.StartParams.Cmd,
-			MaxInstances: params.Config.MaxWorkers,
-			Timeout:      params.Config.Supervisor.SendParams.Timeout,
+			ModulePath:       params.Config.Supervisor.StartParams.Cmd,
+			MaxInstances:     params.Config.MaxWorkers,
+			Timeout:          params.Config.Supervisor.SendParams.Timeout,
+			SnapshotStrategy: os.Getenv("FUNCTION_WASM_SNAPSHOT_STRATEGY"),
 		}
 		d := wasm.NewDispatcher(cfg, params.Log)
 		if err := d.Start(params.Context); err != nil {

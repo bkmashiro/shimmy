@@ -338,17 +338,22 @@ Minimum toolchains for the example commands below:
 - `scripts/demo-wasm.sh`: Go with `GOOS=wasip1 GOARCH=wasm` support, `curl`,
   and `python3`.
 - `scripts/demo-cpp-wasm.sh`: the same tools plus `zig` and `file`.
-- `scripts/benchmark-wasm-e2e.py`: Go with `GOOS=wasip1 GOARCH=wasm` support
-  and `python3`; it builds the stateful demo evaluator, starts a real Shimmy
-  HTTP server, and measures short eval, incorrect eval, large string payload,
-  host-side cases, and preview payload classes.
+- `scripts/benchmark-e2e.py`: Go with `GOOS=wasip1 GOARCH=wasm` support and
+  `python3`; it builds the stateful WASM demo, starts real Shimmy HTTP servers,
+  and compares Python file-worker env/request package paths against the generic
+  WASM path across light/heavy eval payloads plus preview smoke. The `deep`
+  profile adds medium payload rows and records `uffd` as skipped until a real
+  dirty-page strategy is wired.
+- `scripts/benchmark-wasm-e2e.py`: legacy WASM-only benchmark kept as a narrow
+  smoke for the generic WASM path.
 - Rust example tests: `rustc`/`cargo` plus
   `rustup target add wasm32-unknown-unknown`.
 
 ```shell
 scripts/demo-wasm.sh
 scripts/demo-cpp-wasm.sh
-scripts/benchmark-wasm-e2e.py --iterations 25 --warmup 3
+make benchmark-e2e BENCH_ARGS='--profile ci --iterations 5 --warmup 2 --json-output benchmark-e2e.json'
+make benchmark-e2e-docker BENCH_ARGS='--profile deep --iterations 10 --warmup 3 --json-output benchmark-e2e.json'
 go test ./internal/execution/wasm -run 'Test(GoStateful|RustCompare|CppCompare|GoPackage|RustPackage|CppPackage)Example_CompilesAndRunsThroughDispatcher' -v
 ```
 

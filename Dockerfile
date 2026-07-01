@@ -63,6 +63,17 @@ RUN git clone --depth=1 https://github.com/google/nsjail.git /nsjail-src && \
     make -C /nsjail-src -j$(nproc) && \
     cp /nsjail-src/nsjail /usr/sbin/nsjail
 
+# Test-only stage for local/manual cross-runtime benchmarks. This intentionally
+# keeps Go and Python in the image because benchmark-e2e builds the host binary,
+# the WASI demo module, and exercises Python file-worker fixtures.
+FROM golang:1.25 AS benchmark-e2e
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    make \
+    python3 \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /workspace
+
 # Runtime image. Cannot use scratch because nsjail requires shared libraries
 # (libcap, libprotobuf, libnl). Image size grows from ~8 MB to ~90-120 MB.
 # When --sandbox is not used, shimmy behaves identically to the scratch image.

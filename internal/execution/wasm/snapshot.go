@@ -33,6 +33,28 @@ type SnapshotStrategy interface {
 	Close() error
 }
 
+func NewSnapshotStrategy(name string) (SnapshotStrategy, error) {
+	switch name {
+	case "", SnapshotStrategyFull:
+		return NewFullMemcpyStrategy(), nil
+	case SnapshotStrategyOff:
+		return NoopSnapshotStrategy{}, nil
+	default:
+		return nil, fmt.Errorf("unknown snapshot strategy %q", name)
+	}
+}
+
+// NoopSnapshotStrategy intentionally does not restore memory. It is useful for
+// benchmarks that need a no-isolation upper-bound comparison, but it is not a
+// safe production strategy for warm evaluators with mutable guest state.
+type NoopSnapshotStrategy struct{}
+
+func (NoopSnapshotStrategy) Take(api.Memory) error { return nil }
+
+func (NoopSnapshotStrategy) Restore(api.Memory) error { return nil }
+
+func (NoopSnapshotStrategy) Close() error { return nil }
+
 // ---------------------------------------------------------------------------
 // FullMemcpyStrategy
 // ---------------------------------------------------------------------------

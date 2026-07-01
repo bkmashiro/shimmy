@@ -10,6 +10,15 @@ on:
       - 'v*.*.*'
   pull_request:
   workflow_dispatch:
+    inputs:
+      run_e2e_benchmark:
+        description: "Run manual cross-runtime e2e benchmark"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
 
 
 jobs:
@@ -114,8 +123,9 @@ jobs:
       - name: Run sandbox integration tests
         run: sudo -E go test -v -run 'TestSandboxedWorker' ./internal/execution/worker/...
 
-  benchmark-wasm-e2e:
-    name: WASM E2E Benchmark
+  benchmark-e2e:
+    name: Manual Cross-runtime E2E Benchmark
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_e2e_benchmark == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -131,19 +141,19 @@ jobs:
       - name: Install Dependencies
         run: go mod download
 
-      - name: Run WASM end-to-end benchmark
-        run: make benchmark-wasm-e2e BENCH_ARGS='--iterations 5 --warmup 2 --json-output benchmark-wasm-e2e.json'
+      - name: Run cross-runtime end-to-end benchmark
+        run: make benchmark-e2e BENCH_ARGS='--profile ci --iterations 5 --warmup 2 --json-output benchmark-e2e.json'
 
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4
         with:
-          name: wasm-e2e-benchmark
-          path: benchmark-wasm-e2e.json
+          name: e2e-benchmark
+          path: benchmark-e2e.json
 
   build_docker:
     name: Build Docker Image
     runs-on: ubuntu-latest
-    needs: [test, test-sandbox, benchmark-wasm-e2e, build]
+    needs: [test, test-sandbox, build]
     concurrency:
       group: ${{ github.ref }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' || github.ref_name != github.event.repository.default_branch }}

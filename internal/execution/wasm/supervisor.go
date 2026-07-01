@@ -32,9 +32,13 @@ type wasmSupervisor struct {
 	mod     api.Module
 	adapter *wasmAdapter
 
+	// strategyName selects the snapshot/restore implementation for this instance.
+	// "off" intentionally disables isolation and is benchmark-only.
+	strategyName string
+
 	// strategy implements snapshot/restore. The generic backend intentionally
-	// uses the portable full-memory copy strategy; dirty-page optimisation is a
-	// separate future concern.
+	// uses the portable full-memory copy strategy by default; dirty-page
+	// optimisation is a separate future concern.
 	strategy SnapshotStrategy
 
 	// healthy is true when the supervisor is in a known-good state and can be
@@ -57,14 +61,19 @@ func newWasmSupervisor(
 	compiled wazero.CompiledModule,
 	modCfg wazero.ModuleConfig,
 	timeout time.Duration,
+	snapshotStrategy string,
 	log *zap.Logger,
 ) *wasmSupervisor {
+	if snapshotStrategy == "" {
+		snapshotStrategy = SnapshotStrategyFull
+	}
 	return &wasmSupervisor{
-		runtime:  rt,
-		compiled: compiled,
-		modCfg:   modCfg,
-		timeout:  timeout,
-		log:      log.Named("supervisor_wasm"),
+		runtime:      rt,
+		compiled:     compiled,
+		modCfg:       modCfg,
+		timeout:      timeout,
+		strategyName: snapshotStrategy,
+		log:          log.Named("supervisor_wasm"),
 	}
 }
 
@@ -93,7 +102,13 @@ func (s *wasmSupervisor) Start(ctx context.Context) error {
 	s.healthy = true
 
 	// Snapshot linear memory so we can restore it before each request.
-	s.strategy = NewFullMemcpyStrategy()
+	strategy, err := NewSnapshotStrategy(s.strategyName)
+	if err != nil {
+		_ = mod.Close(ctx)
+		s.mod = nil
+		return fmt.Errorf("wasm: configure snapshot strategy: %w", err)
+	}
+	s.strategy = strategy
 	if err := s.takeSnapshot(); err != nil {
 		_ = s.strategy.Close()
 		_ = mod.Close(ctx)
@@ -107,7 +122,7 @@ func (s *wasmSupervisor) Start(ctx context.Context) error {
 	}
 	s.log.Debug("wasm module ready",
 		zap.Uint32("snapshot_bytes", memSize),
-		zap.String("strategy", fmt.Sprintf("%T", s.strategy)),
+		zap.String("strategy", s.strategyName),
 	)
 
 	return nil

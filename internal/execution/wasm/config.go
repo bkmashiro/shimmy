@@ -38,7 +38,17 @@ type Config struct {
 	// CompileCacheDir enables wazero's on-disk compilation cache when set via
 	// FUNCTION_WASM_COMPILE_CACHE.
 	CompileCacheDir string
+
+	// SnapshotStrategy selects how warm WASM instances reset linear memory after
+	// each request. "full" is the production default; "off" is a benchmark-only
+	// comparison mode that intentionally allows guest state to leak.
+	SnapshotStrategy string
 }
+
+const (
+	SnapshotStrategyFull = "full"
+	SnapshotStrategyOff  = "off"
+)
 
 func (c *Config) applyDefaults() {
 	if c.Timeout == 0 {
@@ -46,6 +56,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.MaxMemoryPages == 0 {
 		c.MaxMemoryPages = 256 // 16 MiB
+	}
+	if c.SnapshotStrategy == "" {
+		c.SnapshotStrategy = SnapshotStrategyFull
 	}
 }
 
@@ -71,6 +84,14 @@ func (c *Config) applyEnv() error {
 	}
 	if v := os.Getenv("FUNCTION_WASM_COMPILE_CACHE"); v != "" {
 		c.CompileCacheDir = v
+	}
+	if v := os.Getenv("FUNCTION_WASM_SNAPSHOT_STRATEGY"); v != "" {
+		switch v {
+		case SnapshotStrategyFull, SnapshotStrategyOff:
+			c.SnapshotStrategy = v
+		default:
+			return fmt.Errorf("FUNCTION_WASM_SNAPSHOT_STRATEGY must be one of %q or %q", SnapshotStrategyFull, SnapshotStrategyOff)
+		}
 	}
 	return nil
 }

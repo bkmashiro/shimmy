@@ -109,6 +109,7 @@ func (d *Dispatcher) Start(ctx context.Context) error {
 		zap.Int("max_instances", maxInstances),
 		zap.Uint32("max_memory_pages", d.cfg.MaxMemoryPages),
 		zap.Duration("timeout", d.cfg.Timeout),
+		zap.String("snapshot_strategy", d.cfg.SnapshotStrategy),
 	)
 
 	// Read the .wasm bytes from disk.
@@ -188,7 +189,7 @@ func (d *Dispatcher) Start(ctx context.Context) error {
 	d.pool = make(chan *wasmSupervisor, maxInstances)
 
 	for i := 0; i < maxInstances; i++ {
-		sv := newWasmSupervisor(rt, compiled, modCfg, d.cfg.Timeout, d.log)
+		sv := newWasmSupervisor(rt, compiled, modCfg, d.cfg.Timeout, d.cfg.SnapshotStrategy, d.log)
 
 		if err := sv.Start(ctx); err != nil {
 			// Clean up already-started supervisors.
@@ -312,7 +313,7 @@ func (d *Dispatcher) spawnOne() {
 	defer cancel()
 
 	d.log.Info("wasm: initialising replacement supervisor")
-	sv := newWasmSupervisor(d.rt, d.compiled, d.modCfg, d.cfg.Timeout, d.log)
+	sv := newWasmSupervisor(d.rt, d.compiled, d.modCfg, d.cfg.Timeout, d.cfg.SnapshotStrategy, d.log)
 	if err := sv.Start(ctx); err != nil {
 		d.log.Error("wasm: replacement supervisor init failed", zap.Error(err))
 		return

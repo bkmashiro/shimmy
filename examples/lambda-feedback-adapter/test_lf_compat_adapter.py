@@ -49,6 +49,34 @@ class LFCompatAdapterTests(unittest.TestCase):
 
         self.assertEqual(result, {"preview": {"markdown": "Preview: foo / set"}})
 
+    def test_preview_supports_optional_two_argument_signature(self):
+        def preview_function(response, params=None):
+            return {"preview": {"response": response, "mode": (params or {}).get("mode")}}
+
+        result = call_function(
+            preview_function,
+            method="preview",
+            response="draft",
+            answer="unused",
+            params={"mode": "optional-two-arg"},
+        )
+
+        self.assertEqual(result, {"preview": {"response": "draft", "mode": "optional-two-arg"}})
+
+    def test_preview_keeps_three_argument_signature_with_default_answer(self):
+        def preview_function(response, answer=None, params=None):
+            return {"preview": {"response": response, "answer": answer, "mode": (params or {}).get("mode")}}
+
+        result = call_function(
+            preview_function,
+            method="preview",
+            response="draft",
+            answer="expected",
+            params={"mode": "three-arg"},
+        )
+
+        self.assertEqual(result, {"preview": {"response": "draft", "answer": "expected", "mode": "three-arg"}})
+
     def test_eval_supports_relative_import_fixture(self):
         fn = load_entrypoint(
             FIXTURE_DIR / "relative-preview",

@@ -68,7 +68,7 @@ def call_function(
     """
 
     params = params or {}
-    if method == "preview" and _accepts_two_positional_args(fn):
+    if method == "preview" and _preview_prefers_two_args(fn):
         raw = fn(response, params)
     else:
         raw = fn(response, answer, params)
@@ -111,7 +111,7 @@ def normalize_result(value: Any) -> Any:
     return value
 
 
-def _accepts_two_positional_args(fn: Callable[..., Any]) -> bool:
+def _preview_prefers_two_args(fn: Callable[..., Any]) -> bool:
     try:
         sig = inspect.signature(fn)
     except (TypeError, ValueError):
@@ -120,10 +120,15 @@ def _accepts_two_positional_args(fn: Callable[..., Any]) -> bool:
         p
         for p in sig.parameters.values()
         if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-        and p.default is inspect.Parameter.empty
     ]
     has_varargs = any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in sig.parameters.values())
-    return not has_varargs and len(positional) == 2
+    if has_varargs or len(positional) < 2:
+        return False
+    if len(positional) == 2:
+        return True
+    # Some preview helpers are written as preview(response, params=None). Avoid
+    # mistaking preview(response, answer=None, params=None) for that shape.
+    return positional[1].name in {"params", "parameters", "preview_params"}
 
 
 def _evict_package_modules(module_name: str, root_path: str) -> None:

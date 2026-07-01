@@ -26,10 +26,8 @@ path:
 scripts/demo-lambda-feedback-file-worker.sh all
 ```
 
-The file worker is configured with `FUNCTION_LF_ROOT`,
-`FUNCTION_LF_EVAL_ENTRYPOINT`, and optionally command-specific
-`FUNCTION_LF_PREVIEW_ENTRYPOINT` envs. Legacy short names (`LF_EVAL_ROOT`,
-`LF_EVAL_ENTRYPOINT`, `LF_PREVIEW_ENTRYPOINT`) are still accepted for local
-experiments. Per-request fixture tests may also pass `root` and `entrypoint`
-inside the request `params` object; those keys are removed before calling the
-evaluator.
+The file worker uses only three package-mode envs: `FUNCTION_LF_ROOT`,
+`FUNCTION_LF_ENTRYPOINT`, and optional `FUNCTION_LF_PREVIEW_ENTRYPOINT` when
+preview lives at a different function. Per-request fixture tests may also pass
+`root` and `entrypoint` inside the request `params` object; those keys are
+removed before calling the evaluator.

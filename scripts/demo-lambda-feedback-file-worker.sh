@@ -46,7 +46,7 @@ run_http() {
       --command "$PYTHON_BIN" \
       --arg "$WORKER" \
       --env "FUNCTION_LF_ROOT=$FIXTURE_ROOT" \
-      --env "FUNCTION_LF_EVAL_ENTRYPOINT=evaluation_function.main:evaluation_function" \
+      --env "FUNCTION_LF_ENTRYPOINT=evaluation_function.main:evaluation_function" \
       --env "FUNCTION_LF_PREVIEW_ENTRYPOINT=evaluation_function.main:preview_function" \
       serve \
       --host 127.0.0.1 \

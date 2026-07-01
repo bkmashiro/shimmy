@@ -74,25 +74,25 @@ class LFFileWorkerTest(unittest.TestCase):
         self.assertEqual(result["error"]["message"], "missing evaluator params: entrypoint, root")
         self.assertNotIn("result", result)
 
-    def test_handle_message_uses_environment_entrypoint_config(self):
+    def test_handle_message_ignores_legacy_short_env_names(self):
         with self.with_env(
             {
                 "LF_EVAL_ROOT": str(BOILERPLATE_ROOT),
                 "LF_EVAL_ENTRYPOINT": "evaluation_function.main:evaluation_function",
             },
-            removed=("LF_ENTRYPOINT",),
+            removed=("FUNCTION_LF_ROOT", "FUNCTION_LF_ENTRYPOINT", "FUNCTION_LF_PREVIEW_ENTRYPOINT", "FUNCTION_LF_EVAL_ENTRYPOINT"),
         ):
             result = lf_file_worker.handle_message(
                 {"command": "eval", "params": {"response": "42", "answer": "42", "params": {}}}
             )
 
-        self.assertEqual(result, {"command": "eval", "result": {"is_correct": True, "feedback": "Correct"}})
+        self.assertEqual(result["error"]["message"], "missing evaluator params: entrypoint, root")
 
-    def test_handle_message_prefers_function_lf_env_names_for_package_mode(self):
+    def test_handle_message_uses_function_lf_env_names_for_package_mode(self):
         with self.with_env(
             {
                 "FUNCTION_LF_ROOT": str(BOILERPLATE_ROOT),
-                "FUNCTION_LF_EVAL_ENTRYPOINT": "evaluation_function.main:evaluation_function",
+                "FUNCTION_LF_ENTRYPOINT": "evaluation_function.main:evaluation_function",
             },
             removed=("LF_EVAL_ROOT", "LF_EVAL_ENTRYPOINT", "LF_ENTRYPOINT"),
         ):
@@ -106,7 +106,7 @@ class LFFileWorkerTest(unittest.TestCase):
         with self.with_env(
             {
                 "FUNCTION_LF_ROOT": str(BOILERPLATE_ROOT),
-                "FUNCTION_LF_EVAL_ENTRYPOINT": "evaluation_function.main:evaluation_function",
+                "FUNCTION_LF_ENTRYPOINT": "evaluation_function.main:evaluation_function",
                 "FUNCTION_LF_PREVIEW_ENTRYPOINT": "evaluation_function.main:preview_function",
             },
             removed=("LF_EVAL_ROOT", "LF_EVAL_ENTRYPOINT", "LF_PREVIEW_ENTRYPOINT", "LF_ENTRYPOINT"),

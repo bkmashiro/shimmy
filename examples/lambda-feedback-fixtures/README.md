@@ -31,3 +31,12 @@ The file worker uses only three package-mode envs: `FUNCTION_LF_ROOT`,
 preview lives at a different function. Per-request fixture tests may also pass
 `root` and `entrypoint` inside the request `params` object; those keys are
 removed before calling the evaluator.
+
+File-worker calls now run through the adapter's best-effort evaluator hygiene
+context: per-request temporary cwd, cwd/`sys.path`/environment restore, evaluator
+stdout/stderr capture, and cleanup of modules imported from the evaluator root.
+This reduces accidental pollution in demos and CI. It is not a security sandbox;
+malicious native Python evaluators still require a real isolation boundary.
+
+See `docs/lambda-feedback-hygiene-roadmap.md` for the backend-independent
+hygiene/compatibility follow-up track.

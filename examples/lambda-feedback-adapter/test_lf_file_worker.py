@@ -120,6 +120,48 @@ class LFFileWorkerTest(unittest.TestCase):
             {"command": "preview", "result": {"preview": {"response": "draft", "expected": "answer"}}},
         )
 
+    def test_handle_message_runs_evaluator_with_hygiene_context(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "evaluator"
+            package = root / "evaluation_function"
+            package.mkdir(parents=True)
+            (package / "__init__.py").write_text("", encoding="utf-8")
+            (package / "main.py").write_text(
+                """
+import os
+from pathlib import Path
+
+
+def evaluation_function(response, answer, params):
+    print("worker stdout")
+    Path("worker-scratch.txt").write_text("scratch", encoding="utf-8")
+    os.environ["LF_WORKER_MUTATION"] = "dirty"
+    return {"cwd_is_workspace": Path.cwd().name.startswith("lf-eval-"), "response": response}
+""",
+                encoding="utf-8",
+            )
+            before_cwd = Path.cwd()
+            scratch = before_cwd / "worker-scratch.txt"
+            if scratch.exists():
+                scratch.unlink()
+            old_env = os.environ.get("LF_WORKER_MUTATION")
+
+            result = lf_file_worker.handle_message(
+                {
+                    "command": "eval",
+                    "params": {
+                        "response": "draft",
+                        "answer": "expected",
+                        "params": {"root": str(root), "entrypoint": "evaluation_function.main:evaluation_function"},
+                    },
+                }
+            )
+
+            self.assertEqual(result, {"command": "eval", "result": {"cwd_is_workspace": True, "response": "draft"}})
+            self.assertEqual(Path.cwd(), before_cwd)
+            self.assertFalse(scratch.exists())
+            self.assertEqual(os.environ.get("LF_WORKER_MUTATION"), old_env)
+
     def test_cli_reads_request_file_and_writes_response_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             req = Path(tmp) / "request.json"

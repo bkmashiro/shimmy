@@ -1,6 +1,8 @@
 import json
+import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,7 +12,7 @@ FIXTURE_DIR = ADAPTER_DIR.parent / "lambda-feedback-fixtures"
 if str(ADAPTER_DIR) not in sys.path:
     sys.path.insert(0, str(ADAPTER_DIR))
 
-from lf_compat_adapter import call_function, load_entrypoint, normalize_result
+from lf_compat_adapter import call_function, load_entrypoint, normalize_result, run_entrypoint
 
 
 class LFCompatAdapterTests(unittest.TestCase):
@@ -108,6 +110,61 @@ class LFCompatAdapterTests(unittest.TestCase):
             normalize_result(DataResult(is_correct=True, score=Scalar())),
             {"is_correct": True, "score": 7},
         )
+
+    def test_run_entrypoint_uses_temporary_workspace_and_restores_process_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "evaluator"
+            package = root / "evaluation_function"
+            package.mkdir(parents=True)
+            (package / "__init__.py").write_text("", encoding="utf-8")
+            (package / "main.py").write_text(
+                """
+import os
+from pathlib import Path
+
+
+def evaluation_function(response, answer, params):
+    print("hello from evaluator")
+    print("warn from evaluator", file=__import__("sys").stderr)
+    cwd = Path.cwd()
+    (cwd / "scratch.txt").write_text("temporary", encoding="utf-8")
+    os.environ["LF_CONTEXT_MUTATION"] = "dirty"
+    return {
+        "cwd_is_request_workspace": cwd.name.startswith("lf-eval-"),
+        "mode": params.get("mode"),
+        "response": response,
+    }
+""",
+                encoding="utf-8",
+            )
+            before_cwd = Path.cwd()
+            before_sys_path = list(sys.path)
+            old_env = os.environ.get("LF_CONTEXT_MUTATION")
+
+            call = run_entrypoint(
+                root,
+                "evaluation_function.main:evaluation_function",
+                method="eval",
+                response="draft",
+                answer="expected",
+                params={"mode": "hygiene"},
+            )
+
+            self.assertEqual(
+                call.result,
+                {
+                    "cwd_is_request_workspace": True,
+                    "mode": "hygiene",
+                    "response": "draft",
+                },
+            )
+            self.assertEqual(call.stdout.strip(), "hello from evaluator")
+            self.assertEqual(call.stderr.strip(), "warn from evaluator")
+            self.assertEqual(Path.cwd(), before_cwd)
+            self.assertEqual(sys.path, before_sys_path)
+            self.assertFalse(Path(call.workdir).exists())
+            self.assertFalse((root / "scratch.txt").exists())
+            self.assertEqual(os.environ.get("LF_CONTEXT_MUTATION"), old_env)
 
     def test_cli_runner_outputs_normalized_json(self):
         runner = ADAPTER_DIR / "run_lf_eval.py"

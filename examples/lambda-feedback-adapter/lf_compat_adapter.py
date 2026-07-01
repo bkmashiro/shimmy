@@ -9,16 +9,102 @@ or a future Python reactor wrapper.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import importlib
 import inspect
+import io
+import os
 import sys
+import tempfile
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 
 class EntrypointError(ValueError):
     """Raised when an evaluator entrypoint cannot be parsed or loaded."""
+
+
+@dataclasses.dataclass(frozen=True)
+class EvaluatorCallResult:
+    """Result from a hygienic evaluator call."""
+
+    result: dict[str, Any]
+    stdout: str
+    stderr: str
+    workdir: str
+
+
+@contextlib.contextmanager
+def evaluator_context(
+    root: str | Path,
+    *,
+    env: dict[str, str] | None = None,
+) -> Iterator[Path]:
+    """Run evaluator code from an isolated temporary cwd and restore process state.
+
+    This is best-effort lifecycle hygiene for native Python execution, not a
+    security sandbox. It restores cwd, ``sys.path``, and environment variables
+    after the call while cleaning the temporary request workspace.
+    """
+
+    previous_cwd = Path.cwd()
+    previous_sys_path = list(sys.path)
+    previous_env = dict(os.environ)
+    with tempfile.TemporaryDirectory(prefix="lf-eval-") as workdir:
+        try:
+            if env:
+                os.environ.update(env)
+            os.chdir(workdir)
+            yield Path(workdir)
+        finally:
+            os.chdir(previous_cwd)
+            sys.path[:] = previous_sys_path
+            os.environ.clear()
+            os.environ.update(previous_env)
+
+
+def run_entrypoint(
+    root: str | Path,
+    entrypoint: str,
+    *,
+    method: str,
+    response: Any,
+    answer: Any = None,
+    params: dict[str, Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> EvaluatorCallResult:
+    """Load and call an evaluator entrypoint inside ``evaluator_context``.
+
+    Captures evaluator stdout/stderr and removes modules imported from the
+    evaluator root afterwards so repeated package-shaped calls do not share
+    accidental import state.
+    """
+
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    root_path = str(Path(root).resolve())
+    module_name = entrypoint.split(":", 1)[0] if ":" in entrypoint else entrypoint
+    with evaluator_context(root, env=env) as workdir:
+        workdir_text = str(workdir)
+        try:
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                fn = load_entrypoint(root, entrypoint)
+                result = call_function(
+                    fn,
+                    method=method,
+                    response=response,
+                    answer=answer,
+                    params=params,
+                )
+        finally:
+            _evict_package_modules(module_name, root_path)
+    return EvaluatorCallResult(
+        result=result,
+        stdout=stdout.getvalue(),
+        stderr=stderr.getvalue(),
+        workdir=workdir_text,
+    )
 
 
 def load_entrypoint(root: str | Path, entrypoint: str) -> Callable[..., Any]:

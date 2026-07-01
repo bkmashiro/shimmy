@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from lf_compat_adapter import call_function, load_entrypoint
+from lf_compat_adapter import run_entrypoint
 
 
 def handle_message(message: dict[str, Any]) -> dict[str, Any]:
@@ -28,15 +28,15 @@ def handle_message(message: dict[str, Any]) -> dict[str, Any]:
 
     try:
         root, entrypoint, evaluator_params = resolve_config(command, params)
-        fn = load_entrypoint(root, entrypoint)
-        result = call_function(
-            fn,
+        call = run_entrypoint(
+            root,
+            entrypoint,
             method=command,
             response=params.get("response"),
             answer=params.get("answer"),
             params=evaluator_params,
         )
-        return {"command": command, "result": result}
+        return {"command": command, "result": call.result}
     except Exception as exc:  # Keep worker failures schema-compatible for Shimmy.
         return error_response(str(exc), exc.__class__.__name__)
 

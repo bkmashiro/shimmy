@@ -108,6 +108,33 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 	case supervisor.ReactorPythonIO:
 		return newReactorPythonDispatcher()
 
+	case supervisor.DbiIO:
+		dbiSupervisorCfg, err := buildDBISupervisorConfig(params.Config.Supervisor)
+		if err != nil {
+			return nil, err
+		}
+		if dbiSupervisorCfg.IO.Interface == supervisor.RpcIO {
+			return dispatcher.NewDedicatedDispatcher(
+				dispatcher.DedicatedDispatcherParams{
+					Config: dispatcher.DedicatedDispatcherConfig{
+						Supervisor: dbiSupervisorCfg,
+					},
+					Context: params.Context,
+					Log:     params.Log,
+				},
+			)
+		}
+		return dispatcher.NewPooledDispatcher(
+			dispatcher.PooledDispatcherParams{
+				Config: dispatcher.PooledDispatcherConfig{
+					Supervisor: dbiSupervisorCfg,
+					MaxWorkers: params.Config.MaxWorkers,
+				},
+				Context: params.Context,
+				Log:     params.Log,
+			},
+		)
+
 	case supervisor.PyodideIO:
 		// Pyodide uses the rpc dispatcher with stdio transport.
 		// Build a supervisor config that runs:

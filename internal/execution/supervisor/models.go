@@ -35,6 +35,12 @@ const (
 	// isolation. Provides true per-request interpreter isolation via memory
 	// snapshotting after py_init().
 	ReactorPythonIO IOInterface = "reactor-python"
+
+	// DbiIO describes native execution under a dynamic binary instrumentation
+	// launcher such as DynamoRIO. The dispatcher rewrites the configured worker
+	// command to `drrun ... -- <original command>` and then uses the normal RPC
+	// or file adapter to communicate with the worker.
+	DbiIO IOInterface = "dbi"
 )
 
 // IOTransport describes the transport mechanism used to communicate with

@@ -40,13 +40,18 @@ type Params struct {
 }
 
 func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
+	supervisorCfg, err := applyDBISecurityConfig(params.Config.Supervisor)
+	if err != nil {
+		return nil, err
+	}
+
 	// wasmBaseConfig builds the Config fields shared by all WASM-backed
 	// dispatchers (Wasm, PythonWasm, ReactorPython).
 	wasmBaseConfig := func() wasm.Config {
 		return wasm.Config{
-			ModulePath:   params.Config.Supervisor.StartParams.Cmd,
+			ModulePath:   supervisorCfg.StartParams.Cmd,
 			MaxInstances: params.Config.MaxWorkers,
-			Timeout:      params.Config.Supervisor.SendParams.Timeout,
+			Timeout:      supervisorCfg.SendParams.Timeout,
 		}
 	}
 
@@ -80,7 +85,7 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 	validWasmProfiles := []string{"generic", "python-reactor", "reactor-python"}
 	wasmProfile := strings.ToLower(strings.TrimSpace(os.Getenv("FUNCTION_WASM_PROFILE")))
 
-	switch params.Config.Supervisor.IO.Interface {
+	switch supervisorCfg.IO.Interface {
 	case supervisor.WasmIO:
 		if wasmProfile == "" {
 			wasmProfile = "generic"
@@ -108,33 +113,6 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 	case supervisor.ReactorPythonIO:
 		return newReactorPythonDispatcher()
 
-	case supervisor.DbiIO:
-		dbiSupervisorCfg, err := buildDBISupervisorConfig(params.Config.Supervisor)
-		if err != nil {
-			return nil, err
-		}
-		if dbiSupervisorCfg.IO.Interface == supervisor.RpcIO {
-			return dispatcher.NewDedicatedDispatcher(
-				dispatcher.DedicatedDispatcherParams{
-					Config: dispatcher.DedicatedDispatcherConfig{
-						Supervisor: dbiSupervisorCfg,
-					},
-					Context: params.Context,
-					Log:     params.Log,
-				},
-			)
-		}
-		return dispatcher.NewPooledDispatcher(
-			dispatcher.PooledDispatcherParams{
-				Config: dispatcher.PooledDispatcherConfig{
-					Supervisor: dbiSupervisorCfg,
-					MaxWorkers: params.Config.MaxWorkers,
-				},
-				Context: params.Context,
-				Log:     params.Log,
-			},
-		)
-
 	case supervisor.PyodideIO:
 		// Pyodide uses the rpc dispatcher with stdio transport.
 		// Build a supervisor config that runs:
@@ -153,7 +131,7 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 		pyodideEvalEntrypoint := os.Getenv("FUNCTION_PYODIDE_EVAL_ENTRYPOINT")
 		pyodidePackageMode := pyodideRoot != "" && pyodideEvalEntrypoint != ""
 
-		pyodideSupervisorCfg := params.Config.Supervisor
+		pyodideSupervisorCfg := supervisorCfg
 		pyodideSupervisorCfg.IO.Interface = supervisor.RpcIO
 		pyodideSupervisorCfg.IO.Rpc.Transport = supervisor.StdioTransport
 		pyodideSupervisorCfg.StartParams.Cmd = "node"
@@ -180,7 +158,7 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 		return dispatcher.NewDedicatedDispatcher(
 			dispatcher.DedicatedDispatcherParams{
 				Config: dispatcher.DedicatedDispatcherConfig{
-					Supervisor: params.Config.Supervisor,
+					Supervisor: supervisorCfg,
 				},
 				Context: params.Context,
 				Log:     params.Log,
@@ -191,7 +169,7 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 		return dispatcher.NewPooledDispatcher(
 			dispatcher.PooledDispatcherParams{
 				Config: dispatcher.PooledDispatcherConfig{
-					Supervisor: params.Config.Supervisor,
+					Supervisor: supervisorCfg,
 					MaxWorkers: params.Config.MaxWorkers,
 				},
 				Context: params.Context,

@@ -1,58 +1,86 @@
-# DBI native fallback notes
+# DynamoRIO / DBI native security wrapper
 
-Status: experimental compatibility path. WASM/Pyodide/reactor-python remain the fast/primary paths.
+Shimmy can optionally launch native `file` or `rpc` workers under DynamoRIO. DBI is a transparent security wrapper around a process-backed worker; it is **not** an IO interface or worker protocol.
 
-## DynamoRIO finding
+## Scope
 
-The Lambda DynamoRIO smoke in `bkmashiro/shimmy-sandbox-prototypes` showed that DBI is not blocked outright on Lambda:
+Supported:
 
-- minimal `drrun` package starts in Lambda;
-- a DynamoRIO client can initialize for a packaged native probe;
-- `dr_register_filter_syscall_event` + `dr_register_pre_syscall_event` can intercept `openat` and force `EPERM`;
-- the existing syscall filter crash was a client bug (`dr_get_time(NULL)`) rather than a Lambda sandbox limitation.
+```text
+FUNCTION_INTERFACE=file + DBI security ✅
+FUNCTION_INTERFACE=rpc  + DBI security ✅
+```
 
-The important API lesson is that pre/post syscall callbacks require a filter callback. Registering only `dr_register_pre_syscall_event` can make the client appear to load while `openat` passes through.
+Rejected:
 
-## Shimmy dispatcher path
+```text
+FUNCTION_INTERFACE=wasm            + DBI security ❌
+FUNCTION_INTERFACE=python-wasm     + DBI security ❌
+FUNCTION_INTERFACE=reactor-python  + DBI security ❌
+FUNCTION_INTERFACE=pyodide         + DBI security ❌
+```
 
-`FUNCTION_INTERFACE=dbi` is a thin wrapper around the existing worker protocols. It rewrites the configured worker command to run under DynamoRIO and then uses the normal RPC or file adapter.
+WASM and reactor evaluators execute inside the Shimmy process rather than as a separate native worker process. Pyodide has its own managed Node runner. Shimmy therefore fails closed if DBI security is enabled for any interface other than `file` or `rpc`.
 
-Environment variables:
+## Command wrapping
+
+Without DBI:
+
+```text
+<worker> <worker args...>
+```
+
+With DBI enabled:
+
+```text
+drrun [DBI options...] [-c client.so] -- <worker> <worker args...>
+```
+
+The original `FUNCTION_INTERFACE` and RPC transport remain unchanged.
+
+## Configuration
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `FUNCTION_COMMAND` | required | Native worker command, e.g. `python3`. |
-| `FUNCTION_DBI_DRRUN` | `drrun` | Path/name of DynamoRIO `drrun`. |
+| `FUNCTION_DBI_SECURITY_ENABLED` | unset / false | Enable the DBI security wrapper. Accepts Go boolean values such as `true`, `false`, `1`, and `0`. |
+| `FUNCTION_DBI_CONFIG_PATH` | unset | Optional policy/config file consumed by the DBI client through the inherited environment. Shimmy verifies that it is readable before launch. |
+| `FUNCTION_DBI_DRRUN` | `drrun` | DynamoRIO launcher path. |
 | `FUNCTION_DBI_CLIENT` | unset | Optional DynamoRIO client `.so`. |
 | `FUNCTION_DBI_OPTIONS` | unset | Extra whitespace-separated `drrun` options. |
-| `FUNCTION_DBI_TARGET_INTERFACE` | `rpc` | Underlying Shimmy worker protocol: `rpc` or `file`. |
 
-Example:
+Example transient file worker:
 
 ```bash
-FUNCTION_INTERFACE=dbi \
+FUNCTION_INTERFACE=file \
 FUNCTION_COMMAND=python3 \
 FUNCTION_ARG=examples/lambda-feedback-adapter/run_lf_eval.py \
+FUNCTION_DBI_SECURITY_ENABLED=true \
 FUNCTION_DBI_DRRUN=/opt/dynamorio/bin64/drrun \
-FUNCTION_DBI_CLIENT=/opt/shimmy-dbi/open_log.so \
+FUNCTION_DBI_CLIENT=/opt/shimmy-dbi/path_policy.so \
+FUNCTION_DBI_CONFIG_PATH=/opt/shimmy-dbi/policy.yaml \
 FUNCTION_DBI_OPTIONS='-logdir /tmp/drlogs' \
-FUNCTION_DBI_TARGET_INTERFACE=file \
 shimmy run
 ```
 
-## Local Docker smoke
+Example persistent RPC worker:
 
-On the local Apple Silicon Mac, an AArch64 DynamoRIO build can run the existing Python Lambda Feedback adapter under an open-log client:
-
-```text
-[dr-open-log] client init pid=3020
-[dr-open-log] saw open-family syscall 56
-...
-{"is_correct": true, "feedback": "Correct! 1.0 matches 1.0 within tolerance 1e-09.", "absolute_error": 0.0}
+```bash
+FUNCTION_INTERFACE=rpc \
+FUNCTION_COMMAND=/opt/evaluator/worker \
+FUNCTION_DBI_SECURITY_ENABLED=true \
+FUNCTION_DBI_CLIENT=/opt/shimmy-dbi/path_policy.so \
+shimmy run
 ```
 
-The x86_64 DynamoRIO build under Docker's amd64 emulation crashes before Python starts, even without a client, so that result is treated as a local emulation artifact rather than Lambda evidence. Lambda x86_64 still needs a direct Python-runtime smoke if we want x86 confidence.
+## Fresh-state boundary
 
-## Remaining risk
+- `file`: each request receives a newly launched worker process. This is the recommended DBI final-fallback mode when strict process-level freshness matters.
+- `rpc`: one instrumented worker process is reused. DynamoRIO does not restore native heap, globals, threads, file descriptors, or runtime state between requests.
 
-This is now plausible for packaged native probes and for native AArch64 Docker Python. It is not yet proven for large dynamic runtimes such as Lean or Mathematica. The next checks should focus on Lambda x86 Python, dynamic loader compatibility, threads/signals, startup overhead, and policy coverage.
+DBI policy and worker lifecycle are separate concerns. Enabling the wrapper does not make persistent RPC state fresh.
+
+## Security boundary
+
+DynamoRIO provides interception and instrumentation hooks; it does not provide a complete policy automatically. The configured client must explicitly enforce the required filesystem, network, process, executable-memory, environment, and descriptor rules. Missing or unreadable configured policy files fail startup, but policy completeness still requires dedicated tests.
+
+The verified 2026-07-10 Lambda probe covered a bounded exact-path `open/openat` denial returning `EPERM`. It did not prove a complete native sandbox or Lean evaluator compatibility.

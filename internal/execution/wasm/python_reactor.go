@@ -87,15 +87,17 @@ type ReactorPythonRunner struct {
 	rt       wazero.Runtime
 	mod      api.Module
 	strategy SnapshotStrategy // snapshot taken after py_init(); restored before each py_exec()
+	prepared bool
 
 	// Cached exported functions.
-	fnPyInit   api.Function
-	fnPyExec   api.Function
-	fnEvaluate api.Function // optional target ABI wrapper; falls back to py_exec when absent
-	fnAlloc    api.Function
-	fnDealloc  api.Function
-	fnRespBuf  api.Function
-	fnRespLen  api.Function
+	fnPyInit    api.Function
+	fnPyPrepare api.Function
+	fnPyExec    api.Function
+	fnEvaluate  api.Function // optional target ABI wrapper; falls back to py_exec when absent
+	fnAlloc     api.Function
+	fnDealloc   api.Function
+	fnRespBuf   api.Function
+	fnRespLen   api.Function
 }
 
 // IsHealthy reports whether the runner is initialised and not closed.
@@ -277,6 +279,9 @@ func (r *ReactorPythonRunner) Init(ctx context.Context) error {
 	// python-reactor.wasm artifacts that only expose py_exec/resp_buf/resp_len
 	// continue to run.
 	r.fnEvaluate = mod.ExportedFunction("evaluate")
+	// py_prepare is required only for the default post-import snapshot mode.
+	// Legacy artifacts remain usable with FUNCTION_WASM_PYTHON_PRELOAD=off.
+	r.fnPyPrepare = mod.ExportedFunction("py_prepare")
 
 	// Call py_init() to start CPython and define _handle_request.
 	r.log.Info("calling py_init() to initialise CPython (~7-8 s)...")
@@ -297,6 +302,27 @@ func (r *ReactorPythonRunner) Init(ctx context.Context) error {
 	if err := r.initSysPath(ctx); err != nil {
 		r.log.Warn("sys.path injection failed — built-in packages may not be importable",
 			zap.Error(err))
+	}
+
+	if r.cfg.PythonPreloadMode == "evaluator" && r.cfg.PythonScriptPath != "" {
+		if r.fnPyPrepare == nil {
+			_ = r.closeAll(ctx)
+			return fmt.Errorf("reactor python: artifact lacks py_prepare required by FUNCTION_WASM_PYTHON_PRELOAD=evaluator")
+		}
+		script, err := os.ReadFile(r.cfg.PythonScriptPath)
+		if err != nil {
+			_ = r.closeAll(ctx)
+			return fmt.Errorf("reactor python: read evaluator for preload: %w", err)
+		}
+		if err := r.prepareEvaluator(ctx, script); err != nil {
+			_ = r.closeAll(ctx)
+			return err
+		}
+		r.prepared = true
+		if err := r.reserveSnapshotHeadroom(ctx); err != nil {
+			_ = r.closeAll(ctx)
+			return err
+		}
 	}
 
 	// Create snapshot strategy based on config. selectSnapshotStrategy handles
@@ -340,6 +366,9 @@ func (r *ReactorPythonRunner) SendRequest(ctx context.Context, script, method st
 
 	if method == "" {
 		method = "eval"
+	}
+	if r.prepared {
+		script = ""
 	}
 
 	// Build request JSON.
@@ -482,6 +511,45 @@ func (r *ReactorPythonRunner) readLengthPrefixedJSONResponse(resPtr uint32) (map
 		return nil, fmt.Errorf("reactor python: parse evaluate response: %w; raw: %.200s", err, resBytes)
 	}
 	return result, nil
+}
+
+func (r *ReactorPythonRunner) reserveSnapshotHeadroom(ctx context.Context) error {
+	n := r.cfg.PythonSnapshotHeadroomBytes
+	if n == 0 {
+		return nil
+	}
+	if n > uint64(^uint32(0)) {
+		return fmt.Errorf("reactor python: snapshot headroom %d exceeds wasm32 allocation limit", n)
+	}
+	res, err := r.fnAlloc.Call(ctx, n)
+	if err != nil || len(res) == 0 || res[0] == 0 {
+		return fmt.Errorf("reactor python: reserve %d snapshot headroom bytes: %w", n, err)
+	}
+	if _, err := r.fnDealloc.Call(ctx, res[0]); err != nil {
+		return fmt.Errorf("reactor python: release snapshot headroom: %w", err)
+	}
+	r.log.Info("reserved evaluator snapshot headroom", zap.Uint64("bytes", n))
+	return nil
+}
+
+func (r *ReactorPythonRunner) prepareEvaluator(ctx context.Context, script []byte) error {
+	allocRes, err := r.fnAlloc.Call(ctx, uint64(len(script)))
+	if err != nil {
+		return fmt.Errorf("reactor python: allocate evaluator preload: %w", err)
+	}
+	ptr := uint32(allocRes[0])
+	if ptr == 0 || !r.mod.Memory().Write(ptr, script) {
+		return fmt.Errorf("reactor python: write evaluator preload")
+	}
+	res, err := r.fnPyPrepare.Call(ctx, uint64(ptr), uint64(len(script)))
+	if err != nil {
+		return fmt.Errorf("reactor python: py_prepare: %w\nstderr: %s", err, r.stderrBuf.String())
+	}
+	if len(res) == 0 || int32(res[0]) != 0 {
+		return fmt.Errorf("reactor python: py_prepare rejected evaluator\nstderr: %s", r.stderrBuf.String())
+	}
+	r.log.Info("trusted evaluator prepared before snapshot", zap.Int("script_bytes", len(script)))
+	return nil
 }
 
 // initSysPath installs a wasi-vfs–aware meta path finder, stubs numpy.random,
@@ -923,12 +991,9 @@ func (r *ReactorPythonRunner) initSysPath(ctx context.Context) error {
 		return fmt.Errorf("initSysPath phase1: %w", err)
 	}
 
-	// Phase 2: numpy pre-warm.  Failure is non-fatal — numpy is still importable
-	// per-request from the WASM binary; it just won't be cached in the snapshot.
-	if err := r.runInitScript(ctx, "phase2:numpy-prewarm", initSysPathPhase2); err != nil {
-		r.log.Warn("numpy pre-warm failed — numpy will be imported per-request",
-			zap.Error(err))
-	}
+	// Package imports are intentionally not hard-coded here. In evaluator preload
+	// mode, py_prepare executes the selected trusted evaluator before the snapshot,
+	// so only that evaluator's imports are paid and captured.
 	return nil
 }
 
@@ -1079,6 +1144,9 @@ func (d *ReactorPythonDispatcher) tryBeginSend() bool {
 func (d *ReactorPythonDispatcher) Start(ctx context.Context) error {
 	d.cfg.applyEnv()
 	d.cfg.applyDefaults()
+	if err := d.cfg.validatePythonPreloadMode(); err != nil {
+		return fmt.Errorf("reactor-python: %w", err)
+	}
 
 	if d.cfg.PythonScriptPath == "" {
 		return fmt.Errorf("reactor-python: PythonScriptPath must be set (FUNCTION_WASM_PYTHON_SCRIPT)")

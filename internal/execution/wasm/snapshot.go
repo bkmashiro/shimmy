@@ -1,10 +1,16 @@
 package wasm
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/tetratelabs/wazero/api"
 )
+
+// ErrSnapshotMemoryDrifted means the guest changed linear-memory size after
+// the post-initialisation snapshot. WASM memory cannot shrink, so restoring
+// only the captured prefix would leave request state in the grown tail.
+var ErrSnapshotMemoryDrifted = errors.New("snapshot: wasm linear memory size drifted")
 
 // SnapshotStrategy abstracts how linear-memory snapshots are taken and
 // restored. The default implementation (FullMemcpyStrategy) copies the entire
@@ -44,6 +50,7 @@ type SnapshotStrategy interface {
 // written during the request.
 type FullMemcpyStrategy struct {
 	snapshot []byte
+	size     uint32
 }
 
 // NewFullMemcpyStrategy returns a ready-to-use FullMemcpyStrategy.
@@ -55,12 +62,14 @@ func NewFullMemcpyStrategy() *FullMemcpyStrategy {
 func (f *FullMemcpyStrategy) Take(mem api.Memory) error {
 	if mem == nil {
 		f.snapshot = nil
+		f.size = 0
 		return nil
 	}
 
 	size := mem.Size()
 	if size == 0 {
 		f.snapshot = nil
+		f.size = 0
 		return nil
 	}
 
@@ -73,6 +82,7 @@ func (f *FullMemcpyStrategy) Take(mem api.Memory) error {
 	// memory buffer which could be modified by subsequent guest execution.
 	f.snapshot = make([]byte, len(buf))
 	copy(f.snapshot, buf)
+	f.size = size
 
 	return nil
 }
@@ -81,6 +91,9 @@ func (f *FullMemcpyStrategy) Take(mem api.Memory) error {
 func (f *FullMemcpyStrategy) Restore(mem api.Memory) error {
 	if f.snapshot == nil || mem == nil {
 		return nil
+	}
+	if mem.Size() != f.size {
+		return fmt.Errorf("%w: captured=%d current=%d", ErrSnapshotMemoryDrifted, f.size, mem.Size())
 	}
 
 	if !mem.Write(0, f.snapshot) {
@@ -93,5 +106,6 @@ func (f *FullMemcpyStrategy) Restore(mem api.Memory) error {
 // Close implements SnapshotStrategy. FullMemcpyStrategy holds no OS resources.
 func (f *FullMemcpyStrategy) Close() error {
 	f.snapshot = nil
+	f.size = 0
 	return nil
 }

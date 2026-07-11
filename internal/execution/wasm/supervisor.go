@@ -214,16 +214,19 @@ func (s *wasmSupervisor) restoreSnapshot() error {
 	if mem == nil {
 		return nil
 	}
-	if err := s.strategy.Restore(mem); err != nil {
-		return err
-	}
 	if cur := mem.Size(); cur > s.snapshotSize {
 		tail := cur - s.snapshotSize
 		zeros := make([]byte, tail)
 		if !mem.Write(s.snapshotSize, zeros) {
 			return fmt.Errorf("wasm: memory grew by %d bytes; zero-fill failed: %w", tail, ErrMemoryGrew)
 		}
+		// The instance is discarded after this error, so restoring the captured
+		// prefix has no value. Returning before strategy.Restore also avoids
+		// asking pointer/size-sensitive strategies to touch a drifted backing.
 		return fmt.Errorf("wasm: memory grew by %d bytes (tail zero-filled): %w", tail, ErrMemoryGrew)
+	}
+	if err := s.strategy.Restore(mem); err != nil {
+		return err
 	}
 	return nil
 }

@@ -4,6 +4,7 @@ package wasm
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -39,11 +40,12 @@ func leb128Encode(v uint32) []byte {
 // section is needed.
 //
 // Binary layout (WASM spec §5):
-//   \0asm (magic) + version (1) + memory section
+//
+//	\0asm (magic) + version (1) + memory section
 //
 // This mirrors buildMinimalMemoryModule from snapshot_bench_test.go but
 // accepts *testing.T so it can be used in unit tests.
-func buildTestMemoryModule(t *testing.T, pages int) []byte {
+func buildTestMemoryModule(t testing.TB, pages int) []byte {
 	t.Helper()
 
 	// Memory section payload: count=1, limits type=0x00 (min only), min=pages
@@ -62,7 +64,7 @@ func buildTestMemoryModule(t *testing.T, pages int) []byte {
 // newTestWazeroMemory instantiates a minimal WASM module with the given number
 // of 64 KiB pages and returns its api.Memory.  The runtime and module are
 // closed via t.Cleanup.
-func newTestWazeroMemory(t *testing.T, pages int) api.Memory {
+func newTestWazeroMemory(t testing.TB, pages int) api.Memory {
 	t.Helper()
 	ctx := context.Background()
 
@@ -122,6 +124,21 @@ func TestFullMemcpyStrategy_TakeRestoreRoundtrip(t *testing.T) {
 	restored, ok := mem.Read(0, size)
 	require.True(t, ok)
 	assert.Equal(t, pattern, []byte(restored), "Restore must return memory to snapshotted state")
+}
+
+func TestFullMemcpyStrategy_RejectsMemoryGrowth(t *testing.T) {
+	mem := newTestWazeroMemory(t, 1)
+	s := NewFullMemcpyStrategy()
+	t.Cleanup(func() { require.NoError(t, s.Close()) })
+
+	require.NoError(t, s.Take(mem))
+	previousPages, ok := mem.Grow(1)
+	require.True(t, ok)
+	require.Equal(t, uint32(1), previousPages)
+
+	err := s.Restore(mem)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrSnapshotMemoryDrifted))
 }
 
 // ---------------------------------------------------------------------------

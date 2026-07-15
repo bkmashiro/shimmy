@@ -80,7 +80,7 @@ FUNCTION_WASM_MODULE=$PWD/internal/execution/wasm/testdata/python-reactor.wasm \
 FUNCTION_WASM_PYTHON_SCRIPT=$PWD/examples/eval-numpy/eval.py \
 FUNCTION_WASM_MAX_MEMORY_PAGES=8192 \
 FUNCTION_MAX_PROCS=1 \
-FUNCTION_TIMEOUT=30s \
+FUNCTION_WORKER_SEND_TIMEOUT=30s \
 bin/shimmy-demo serve --host 127.0.0.1 --port 18080
 ```
 

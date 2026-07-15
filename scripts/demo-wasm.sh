@@ -62,7 +62,7 @@ echo "==> Starting shimmy on ${BASE_URL}"
     FUNCTION_INTERFACE=wasm \
     FUNCTION_COMMAND="${WASM}" \
     FUNCTION_MAX_PROCS=1 \
-    FUNCTION_TIMEOUT=5s \
+    FUNCTION_WORKER_SEND_TIMEOUT=5s \
     "${BIN}" serve --host "${HOST}" --port "${PORT}"
 ) >"${LOG}" 2>&1 &
 server_pid="$!"

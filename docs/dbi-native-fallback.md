@@ -83,4 +83,12 @@ DBI policy and worker lifecycle are separate concerns. Enabling the wrapper does
 
 DynamoRIO provides interception and instrumentation hooks; it does not provide a complete policy automatically. The configured client must explicitly enforce the required filesystem, network, process, executable-memory, environment, and descriptor rules. Missing or unreadable configured policy files fail startup, but policy completeness still requires dedicated tests.
 
-The verified 2026-07-10 Lambda probe covered a bounded exact-path `open/openat` denial returning `EPERM`. It did not prove a complete native sandbox or Lean evaluator compatibility.
+Target-environment evidence is broader than the first exact-path smoke but remains
+bounded. On real Lambda x86_64, the 2026-07-11 matrix passed a clean baseline,
+client initialisation, actual denials, and structured JSONL audit completeness for
+seven rules: filesystem read/write, network connect, process create/exec,
+reserved-FD write, and executable-memory transition. A pinned Lean 4.8 rubric
+evaluator also passed transient `file` baseline and DBI HTTP E2E. These results
+verify the opt-in wrapper and its tested policy surface; they do not prove a
+complete production sandbox or arbitrary native-runtime compatibility. Canonical
+raw JSON and reports are indexed in the companion `shimmy-docs` evidence ledger.

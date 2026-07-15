@@ -120,7 +120,7 @@ The interface is selected via `FUNCTION_INTERFACE` env var.
 | `FUNCTION_INTERFACE` | `rpc` | IO interface: `rpc`, `file`, or (new) `wasm` |
 | `FUNCTION_RPC_TRANSPORT` | `stdio` | For rpc mode: `stdio`, `ipc`, `http`, `ws`, `tcp` |
 | `FUNCTION_MAX_PROCS` | `1` | Max workers in pool (file mode / wasm pool) |
-| `FUNCTION_TIMEOUT` | — | Per-request timeout |
+| `FUNCTION_WORKER_SEND_TIMEOUT` | `30s` | Per-request send/evaluation timeout |
 | `AUTH_KEY` | — | Bearer token for the HTTP API |
 | `PORT` | `8080` | HTTP listen port |
 | `SENTRY_DSN` | — | Sentry error reporting |

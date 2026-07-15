@@ -47,7 +47,7 @@ FUNCTION_COMMAND=/path/to/python-reactor.wasm
 | Profile | What Shimmy receives | Runtime expectation |
 |---|---|---|
 | `generic` | A pre-built `.wasm` module. | Exposes the Shimmy `alloc` / `evaluate` ABI directly. Source language is irrelevant at runtime. |
-| `python-reactor` | A CPython-WASI reactor module plus evaluator script/package config. | Host initializes Python, loads evaluator code, snapshots post-init memory, restores after requests. Current `v1.0.13` artifact exports the same host-facing `alloc` / `evaluate` ABI and retains legacy `py_exec` exports. |
+| `python-reactor` | A CPython-WASI reactor module plus evaluator script/package config. | Host initializes Python, prepares the selected evaluator, snapshots post-import memory, and restores after requests. Current `v1.0.14` exports `py_prepare` plus the host-facing `alloc` / `evaluate` ABI and legacy `py_exec` exports. |
 | `js-javy` / future JS profile | A WASI module produced by a JS compiler/bundler. | Needs a clear ABI adapter; current JS demo still uses an RPC/subprocess-style route. |
 
 The repository now accepts `FUNCTION_INTERFACE=wasm` + `FUNCTION_WASM_PROFILE` for profile selection and keeps `FUNCTION_INTERFACE=reactor-python` as a compatibility alias.

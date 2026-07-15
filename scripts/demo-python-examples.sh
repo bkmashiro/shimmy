@@ -137,7 +137,7 @@ run_plain_reactor() {
       FUNCTION_WASM_PYTHON_SCRIPT="${ROOT}/examples/eval-python/eval.py" \
       FUNCTION_WASM_MAX_MEMORY_PAGES=4096 \
       FUNCTION_MAX_PROCS=1 \
-      FUNCTION_TIMEOUT=30s \
+      FUNCTION_WORKER_SEND_TIMEOUT=30s \
       "${BIN}" serve --host "${HOST}" --port "${p}"
   ) >"${log}" 2>&1 &
   pid="$!"
@@ -173,7 +173,7 @@ run_numpy_reactor() {
       FUNCTION_WASM_PYTHON_SCRIPT="${ROOT}/examples/eval-numpy/eval.py" \
       FUNCTION_WASM_MAX_MEMORY_PAGES=4096 \
       FUNCTION_MAX_PROCS=1 \
-      FUNCTION_TIMEOUT=30s \
+      FUNCTION_WORKER_SEND_TIMEOUT=30s \
       "${BIN}" serve --host "${HOST}" --port "${p}"
   ) >"${log}" 2>&1 &
   pid="$!"
@@ -208,7 +208,7 @@ run_scipy_pyodide() {
       FUNCTION_PYODIDE_RUNNER="${ROOT}/examples/eval-pyodide/runner.js" \
       FUNCTION_PYODIDE_SCRIPT="${ROOT}/examples/eval-scipy/eval.py" \
       FUNCTION_MAX_PROCS=1 \
-      FUNCTION_TIMEOUT=60s \
+      FUNCTION_WORKER_SEND_TIMEOUT=60s \
       "${BIN}" serve --host "${HOST}" --port "${p}"
   ) >"${log}" 2>&1 &
   pid="$!"

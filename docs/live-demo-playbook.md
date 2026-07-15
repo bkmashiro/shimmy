@@ -120,7 +120,7 @@ go build -trimpath -buildvcs=false -o bin/shimmy-demo .
 FUNCTION_INTERFACE=wasm \
 FUNCTION_COMMAND="$PWD/examples/demo-stateful/eval.wasm" \
 FUNCTION_MAX_PROCS=1 \
-FUNCTION_TIMEOUT=5s \
+FUNCTION_WORKER_SEND_TIMEOUT=5s \
 bin/shimmy-demo serve --host 127.0.0.1 --port 18080
 ```
 

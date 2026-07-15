@@ -26,7 +26,7 @@ type Config struct {
 	MaxInstances int `conf:"max_workers"`
 
 	// Timeout is the per-request deadline passed to the WASM call.
-	// Populated from FUNCTION_TIMEOUT / send.timeout.
+	// Populated from FUNCTION_WORKER_SEND_TIMEOUT / send.timeout.
 	Timeout time.Duration `conf:"timeout"`
 
 	// --- Sandbox limits ---

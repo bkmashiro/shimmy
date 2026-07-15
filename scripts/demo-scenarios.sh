@@ -46,7 +46,7 @@ run_wasm_case() {
       FUNCTION_INTERFACE=wasm \
       FUNCTION_COMMAND="${wasm}" \
       FUNCTION_MAX_PROCS=1 \
-      FUNCTION_TIMEOUT=5s \
+      FUNCTION_WORKER_SEND_TIMEOUT=5s \
       "${BIN}" serve --host "${HOST}" --port "${p}"
   ) >"${log}" 2>&1 &
   pid="$!"

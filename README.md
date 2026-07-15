@@ -62,7 +62,7 @@ GLOBAL OPTIONS:
    --command value, -c value                        the command to invoke to start the worker process. [$FUNCTION_COMMAND]
    --cwd value, -d value                            the working directory for the worker process. [$FUNCTION_WORKING_DIR]
    --env value, -e value [ --env value, -e value ]  additional environment variables for the worker process. [$FUNCTION_ENV]
-   --interface value, -i value                      the interface to use for worker process communication. Options: rpc, file. (default: "rpc") [$FUNCTION_INTERFACE]
+   --interface value, -i value                      the execution interface. Options: rpc, file, wasm, pyodide; reactor-python and python-wasm are compatibility aliases. (default: "rpc") [$FUNCTION_INTERFACE]
    --max-workers value, -n value                    the maximum number of worker processes to run concurrently. (default: number of CPU cores) [$FUNCTION_MAX_PROCS]
 
    rpc
@@ -78,6 +78,25 @@ GLOBAL OPTIONS:
    --worker-send-timeout value  the timeout for a single message send operation. (default: 30s) [$FUNCTION_WORKER_SEND_TIMEOUT]
    --worker-stop-timeout value  the duration to wait for a worker process to stop. (default: 5s) [$FUNCTION_WORKER_STOP_TIMEOUT]
 ```
+
+### Opt-in runtime paths
+
+The original `rpc` and `file` paths remain the defaults. Maintainers select the
+new paths with environment variables; no source change or language-specific
+branch in the HTTP handler is required:
+
+| Path | Selection | Deployment prerequisites |
+|---|---|---|
+| Python reactor | `FUNCTION_INTERFACE=wasm`, `FUNCTION_WASM_PROFILE=python-reactor` | Pinned `python-reactor.wasm` plus an evaluator script or Lambda Feedback package config |
+| Pyodide | `FUNCTION_INTERFACE=pyodide` | Node.js, the provided runner, its npm dependencies, and a script/package config |
+| Native + DynamoRIO | `FUNCTION_INTERFACE=file` or `rpc`, plus `FUNCTION_DBI_SECURITY_ENABLED=true` | DynamoRIO, a policy client, and (when used) a readable policy config |
+
+Environment variables select and configure an already deployed runtime. They do
+not download external runtimes or policy clients automatically. See
+[deployment recipes](docs/deployment-recipes.md),
+[Lambda Feedback handoff](docs/lambda-feedback-handoff.md), and
+[the DBI native fallback](docs/dbi-native-fallback.md) for exact variables,
+artifacts, lifecycle guarantees, and smoke commands.
 
 ## Evaluation Runtime Interface
 

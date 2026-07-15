@@ -44,10 +44,10 @@ Current pin lives in `scripts/python-reactor-artifact.env`:
 
 ```text
 repo:    bkmashiro/webassembly-language-runtimes
-version: v1.0.13
+version: v1.0.14
 asset:   python-reactor.wasm
-sha256:  4c5fea0b3a6a31a54ea83f8f93a7c912627b4cf5fc6516ee8e50159bb7c04d4c
-exports: py_init, evaluate, py_exec, alloc, dealloc, resp_buf, resp_len
+sha256:  78dcbb6d673351c0d3b776c42d2fb93b6f638cdc714d58072dece4b115edaa72
+exports: py_init, py_prepare, evaluate, py_exec, alloc, dealloc, resp_buf, resp_len
 ```
 
 Update procedure:
@@ -56,10 +56,11 @@ Update procedure:
 2. Publish a tagged release.
 3. Run `scripts/verify-python-reactor-artifact.sh /path/to/python-reactor.wasm`.
 4. Update `scripts/python-reactor-artifact.env` with the new tag/SHA.
-5. Replace both checked-in LFS consumers:
-   - `internal/execution/wasm/testdata/python-reactor.wasm`
-   - `build/python-reactor/artifacts/python-reactor.wasm`
-6. Run `scripts/smoke-python-reactor-handoff.sh docker` on a Linux-capable machine.
+5. Let CI/smoke download the pinned release into its cache; do not upload a new
+   200+ MiB LFS fixture merely to move the deployment pin.
+6. Replace a checked-in compatibility fixture only when a test explicitly needs
+   the new ABI, and record why.
+7. Run `scripts/smoke-python-reactor-handoff.sh docker` on a Linux-capable machine.
 
 ## Smoke commands
 

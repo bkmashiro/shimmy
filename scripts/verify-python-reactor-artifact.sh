@@ -20,7 +20,7 @@ usage() {
 usage: $0 [path/to/python-reactor.wasm]
 
 Verifies the pinned python-reactor.wasm artifact hash and required exports.
-If no path is provided, verifies internal/execution/wasm/testdata/python-reactor.wasm.
+If no path is provided, verifies/downloads the pinned release in the artifact cache.
 If the target file is missing, downloads ${SHIMMY_REACTOR_URL} first.
 EOF
 }
@@ -30,7 +30,7 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   exit 0
 fi
 
-wasm="${1:-${ROOT}/internal/execution/wasm/testdata/${SHIMMY_REACTOR_ASSET}}"
+wasm="${1:-${SHIMMY_REACTOR_ARTIFACT_DIR}/python-reactor-${SHIMMY_REACTOR_VERSION}.wasm}"
 if [[ ! -f "${wasm}" ]]; then
   echo "==> ${wasm} missing; downloading ${SHIMMY_REACTOR_URL}"
   mkdir -p "$(dirname "${wasm}")"
@@ -59,7 +59,7 @@ from pathlib import Path
 
 path = Path(sys.argv[1])
 data = path.read_bytes()
-required = {"py_init", "evaluate", "py_exec", "alloc", "dealloc", "resp_buf", "resp_len"}
+required = {"py_init", "py_prepare", "evaluate", "py_exec", "alloc", "dealloc", "resp_buf", "resp_len"}
 
 pos = 8
 if data[:4] != b"\0asm":

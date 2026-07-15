@@ -158,7 +158,7 @@ The same knobs are available through Shimmy's startup integration:
 It does **not** compile native extension packages. Those must already be available
 in the target backend:
 
-- reactor-python: built into the reactor artifact / WASI VFS, e.g. NumPy in `v1.0.13`
+- reactor-python: built into the reactor artifact / WASI VFS, e.g. NumPy in the current `v1.0.14` pin
 - Pyodide: loaded through `FUNCTION_PYODIDE_PACKAGES`
 
 `scipy` is intentionally out of reactor scope; use Pyodide for scipy-heavy evaluators.

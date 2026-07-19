@@ -645,6 +645,21 @@ func (s *UffdStrategy) Take(mem api.Memory) error {
 	return nil
 }
 
+// DirtyPageCount returns the number of pages currently recorded by the UFFD
+// write-protect fault handler. It is intended for benchmark validation.
+func (s *UffdStrategy) DirtyPageCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	count := 0
+	for _, dirty := range s.dirty {
+		if dirty {
+			count++
+		}
+	}
+	return count
+}
+
 // Restore implements SnapshotStrategy. It copies snapshot data back to only
 // the pages that were dirtied since the last Take, then re-arms write-
 // protection on the entire region with a single ioctl and clears the dirty

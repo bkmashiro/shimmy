@@ -1,40 +1,84 @@
-name: Snapshot Strategy Benchmarks (manual)
+name: Snapshot Strategy Benchmarks
 
 on:
   workflow_dispatch:
+    inputs:
+      suite:
+        description: Benchmark suite to run
+        required: true
+        default: large
+        type: choice
+        options:
+          - large
+          - full
+  push:
+    branches:
+      - feat/wasm-backend
+    paths:
+      - "internal/execution/wasm/snapshot_large_bench*_test.go"
+      - "internal/execution/wasm/snapshot_uffd_linux.go"
+      - "internal/execution/wasm/snapshot_uffd_metrics_linux_test.go"
+      - ".github/workflows/bench-snapshot.yml"
 
 jobs:
   bench:
     name: Benchmark (bare Linux)
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     defaults:
       run:
-        # pipefail: make "go test ... | tee ..." fail if go test exits non-zero.
         shell: bash -o pipefail {0}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
 
-      - name: Install C toolchain (for CGO/mprotect)
+      - name: Install C toolchain
         run: sudo apt-get install -y gcc libc6-dev
 
+      - name: Enable and record userfaultfd environment
+        run: |
+          sudo sysctl -w vm.unprivileged_userfaultfd=1
+          {
+            go version
+            uname -a
+            lscpu
+            printf 'vm.unprivileged_userfaultfd='
+            cat /proc/sys/vm/unprivileged_userfaultfd
+          } | tee bench-env.txt
+
+      - name: Validate benchmark evidence contract
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          go test ./internal/execution/wasm \
+            -run='TestLargeRestoreBenchmarkPlan|TestDirtyPageRanges|TestUffdStrategyDirtyPageCountReportsTrackedBits' \
+            -count=1 -v
+
+      - name: Benchmark large-memory restore and UFFD phases
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          go test -run='^$' \
+            -bench='^(BenchmarkLargeMemoryRestore|BenchmarkUffdLargeMemoryPhases)$' \
+            -benchtime=1x -count=3 -timeout=3600s -benchmem \
+            ./internal/execution/wasm/ | tee bench-large.txt
+
       - name: Download python-reactor.wasm
+        if: github.event_name == 'workflow_dispatch' && inputs.suite == 'full'
         run: |
           curl -fsSL \
             "https://github.com/bkmashiro/shimmy-wasm-go/releases/download/wasm-artifacts/python-reactor.wasm" \
             -o python-reactor.wasm
           ls -lh python-reactor.wasm
 
-      # -run='^$' skips all unit tests; only benchmarks execute.
-      # Unit tests that require testdata/python-reactor.wasm are not needed here.
-
-      - name: BenchmarkRestoreNPages (dirty-page curve)
+      - name: BenchmarkRestoreNPages
+        if: github.event_name == 'workflow_dispatch' && inputs.suite == 'full'
         env:
           PYTHON_REACTOR_WASM: ${{ github.workspace }}/python-reactor.wasm
           CGO_ENABLED: "1"
@@ -43,7 +87,8 @@ jobs:
             -benchtime=10s -timeout=3600s -benchmem \
             ./internal/execution/wasm/ | tee bench-dirty.txt
 
-      - name: BenchmarkStrategy (per-request latency)
+      - name: BenchmarkStrategy
+        if: github.event_name == 'workflow_dispatch' && inputs.suite == 'full'
         env:
           PYTHON_REACTOR_WASM: ${{ github.workspace }}/python-reactor.wasm
           CGO_ENABLED: "1"
@@ -52,7 +97,8 @@ jobs:
             -benchtime=20s -timeout=3600s -benchmem \
             ./internal/execution/wasm/ | tee bench-strategy.txt
 
-      - name: BenchmarkPool (concurrent throughput)
+      - name: BenchmarkPool
+        if: github.event_name == 'workflow_dispatch' && inputs.suite == 'full'
         env:
           PYTHON_REACTOR_WASM: ${{ github.workspace }}/python-reactor.wasm
           CGO_ENABLED: "1"
@@ -61,7 +107,8 @@ jobs:
             -benchtime=15s -timeout=3600s -benchmem \
             ./internal/execution/wasm/ | tee bench-pool.txt
 
-      - name: BenchmarkTakeOnly + BenchmarkRestoreOnly
+      - name: BenchmarkTakeOnly and BenchmarkRestoreOnly
+        if: github.event_name == 'workflow_dispatch' && inputs.suite == 'full'
         env:
           PYTHON_REACTOR_WASM: ${{ github.workspace }}/python-reactor.wasm
           CGO_ENABLED: "1"
@@ -70,10 +117,10 @@ jobs:
             -benchtime=10s -timeout=3600s -benchmem \
             ./internal/execution/wasm/ | tee bench-isolate.txt
 
-      - name: Upload benchmark results
+      - name: Upload benchmark evidence
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: bench-results-${{ github.sha }}
+          name: snapshot-bench-${{ github.sha }}
           path: bench-*.txt
           retention-days: 90

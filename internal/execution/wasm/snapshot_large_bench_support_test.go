@@ -75,10 +75,25 @@ func newLargeRestoreBenchmarkPlan(sizeMiB, dirtyPercent, pageBytes int) (largeRe
 	}, nil
 }
 
+func validateObservedDirtyPages(mode string, plan largeRestoreBenchmarkPlan, observed int) error {
+	if observed < plan.requestedDirtyPages {
+		return fmt.Errorf("%s observed %d dirty pages, fewer than requested %d", mode, observed, plan.requestedDirtyPages)
+	}
+	if observed > plan.totalPages {
+		return fmt.Errorf("%s observed %d dirty pages, beyond extent page count %d", mode, observed, plan.totalPages)
+	}
+	if mode == "uffd" && observed != plan.requestedDirtyPages {
+		return fmt.Errorf("uffd observed %d dirty pages, requested %d", observed, plan.requestedDirtyPages)
+	}
+	return nil
+}
+
 func reportLargeRestoreMetrics(reporter benchmarkMetricReporter, plan largeRestoreBenchmarkPlan, observedDirtyPages *int, fallback bool) {
 	reporter.ReportMetric(float64(plan.requestedDirtyPages), "requested_pages/op")
 	if observedDirtyPages != nil {
 		reporter.ReportMetric(float64(*observedDirtyPages), "observed_pages/op")
+		overtracked := *observedDirtyPages - plan.requestedDirtyPages
+		reporter.ReportMetric(float64(overtracked), "overtracked_pages/op")
 	}
 	reporter.ReportMetric(float64(plan.requestedDirtyPages*plan.pageBytes), "dirty_B/op")
 	reporter.ReportMetric(float64(plan.extentBytes), "extent_B/op")

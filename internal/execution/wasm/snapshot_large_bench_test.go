@@ -66,7 +66,7 @@ func BenchmarkLargeMemoryRestore(b *testing.B) {
 						b.Fatal("memory read failed")
 					}
 
-					reportLargeRestoreMetrics(b, plan, nil, false)
+					lastObserved := -1
 					b.ReportAllocs()
 					b.ResetTimer()
 					for i := 0; i < b.N; i++ {
@@ -79,15 +79,21 @@ func BenchmarkLargeMemoryRestore(b *testing.B) {
 							if err != nil {
 								b.Fatalf("read observed dirty pages: %v", err)
 							}
-							if observed != plan.requestedDirtyPages {
-								b.Fatalf("observed dirty pages = %d, requested %d", observed, plan.requestedDirtyPages)
+							if err := validateObservedDirtyPages(mode, plan, observed); err != nil {
+								b.Fatal(err)
 							}
-							reportLargeRestoreMetrics(b, plan, &observed, false)
+							lastObserved = observed
 						}
 						b.StartTimer()
 						if err := strategy.Restore(mem); err != nil {
 							b.Fatalf("Restore: %v", err)
 						}
+					}
+					b.StopTimer()
+					if lastObserved >= 0 {
+						reportLargeRestoreMetrics(b, plan, &lastObserved, false)
+					} else {
+						reportLargeRestoreMetrics(b, plan, nil, false)
 					}
 				})
 			}
@@ -118,8 +124,6 @@ func BenchmarkUffdLargeMemoryPhases(b *testing.B) {
 			strategy := newLargeUffdBenchmarkStrategy(b, sizeMiB)
 			dst := unsafe.Slice((*byte)(strategy.basePtr), strategy.memSize)
 			observed := plan.requestedDirtyPages
-			reportLargeRestoreMetrics(b, plan, &observed, false)
-			b.ReportMetric(float64(len(ranges)), "ranges/op")
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
@@ -136,13 +140,14 @@ func BenchmarkUffdLargeMemoryPhases(b *testing.B) {
 					copy(dst[offset:offset+dirtyPageBytes], strategy.snapshot[offset:offset+dirtyPageBytes])
 				}
 			}
+			b.StopTimer()
+			reportLargeRestoreMetrics(b, plan, &observed, false)
+			b.ReportMetric(float64(len(ranges)), "ranges/op")
 		})
 
 		b.Run(fmt.Sprintf("rearm-full/%dMiB/dirty%dpc", sizeMiB, dirtyPercent), func(b *testing.B) {
 			strategy := newLargeUffdBenchmarkStrategy(b, sizeMiB)
 			observed := plan.requestedDirtyPages
-			reportLargeRestoreMetrics(b, plan, &observed, false)
-			b.ReportMetric(1, "ranges/op")
 			b.ReportAllocs()
 			fullRange := []dirtyPageRange{{offset: 0, length: int(plan.extentBytes)}}
 			b.ResetTimer()
@@ -156,13 +161,14 @@ func BenchmarkUffdLargeMemoryPhases(b *testing.B) {
 					b.Fatalf("re-arm full range: %v", err)
 				}
 			}
+			b.StopTimer()
+			reportLargeRestoreMetrics(b, plan, &observed, false)
+			b.ReportMetric(1, "ranges/op")
 		})
 
 		b.Run(fmt.Sprintf("rearm-dirty-contiguous/%dMiB/dirty%dpc", sizeMiB, dirtyPercent), func(b *testing.B) {
 			strategy := newLargeUffdBenchmarkStrategy(b, sizeMiB)
 			observed := plan.requestedDirtyPages
-			reportLargeRestoreMetrics(b, plan, &observed, false)
-			b.ReportMetric(float64(len(ranges)), "ranges/op")
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
@@ -175,6 +181,9 @@ func BenchmarkUffdLargeMemoryPhases(b *testing.B) {
 					b.Fatalf("re-arm dirty ranges: %v", err)
 				}
 			}
+			b.StopTimer()
+			reportLargeRestoreMetrics(b, plan, &observed, false)
+			b.ReportMetric(float64(len(ranges)), "ranges/op")
 		})
 	}
 }

@@ -25,16 +25,41 @@ func TestLargeRestoreBenchmarkPlanReportsDirtyEvidence(t *testing.T) {
 	reportLargeRestoreMetrics(metrics, plan, &observed, false)
 
 	want := map[string]float64{
-		"requested_pages/op": 1310,
-		"observed_pages/op":  1310,
-		"dirty_B/op":         1310 * 4096,
-		"extent_B/op":        512 * 1024 * 1024,
-		"fallback":           0,
+		"requested_pages/op":   1310,
+		"observed_pages/op":    1310,
+		"overtracked_pages/op": 0,
+		"dirty_B/op":           1310 * 4096,
+		"extent_B/op":          512 * 1024 * 1024,
+		"fallback":             0,
 	}
 	for unit, wantValue := range want {
 		if got, ok := metrics[unit]; !ok || got != wantValue {
 			t.Errorf("metric %q = %v (present=%t), want %v", unit, got, ok, wantValue)
 		}
+	}
+}
+
+func TestObservedDirtyValidationAllowsSoftDirtyOvertrackingOnly(t *testing.T) {
+	plan, err := newLargeRestoreBenchmarkPlan(128, 1, 4096)
+	if err != nil {
+		t.Fatalf("newLargeRestoreBenchmarkPlan: %v", err)
+	}
+
+	if err := validateObservedDirtyPages("soft-dirty", plan, 498); err != nil {
+		t.Fatalf("soft-dirty overtracking should be reported, not rejected: %v", err)
+	}
+	metrics := capturedBenchmarkMetrics{}
+	observed := 498
+	reportLargeRestoreMetrics(metrics, plan, &observed, false)
+	if got := metrics["overtracked_pages/op"]; got != 171 {
+		t.Fatalf("overtracked_pages/op = %v, want 171", got)
+	}
+
+	if err := validateObservedDirtyPages("uffd", plan, 498); err == nil {
+		t.Fatal("UFFD tracking mismatch must fail closed")
+	}
+	if err := validateObservedDirtyPages("soft-dirty", plan, 326); err == nil {
+		t.Fatal("observing fewer pages than requested must fail closed")
 	}
 }
 

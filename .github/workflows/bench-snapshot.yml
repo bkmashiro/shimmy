@@ -118,7 +118,7 @@ jobs:
             ./internal/execution/wasm/ | tee bench-isolate.txt
 
       - name: Upload benchmark evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: snapshot-bench-${{ github.sha }}

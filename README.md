@@ -96,7 +96,9 @@ not download external runtimes or policy clients automatically. See
 [deployment recipes](docs/deployment-recipes.md),
 [Lambda Feedback handoff](docs/lambda-feedback-handoff.md), and
 [the DBI native fallback](docs/dbi-native-fallback.md) for exact variables,
-artifacts, lifecycle guarantees, and smoke commands.
+artifacts, lifecycle guarantees, and smoke commands. For a self-contained
+four-lane demonstration without the larger production images, use the
+[compact Docker Compose stack](demo/compose/README.md).
 
 ## Evaluation Runtime Interface
 

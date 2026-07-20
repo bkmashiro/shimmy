@@ -1,0 +1,15 @@
+.git
+.github
+.demo-logs
+.demo-lambda-sources
+bin
+build
+coverage.out
+lcov.info
+*.test
+**/__pycache__
+**/*.pyc
+**/node_modules
+examples/**/*.wasm
+examples/**/target
+internal/execution/wasm/testdata/*.wasm

@@ -1,0 +1,98 @@
+name: shimmy-demo
+
+services:
+  generic:
+    image: "${SHIMMY_DEMO_IMAGE_PREFIX:-shimmy-demo}-generic:${SHIMMY_DEMO_TAG:-dev}"
+    build:
+      context: ../..
+      dockerfile: demo/compose/Dockerfile
+      target: generic
+      args:
+        VERSION: "${SHIMMY_DEMO_VERSION:-demo}"
+        COMMIT: "${SHIMMY_DEMO_COMMIT:-local}"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    ports:
+      - "127.0.0.1:${SHIMMY_DEMO_GENERIC_PORT:-18081}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    mem_limit: 256m
+    cpus: 1.0
+
+  python-reactor:
+    image: "${SHIMMY_DEMO_IMAGE_PREFIX:-shimmy-demo}-python-reactor:${SHIMMY_DEMO_TAG:-dev}"
+    build:
+      context: ../..
+      dockerfile: demo/compose/Dockerfile
+      target: python-reactor
+      args:
+        VERSION: "${SHIMMY_DEMO_VERSION:-demo}"
+        COMMIT: "${SHIMMY_DEMO_COMMIT:-local}"
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    ports:
+      - "127.0.0.1:${SHIMMY_DEMO_REACTOR_PORT:-18082}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 36
+      start_period: 120s
+    mem_limit: 2g
+    cpus: 2.0
+
+  pyodide-scipy:
+    image: "${SHIMMY_DEMO_IMAGE_PREFIX:-shimmy-demo}-pyodide-scipy:${SHIMMY_DEMO_TAG:-dev}"
+    build:
+      context: ../..
+      dockerfile: demo/compose/Dockerfile
+      target: pyodide-scipy
+      args:
+        VERSION: "${SHIMMY_DEMO_VERSION:-demo}"
+        COMMIT: "${SHIMMY_DEMO_COMMIT:-local}"
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    ports:
+      - "127.0.0.1:${SHIMMY_DEMO_PYODIDE_PORT:-18083}:8080"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 36
+      start_period: 120s
+    mem_limit: 2g
+    cpus: 2.0
+
+  dbi-lean:
+    profiles: ["dbi"]
+    platform: linux/amd64
+    image: "${SHIMMY_DEMO_IMAGE_PREFIX:-shimmy-demo}-dbi-lean:${SHIMMY_DEMO_TAG:-dev}"
+    build:
+      context: ../..
+      dockerfile: demo/compose/Dockerfile
+      target: dbi-lean
+      platforms:
+        - linux/amd64
+      args:
+        VERSION: "${SHIMMY_DEMO_VERSION:-demo}"
+        COMMIT: "${SHIMMY_DEMO_COMMIT:-local}"
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    ports:
+      - "127.0.0.1:${SHIMMY_DEMO_DBI_PORT:-18084}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    mem_limit: 2g
+    cpus: 2.0

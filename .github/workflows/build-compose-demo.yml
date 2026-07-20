@@ -1,21 +1,6 @@
 name: Build compact demo images
 
 on:
-  push:
-    branches:
-      - feat/wasm-backend
-    paths:
-      - .dockerignore
-      - .github/workflows/build-compose-demo.yml
-      - demo/compose/**
-      - scripts/smoke-compose-demo.sh
-      - examples/demo-stateful/main.go
-      - examples/eval-python/eval.py
-      - examples/eval-pyodide/**
-      - examples/eval-scipy/eval.py
-      - go.mod
-      - go.sum
-      - "**/*.go"
   workflow_dispatch:
     inputs:
       push_images:

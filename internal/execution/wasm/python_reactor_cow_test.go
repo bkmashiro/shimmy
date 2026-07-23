@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestCowPythonReactorPreparedBaselines(t *testing.T) {
@@ -152,4 +153,65 @@ func writeCowPythonEvidence(t *testing.T, dispatcher *ReactorPythonDispatcher, i
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(path, append(encoded, '\n'), 0o644))
 	t.Logf("COW evidence: %s", encoded)
+}
+
+func BenchmarkCowPythonPreparedFullRequest(b *testing.B) {
+	wasmPath := os.Getenv("PYTHON_REACTOR_WASM")
+	if wasmPath == "" {
+		b.Skip("PYTHON_REACTOR_WASM not set")
+	}
+	root := b.TempDir()
+	evaluatorPath := filepath.Join(root, "benchmark_evaluator.py")
+	require.NoError(b, os.WriteFile(evaluatorPath, []byte(`
+def evaluation_function(response, answer, params=None):
+    return {"is_correct": response == answer, "feedback": "ok"}
+`), 0o600))
+	cacheDir := filepath.Join(root, "wazero-cache")
+
+	for _, mode := range []string{"memcpy", "cow"} {
+		b.Run(mode, func(b *testing.B) {
+			cfg := Config{
+				PythonScriptPath:            evaluatorPath,
+				PythonPreloadMode:           "evaluator",
+				PythonSnapshotHeadroomBytes: 8 * 1024 * 1024,
+				SnapshotMode:                mode,
+				MaxMemoryPages:              8192,
+				CompileCacheDir:             cacheDir,
+				Timeout:                     120 * time.Second,
+			}
+			var coordinator *cowImageCoordinator
+			if mode == "cow" {
+				coordinator = newCowImageCoordinator()
+			}
+			runner := NewReactorPythonRunner(wasmPath, cfg, zap.NewNop(), coordinator)
+			initCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			require.NoError(b, runner.Init(initCtx))
+			cancel()
+			if mode == "cow" {
+				strategy, ok := runner.strategy.(*CowSnapshotStrategy)
+				require.True(b, ok)
+				require.True(b, strategy.UsingCow(), "benchmark refuses mislabeled COW fallback")
+			}
+			b.Cleanup(func() {
+				shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer shutdownCancel()
+				_ = runner.Shutdown(shutdownCtx)
+				if coordinator != nil {
+					_ = coordinator.Close()
+				}
+			})
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				result, err := runner.SendRequest(context.Background(), "", "eval", `{"response":"42","answer":"42"}`)
+				if err != nil {
+					b.Fatalf("request %d: %v", i, err)
+				}
+				if result["is_correct"] != true {
+					b.Fatalf("request %d returned %#v", i, result)
+				}
+			}
+		})
+	}
 }

@@ -96,6 +96,15 @@ jobs:
             -run='^TestCowPythonReactorPreparedBaselines$' \
             -count=1 -v -timeout=30m 2>&1 | tee cow-python-test.log
 
+      - name: Compare complete prepared request latency
+        env:
+          PYTHON_REACTOR_WASM: ${{ github.workspace }}/python-reactor.wasm
+        run: |
+          go test ./internal/execution/wasm \
+            -run='^$' -bench='^BenchmarkCowPythonPreparedFullRequest$' \
+            -benchtime=5x -count=1 -benchmem -timeout=30m \
+            2>&1 | tee cow-python-benchmark.log
+
       - name: Upload prepared-image evidence
         if: always()
         uses: actions/upload-artifact@v6
@@ -105,6 +114,7 @@ jobs:
             python-reactor.sha256
             cow-python-evidence.json
             cow-python-test.log
+            cow-python-benchmark.log
           if-no-files-found: warn
           retention-days: 90
 

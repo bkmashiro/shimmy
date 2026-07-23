@@ -5,23 +5,15 @@ on:
     branches:
       - feat/wasm-backend
     paths:
-      - "internal/execution/wasm/snapshot_cow*"
-      - "internal/execution/wasm/snapshot.go"
-      - "internal/execution/wasm/snapshot_stub.go"
-      - "internal/execution/wasm/config.go"
-      - "internal/execution/wasm/supervisor.go"
-      - "internal/execution/wasm/dispatcher.go"
-      - "internal/execution/wasm/python_reactor.go"
+      - "internal/execution/**/*.go"
+      - "go.mod"
+      - "go.sum"
       - ".github/workflows/cow-memory.yml"
   pull_request:
     paths:
-      - "internal/execution/wasm/snapshot_cow*"
-      - "internal/execution/wasm/snapshot.go"
-      - "internal/execution/wasm/snapshot_stub.go"
-      - "internal/execution/wasm/config.go"
-      - "internal/execution/wasm/supervisor.go"
-      - "internal/execution/wasm/dispatcher.go"
-      - "internal/execution/wasm/python_reactor.go"
+      - "internal/execution/**/*.go"
+      - "go.mod"
+      - "go.sum"
       - ".github/workflows/cow-memory.yml"
   workflow_dispatch:
     inputs:

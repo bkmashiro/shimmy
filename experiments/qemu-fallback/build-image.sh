@@ -137,15 +137,39 @@ for current, directories, files in os.walk(root, topdown=False):
     os.utime(current, (epoch, epoch), follow_symlinks=False)
 PY
 
+printf 'QEMU rootfs input digests:\n'
+sha256sum "$GUEST_BINARY" "$EVALUATOR_BINARY" "$RPC_EVALUATOR_BINARY" "$BUSYBOX_BINARY" "$ROOT/init"
+
 FINAL_ROOTFS="$OUTPUT_DIR/evaluator.squashfs"
+SORT_FILE="$BUILD_DIR/squashfs.sort"
 rm -f "$FINAL_ROOTFS"
+python3 - "$ROOT" "$SORT_FILE" <<'PY'
+import os
+import sys
+
+root, destination = sys.argv[1:]
+paths = []
+for current, directories, files in os.walk(root):
+    directories.sort()
+    files.sort()
+    for name in directories + files:
+        paths.append(os.path.join(current, name))
+with open(destination, "w", encoding="utf-8") as handle:
+    for priority, path in enumerate(reversed(paths), start=1):
+        handle.write(f"{path} {priority}\n")
+PY
 mksquashfs "$ROOT" "$FINAL_ROOTFS" \
   -noappend \
   -all-root \
   -all-time "$SOURCE_DATE_EPOCH" \
   -mkfs-time "$SOURCE_DATE_EPOCH" \
   -no-xattrs \
+  -no-duplicates \
+  -no-exports \
+  -no-fragments \
   -no-progress \
+  -processors 1 \
+  -sort "$SORT_FILE" \
   -comp gzip
 cp "$KERNEL_PATH" "$OUTPUT_DIR/vmlinuz"
 SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" dracut \

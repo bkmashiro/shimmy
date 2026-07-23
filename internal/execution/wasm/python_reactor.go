@@ -1193,15 +1193,16 @@ func (r *ReactorPythonRunner) closeAll(ctx context.Context) error {
 	return errors.Join(moduleErr, flyweightErr, runtimeErr)
 }
 
-// Shutdown closes the WASM module and runtime.
+// Shutdown closes the runner's module/snapshot resources and, for standalone
+// runners only, its owned flyweight Runtime.
 func (r *ReactorPythonRunner) Shutdown(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	// r.closed can also mean WithCloseOnContextDone invalidated the module after
-	// a timeout. In that state the dispatcher still calls Shutdown to release the
-	// per-runner wazero runtime and snapshot resources. Only return early once
-	// the owned runtime/module have actually been cleared.
+	// a timeout. In that state the dispatcher still calls Shutdown to release
+	// the per-runner module and snapshot resources; standalone runners also own
+	// their flyweight. Only return early once owned handles have been cleared.
 	if r.mod == nil && r.rt == nil {
 		return nil
 	}

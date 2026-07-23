@@ -1,8 +1,10 @@
 # Python Reactor Flyweight
 
-**Status:** active implementation roadmap  
-**Host baseline:** `b13a5d0bedfcc7626ef2bb70bf42c045e014a71e`  
-**Guest evidence baseline:** fixed `python3.12-wasi-reactor` artifact from the existing heavy COW workflow
+**Status:** implemented and verified
+
+**Evidence host baseline:** `8df3a0529aef468628d97380ef4270a5f75c86d5`
+
+**Guest artifact:** SHA-256 `78dcbb6d673351c0d3b776c42d2fb93b6f638cdc714d58072dece4b115edaa72`
 
 ## Goal
 
@@ -54,6 +56,20 @@ This is a density/lifecycle change, not an expansion of the reset claim: COW sti
 - bare Linux COW mechanism tests;
 - exact fixed Python artifact heavy COW test, sibling-timeout/replacement test, and density evidence validation;
 - independent post-fix review of diff and generated evidence.
+
+## Verified evidence
+
+GitHub Actions run [`29976320158`](https://github.com/bkmashiro/shimmy-wasm-go/actions/runs/29976320158) ran on bare `linux/amd64` with Go 1.24.5 and the fixed Guest artifact. Its uploaded `cow-python-8df3a052...` artifact contains the raw JSON/logs.
+
+- exact Python prepared-baseline proof: six successful reset requests, one structured Guest error, one timed-out module replacement, sibling module still callable, zero COW fallback;
+- prepared memory: `240,058,368` bytes; canonical image digest stable within each dispatcher;
+- idle PSS regression across N={1,2,4,8}: fixed intercept **549.72 MiB**, incremental slope **1.882 MiB/runner**, including **0.450 MiB/runner** page-table slope;
+- removing the retained raw artifact reference reduced the measured fixed PSS intercept by about **241.99 MiB**; wazero still retains one shared decoded DataSection/compiled representation;
+- N=8 idle PSS: **565.22 MiB**. RSS/VmHWM is not a physical-density metric because it counts every shared 228.94 MiB mapping in full;
+- complete prepared request: COW **1.064 ms/op**, full memcpy **11.055 ms/op**, or **10.39×** latency advantage in this five-sample evidence run;
+- memory-only 32 GiB model with 28 GiB available: about 14,942 idle, 6,741 at 1% dirty, 2,109 at 5%, 1,135 at 10%, 475 at 25%, and 241 at 50% dirty when all instances are simultaneously active.
+
+The last capacity line is a memory model, not a throughput promise. Current `Start` eagerly prepares the whole configured pool with at most four concurrent initializers; initialization time, CPU, virtual mappings, and kernel limits will constrain a multi-thousand-instance deployment before steady-state memory does. A future lazy/on-demand admission layer is separate scope.
 
 ## Acceptance
 

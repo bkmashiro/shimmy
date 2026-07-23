@@ -15,8 +15,8 @@ performance claim and does not justify an automatic/default strategy change.
 
 Final correctness and Python prepared-image run:
 
-- GitHub Actions run: [`29971630921`](https://github.com/bkmashiro/shimmy-wasm-go/actions/runs/29971630921)
-- Commit: `d9f0cab35138859beff22507f34cfd77b472c8ff`
+- GitHub Actions run: [`29972072029`](https://github.com/bkmashiro/shimmy-wasm-go/actions/runs/29972072029)
+- Commit: `f074b7f8b12bb79df1d3b8c263887851cb54c393`
 - Platform: `linux/amd64`
 - Go: `go1.24.5`
 - wazero: `v1.11.0`
@@ -49,7 +49,7 @@ No local Docker build or container test was run for this work.
 | Python response is copied before post-request reset | Pass |
 | Idle Python runner hash equals its canonical prepared image | Pass |
 | Recoverable Python exception returns structured output and still resets | Pass |
-| Timeout closes/discards the old Python runner and replacement reattaches | Pass |
+| Timeout closes/discards the old Python runner, releases its module/runtime, and replacement reattaches | Pass |
 | Host stderr buffer is empty before Python runner returns to pool | Pass |
 | Full Linux `go test ./...` | Pass |
 
@@ -110,11 +110,11 @@ Final run, pinned Python artifact, prepared evaluator, `5` iterations per mode:
 
 | Strategy | Complete `SendRequest` + post-request restore | Allocations |
 |---|---:|---:|
-| Full copy | `10.28 ms/op` | `45 allocs/op` |
-| COW | `1.22 ms/op` | `45 allocs/op` |
+| Full copy | `11.00 ms/op` | `45 allocs/op` |
+| COW | `1.08 ms/op` | `45 allocs/op` |
 
 The observed ratio in this controlled five-iteration runner sample was about
-`8.43×`. This is a mechanism/application-path diagnostic for one tiny prepared
+`10.19×`. This is a mechanism/application-path diagnostic for one tiny prepared
 evaluator, not a production estimate or a claim for arbitrary Python workloads.
 
 ## Promotion and isolation boundary

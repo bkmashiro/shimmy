@@ -72,6 +72,16 @@ for key in ("kernel", "initrd", "rootfs"):
         raise SystemExit(f"{key} digest mismatch: {digest}")
 PY
 
+python3 - "$NATIVE_PORT" "$QEMU_PORT" <<'PY'
+import socket
+import sys
+
+for value in sys.argv[1:]:
+    port = int(value)
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", port))
+PY
+
 mkdir -p "$RESULT_DIR"
 run_id=$(date -u +%Y%m%dT%H%M%SZ)-${ACCELERATOR}
 run_dir="$RESULT_DIR/$run_id"
@@ -92,15 +102,15 @@ common_env=(
   FUNCTION_INTERFACE=file
   FUNCTION_COMMAND="$EVALUATOR_BINARY"
   FUNCTION_WORKING_DIR="$RUNTIME_DIR"
-  FUNCTION_TIMEOUT=180s
+  FUNCTION_TIMEOUT=300s
+  FUNCTION_WORKER_SEND_TIMEOUT=300s
   FUNCTION_MAX_PROCS=1
   LOG_LEVEL=info
 )
 
-env "${common_env[@]}" PORT="$NATIVE_PORT" "$SHIMMY_BINARY" serve >"$run_dir/native.log" 2>&1 &
+env "${common_env[@]}" "$SHIMMY_BINARY" serve --port "$NATIVE_PORT" >"$run_dir/native.log" 2>&1 &
 native_pid=$!
 env "${common_env[@]}" \
-  PORT="$QEMU_PORT" \
   FUNCTION_QEMU_ENABLED=true \
   FUNCTION_QEMU_RUNNER="$RUNNER_BINARY" \
   FUNCTION_QEMU_BINARY="$QEMU_BINARY" \
@@ -110,15 +120,17 @@ env "${common_env[@]}" \
   FUNCTION_QEMU_MEMORY_MB=512 \
   FUNCTION_QEMU_VCPUS=1 \
   FUNCTION_QEMU_NETWORK_PROFILE=none \
-  FUNCTION_QEMU_BOOT_TIMEOUT=120s \
-  "$SHIMMY_BINARY" serve >"$run_dir/qemu.log" 2>&1 &
+  FUNCTION_QEMU_BOOT_TIMEOUT=240s \
+  "$SHIMMY_BINARY" serve --port "$QEMU_PORT" >"$run_dir/qemu.log" 2>&1 &
 qemu_pid=$!
 
 wait_for_health() {
   local port=$1
   local pid=$2
+  local log=$3
   for _ in $(seq 1 300); do
     if ! kill -0 "$pid" 2>/dev/null; then
+      printf 'Shimmy for port %s exited; see %s\n' "$port" "$log" >&2
       return 1
     fi
     if curl --silent --fail "http://127.0.0.1:$port/health" >/dev/null; then
@@ -126,23 +138,24 @@ wait_for_health() {
     fi
     sleep 0.1
   done
+  printf 'Shimmy for port %s did not become healthy; see %s\n' "$port" "$log" >&2
   return 1
 }
-wait_for_health "$NATIVE_PORT" "$native_pid"
-wait_for_health "$QEMU_PORT" "$qemu_pid"
+wait_for_health "$NATIVE_PORT" "$native_pid" "$run_dir/native.log"
+wait_for_health "$QEMU_PORT" "$qemu_pid" "$run_dir/qemu.log"
 
 payload='{"response":"same","answer":"same","params":{"source":"doc-profile"}}'
 : >"$run_dir/native-times.txt"
 : >"$run_dir/qemu-times.txt"
 for index in $(seq 1 "$REQUEST_COUNT"); do
-  curl --max-time 180 --silent --show-error --fail \
+  curl --max-time 330 --silent --show-error --fail \
     --output "$run_dir/native-$index.json" \
     --write-out '%{time_total}\n' \
     --header 'Content-Type: application/json' \
     --header 'Command: eval' \
     --data "$payload" \
     "http://127.0.0.1:$NATIVE_PORT/" >>"$run_dir/native-times.txt"
-  curl --max-time 180 --silent --show-error --fail \
+  curl --max-time 330 --silent --show-error --fail \
     --output "$run_dir/qemu-$index.json" \
     --write-out '%{time_total}\n' \
     --header 'Content-Type: application/json' \

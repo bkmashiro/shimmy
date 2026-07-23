@@ -1,0 +1,56 @@
+{
+  "schema": "shimmy.qemu_fallback.evidence.v1",
+  "as_of": "2026-07-23",
+  "verdict": "PARTIAL",
+  "implementation_commit": "82e2370f9df667b105deb207ba5333ff26994c53",
+  "github_actions": {
+    "status": "PASS",
+    "run_id": 30042170032,
+    "url": "https://github.com/bkmashiro/shimmy-wasm-go/actions/runs/30042170032",
+    "head_sha": "82e2370f9df667b105deb207ba5333ff26994c53",
+    "scope": [
+      "two clean builds produced byte-identical kernel, initramfs, SquashFS rootfs, and manifest artifacts",
+      "native versus QEMU file public-HTTP response parity under x86_64 TCG",
+      "persistent RPC parity for stdio, IPC, TCP, HTTP, and WebSocket",
+      "artifact upload for independent digest verification"
+    ]
+  },
+  "doc_tcg": {
+    "status": "PASS",
+    "profile_script_sha256": "a68fab69caac1d98360f39dcfc1b00cf0b1ff6c29aa207949834af15776832b1",
+    "accelerator": "tcg",
+    "host": "potoo01.doc.ic.ac.uk",
+    "qemu_version": "QEMU emulator version 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.16)",
+    "request_count": 3,
+    "lifecycle": "fresh file worker and VM for each request",
+    "response_parity": true,
+    "native_seconds": [
+      0.01224,
+      0.007431,
+      0.008484
+    ],
+    "qemu_seconds": [
+      34.02243,
+      32.900776,
+      37.174497
+    ],
+    "native_median_seconds": 0.008484,
+    "qemu_median_seconds": 34.02243,
+    "manifest_digests": {
+      "kernel": "09d55bc6cb91a2926e363516a3b249fdf8b3fc3d32c3811b84e6577e63644ef2",
+      "initrd": "18246ab78c7cfb1d60545b728c9cd651fd7d2f64d91e8349aadcac5c05a6d95c",
+      "rootfs": "3958f32d2b6e9f1c4636dd6c3541a8b46096607f1f318cf31203fe3cf8f1c4e4"
+    },
+    "claim_boundary": "These are three fresh-VM TCG samples on one DoC batch host, not a production SLO or persistent-RPC benchmark."
+  },
+  "doc_kvm": {
+    "status": "BLOCKED",
+    "reason": "The experiment account cannot read and write /dev/kvm on the approved batch hosts.",
+    "fallback_used": false
+  },
+  "aws_lambda_x86_64_tcg": {
+    "status": "NOT_RUN",
+    "reason": "Real AWS writes and paid qualification require separate operator approval."
+  },
+  "qualification_boundary": "The wrapper, image reproducibility, hosted-TCG functional parity, and DoC TCG file parity are verified. Production Lambda qualification and DoC KVM performance evidence remain open."
+}

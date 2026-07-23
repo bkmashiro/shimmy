@@ -2,13 +2,15 @@
 
 > **For Hermes:** Execute this plan task-by-task. The controller owns architecture, transparent-compatibility semantics, Imperial/AWS operations, evidence review, and the final verdict. Bounded implementation may be delegated; deployment, publication, remote side effects, and promotion may not.
 
-**Status:** planned after supervisor clarification; no implementation or qualification claim exists yet.
+**Status:** implementation, reproducible image build, GitHub-hosted x86_64 TCG parity, and an Imperial DoC TCG file profile are complete. The verdict remains **PARTIAL** because real AWS Lambda TCG qualification has not run and the DoC experiment account cannot access KVM.
 
 **Goal:** Add QEMU as a transparent wrapper around Shimmy's existing native worker path, analogous to the optional DynamoRIO wrapper. QEMU must take over the complete evaluator process stack without introducing a new evaluator interface, language/package allowlist, or evaluator source change.
 
 **Architecture:** Keep `FUNCTION_INTERFACE=file|rpc` and every existing RPC transport. When `FUNCTION_QEMU_ENABLED=true`, rewrite the worker `StartConfig` so the Host launches `shimmy-qemu-runner`, which boots a full Linux guest and runs the complete original command/cwd/args/env inside it. The existing supervisor and HTTP layers continue to see the same file/RPC worker contract. QEMU is deployment-selected before execution; it never replays an ambiguously started request after another backend fails.
 
 **Tech Stack:** Go, current Shimmy supervisor/worker contracts, `qemu-system-x86_64`, TCG/KVM capability detection, read-only Linux/evaluator images, virtio-serial control/data tunnels, GitHub Actions, Imperial DoC batch hosts, existing CodeBuild/Lambda probe patterns.
+
+**Current evidence:** [machine-readable QEMU fallback evidence](../qemu-fallback-evidence.json). GitHub Actions run [`30042170032`](https://github.com/bkmashiro/shimmy-wasm-go/actions/runs/30042170032) passed two-build artifact reproducibility, public file-response parity, and persistent RPC parity for stdio, IPC, TCP, HTTP and WebSocket at commit `82e2370f9df667b105deb207ba5333ff26994c53`. The DoC profile passed three native/QEMU response comparisons under TCG. Its latency samples are fresh-file/fresh-VM diagnostic evidence, not a production SLO. KVM did not fall back to TCG: it failed before launch because `/dev/kvm` was unavailable to the account. No AWS resources were written.
 
 ---
 
@@ -17,9 +19,9 @@
 This work belongs to:
 
 ```text
-implementation: ~/projects/shimmy-wasm
-mechanism/Lambda probes: ~/projects/shimmy-sandbox-prototypes
-accepted canonical evidence: ~/projects/shimmy-docs/docs/current/evidence
+implementation: this repository
+mechanism/Lambda probes: a separately controlled qualification harness
+accepted evidence: reviewed, version-bound project evidence artifacts
 ```
 
 It does not belong to Agent Python Runtime.
@@ -237,8 +239,7 @@ Planned wrapper-specific environment:
 FUNCTION_QEMU_ENABLED=true
 FUNCTION_QEMU_RUNNER=/opt/shimmy/bin/shimmy-qemu-runner
 FUNCTION_QEMU_BINARY=/opt/qemu/bin/qemu-system-x86_64
-FUNCTION_QEMU_ROOTFS=/opt/shimmy-qemu/rootfs.qcow2
-FUNCTION_QEMU_EVALUATOR_IMAGE=/opt/shimmy-qemu/evaluator.img
+FUNCTION_QEMU_ROOTFS=/opt/shimmy-qemu/evaluator.squashfs
 FUNCTION_QEMU_IMAGE_MANIFEST=/opt/shimmy-qemu/image-manifest.json
 FUNCTION_QEMU_ACCELERATOR=tcg|kvm|auto
 FUNCTION_QEMU_MEMORY_MB=<bounded integer>
@@ -285,20 +286,20 @@ The guest bridge/agent starts the complete inner command exactly once for RPC an
 ### Repository roles
 
 ```text
-shimmy-wasm:
+this repository:
   wrapper/config implementation, Host runner, guest bridge, image contracts, GHA and DoC harness
 
-shimmy-sandbox-prototypes:
+separately approved qualification harness:
   real CodeBuild/Lambda packaging and target probe
 
-shimmy-docs:
+reviewed project evidence:
   accepted canonical evidence and final bounded interpretation
 ```
 
 ### Imperial DoC storage
 
 ```text
-/vol/bitbucket/ys25/shimmy/qemu-fallback/
+<approved DoC project scratch>/shimmy/qemu-fallback/
 ├── sources/
 ├── images/
 │   ├── base/
@@ -315,13 +316,13 @@ All DoC downloads, generated images and raw results go under this root, never Do
 
 ### GitHub Actions
 
-Manual `workflow_dispatch` smoke proves:
+Push and manual `workflow_dispatch` smoke prove:
 
 - command/config transformation;
 - file parity;
 - RPC parity for stdio, IPC, TCP, HTTP and WS;
-- Python and Lean fixtures without source changes;
-- KVM detection and recorded TCG fallback;
+- generic evaluator fixtures without source changes;
+- explicit TCG selection;
 - timeout/crash cleanup;
 - no stable performance claim.
 
@@ -517,7 +518,7 @@ Commit: `ci(qemu): prove transparent fallback parity`.
 **Controller procedure:**
 
 1. Strict CA-backed SSH to the less-loaded permitted batch host.
-2. Keep downloads/images/results under `/vol/bitbucket/ys25/shimmy/qemu-fallback/`.
+2. Keep downloads/images/results under `<approved DoC project scratch>/shimmy/qemu-fallback/`.
 3. Hold evaluator and Shimmy config constant; toggle only `FUNCTION_QEMU_ENABLED` plus required runtime artifacts.
 4. Run correctness before performance; begin N=1, then N=2 if load/memory/cleanup gates pass.
 5. Record KVM and TCG separately, with three fresh process/VM repeats.
@@ -526,8 +527,8 @@ Commit: `ci(qemu): prove transparent fallback parity`.
 ## Task 8: Qualify real Lambda x86_64 TCG
 
 **Files:**
-- Create in `shimmy-sandbox-prototypes`: `probe-lambda/shimmy-qemu-fallback/`
-- Add accepted evidence to `shimmy-docs` only after validation
+- Create the target probe in the separately approved qualification harness.
+- Add accepted evidence here only after validation.
 
 **Precondition:** explicit owner approval for AWS writes/cost.
 
@@ -546,7 +547,7 @@ Commit: `ci(qemu): prove transparent fallback parity`.
 - Modify: `README.md`
 - Modify: `docs/deployment-recipes.md`
 - Create or modify: `docs/qemu-final-fallback.md`
-- Update this plan and accepted `shimmy-docs` evidence
+- Update this plan and the checked-in evidence ledger
 
 **Steps:**
 

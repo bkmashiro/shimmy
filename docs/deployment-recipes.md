@@ -21,6 +21,7 @@ This page is the short version of the current runtime/profile/env surface. Use i
 | Python-reactor Lambda Feedback package | LF package-style evaluator that can run with packages already in the reactor artifact plus bundled pure-Python deps. | `FUNCTION_INTERFACE=wasm`; `FUNCTION_WASM_PROFILE=python-reactor`; `FUNCTION_WASM_MODULE=/path/to/python-reactor.wasm`; `FUNCTION_LF_ROOT=/path/to/package`; `FUNCTION_LF_EVAL_ENTRYPOINT=module:function` | `FUNCTION_LF_CONFIG`; `FUNCTION_LF_PREVIEW_ENTRYPOINT`; `FUNCTION_LF_ADAPTER_ROOT`; `FUNCTION_LF_BUNDLER`; `FUNCTION_LF_INCLUDE_ROOTS`; `FUNCTION_LF_SYS_PATH`; `FUNCTION_LF_BUNDLE_OUT` | Shimmy runs the bundler once at startup, then executes the generated script through python-reactor. |
 | Pyodide compatibility | Heavy Python package stack, especially SciPy/Pandas or Emscripten/Pyodide-only packages. | `FUNCTION_INTERFACE=pyodide`; `FUNCTION_PYODIDE_RUNNER=/path/to/runner.js`; plus either `FUNCTION_PYODIDE_SCRIPT=/path/to/eval.py` or package-mode envs | `FUNCTION_PYODIDE_PACKAGES`; `FUNCTION_PYODIDE_ROOT`; `FUNCTION_PYODIDE_EVAL_ENTRYPOINT`; `FUNCTION_PYODIDE_PREVIEW_ENTRYPOINT`; `FUNCTION_PYODIDE_ADAPTER` | This is a Node/Pyodide subprocess lane, not the same in-process wazero pool as `wasm`. |
 | Legacy RPC/file | Existing non-WASM workers or fallback integrations. | `FUNCTION_INTERFACE=rpc` or `FUNCTION_INTERFACE=file`; `FUNCTION_COMMAND=...` | RPC transport/file-mode worker options | Keep for compatibility and comparison. |
+| Full Linux via QEMU | An existing `file` or `rpc` worker needs a sealed full-Linux compatibility environment. | Existing interface/command config; `FUNCTION_QEMU_ENABLED=true`; `FUNCTION_QEMU_BINARY`; `FUNCTION_QEMU_ROOTFS`; `FUNCTION_QEMU_IMAGE_MANIFEST` | `FUNCTION_QEMU_RUNNER`; `FUNCTION_QEMU_ACCELERATOR`; bounded memory/vCPU/boot settings; `FUNCTION_QEMU_NETWORK_PROFILE` | Transparent wrapper only: do not use `FUNCTION_INTERFACE=qemu`. QEMU and DBI are mutually exclusive. |
 
 ## Verification status
 
@@ -29,11 +30,11 @@ This page is the short version of the current runtime/profile/env surface. Use i
 | Python-reactor | Dispatcher/profile tests, package-bundling startup tests, pinned artifact hash/export verification | CodeBuild Linux schema-v2/v3 workload runs through the real Shimmy HTTP path with `v1.0.14` |
 | Pyodide | Dispatcher/script/package-mode routing tests and the checked-in Node runner contract | GitHub Actions 17-row HTTP E2E plus CodeBuild schema-v2/v3 Pure/NumPy/SymPy/SciPy runs |
 | Native + DBI | Wrapper argv/config/fail-closed unit tests for both `file` and `rpc` | Real Lambda x86_64 Python and Lean HTTP E2E plus the bounded seven-rule policy matrix |
+| Full Linux via QEMU | Wrapper/protocol/lifecycle tests plus byte-reproducible manifest-bound Linux artifacts | GitHub-hosted x86_64 TCG file and all-RPC-transport parity; DoC TCG fresh-file parity. Lambda TCG is not yet qualified and DoC KVM is permission-blocked. |
 
-Canonical raw JSON and interpretation reports are indexed by the companion
-`shimmy-docs/docs/current/evidence/README.md`. The evidence verifies the listed
-paths and tested boundaries, not automatic dependency installation, arbitrary
-package compatibility, or a complete production DBI sandbox.
+The checked-in evidence files verify the listed paths and tested boundaries,
+not automatic dependency installation, arbitrary package compatibility, or a
+complete production sandbox.
 
 ## Artifact policy for `python-reactor.wasm`
 
@@ -92,6 +93,48 @@ Current eligibility and limits:
 
 Do not promote COW to `auto`/default without a separate compatibility and
 production evidence decision.
+
+## QEMU full-Linux fallback (explicit opt-in)
+
+QEMU wraps the existing process worker. Keep `FUNCTION_INTERFACE=file` or
+`FUNCTION_INTERFACE=rpc`; all current RPC transports remain valid. A minimal
+file-worker deployment looks like:
+
+```bash
+FUNCTION_INTERFACE=file \
+FUNCTION_COMMAND=/opt/evaluator/eval \
+FUNCTION_QEMU_ENABLED=true \
+FUNCTION_QEMU_RUNNER=/opt/shimmy/bin/shimmy-qemu-runner \
+FUNCTION_QEMU_BINARY=/usr/bin/qemu-system-x86_64 \
+FUNCTION_QEMU_ROOTFS=/opt/shimmy-qemu/evaluator.squashfs \
+FUNCTION_QEMU_IMAGE_MANIFEST=/opt/shimmy-qemu/manifest.json \
+FUNCTION_QEMU_ACCELERATOR=tcg \
+FUNCTION_QEMU_NETWORK_PROFILE=none \
+FUNCTION_QEMU_MEMORY_MB=512 \
+FUNCTION_QEMU_VCPUS=1 \
+FUNCTION_QEMU_BOOT_TIMEOUT=120s \
+./shimmy serve
+```
+
+Deployment requirements and boundaries:
+
+- Build and ship the manifest, pinned kernel, reproducible initramfs and
+  read-only raw SquashFS rootfs together. The builder records the source-lock
+  digest in the manifest; the runner validates that field and verifies every
+  referenced artifact SHA-256 before starting QEMU.
+- The original command, arguments, working directory and required dependencies
+  must exist at the configured paths inside the guest image.
+- `file` retains a fresh worker/VM per request. `rpc` retains one persistent
+  worker/VM and tunnels stdio, IPC, TCP, HTTP or WebSocket as raw streams.
+- `FUNCTION_QEMU_NETWORK_PROFILE=none` is the default tested profile. It does
+  not expose Host files, credentials, SSH agents or Host networking.
+- Enabling QEMU and DynamoRIO together fails during configuration. Shimmy never
+  replays a request under QEMU after native or DBI execution fails.
+- Select `kvm` only when `/dev/kvm` is readable and writable by the service
+  account. There is no silent KVM-to-TCG fallback in qualification profiles.
+- Current evidence is **PARTIAL**: see
+  [`qemu-fallback-evidence.json`](qemu-fallback-evidence.json). Hosted and DoC
+  TCG evidence is not a substitute for the still-unrun AWS Lambda TCG gate.
 
 ## Examples
 

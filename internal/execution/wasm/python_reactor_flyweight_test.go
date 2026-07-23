@@ -19,6 +19,13 @@ func TestReactorPythonPoolSizeHonorsConfiguredCapacity(t *testing.T) {
 	require.Equal(t, 2, reactorPythonPoolSize(-1, 2))
 }
 
+func TestReactorPythonInitConcurrencyIsBoundedWithoutCappingPool(t *testing.T) {
+	require.Equal(t, 1, reactorPythonInitConcurrency(1))
+	require.Equal(t, 3, reactorPythonInitConcurrency(3))
+	require.Equal(t, 4, reactorPythonInitConcurrency(8))
+	require.Equal(t, 4, reactorPythonInitConcurrency(10_000))
+}
+
 func TestReactorPythonFlyweightSharesCompiledCodeAcrossDistinctInstances(t *testing.T) {
 	ctx := context.Background()
 	flyweight, err := newReactorPythonFlyweight(ctx, buildTestMemoryModule(t, 1), Config{

@@ -46,6 +46,7 @@ package wasm
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -167,6 +168,16 @@ func reactorPythonPoolSize(configured, cpuCount int) int {
 		return 4
 	}
 	return cpuCount
+}
+
+func reactorPythonInitConcurrency(poolSize int) int {
+	if poolSize < 1 {
+		return 1
+	}
+	if poolSize > 4 {
+		return 4
+	}
+	return poolSize
 }
 
 // ReactorPythonRunner keeps one python-reactor.wasm instance alive and
@@ -1225,11 +1236,10 @@ type ReactorPythonDispatcher struct {
 	pool   chan *ReactorPythonRunner
 	script string
 
-	// wasmBytes holds the python-reactor.wasm file contents loaded once in Start.
-	// The dispatcher compiles this slice once into flyweight and replacement
-	// runners instantiate from that shared compiled module.
-	wasmBytes []byte
-	flyweight *reactorPythonFlyweight
+	// artifactDigest binds evidence to the bytes compiled once at Start. The
+	// large raw slice is intentionally not retained after compilation.
+	artifactDigest [sha256.Size]byte
+	flyweight      *reactorPythonFlyweight
 	// cowCoordinator owns one canonical post-py_prepare linear-memory image for
 	// this exact dispatcher/module/evaluator/config deployment.
 	cowCoordinator *cowImageCoordinator
@@ -1298,7 +1308,7 @@ func (d *ReactorPythonDispatcher) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("reactor-python: read wasm %q: %w", d.cfg.ModulePath, err)
 	}
-	d.wasmBytes = wasmBytes
+	d.artifactDigest = sha256.Sum256(wasmBytes)
 	d.log.Info("loaded python-reactor.wasm",
 		zap.String("path", d.cfg.ModulePath),
 		zap.Int("size", len(wasmBytes)),
@@ -1311,7 +1321,7 @@ func (d *ReactorPythonDispatcher) Start(ctx context.Context) error {
 	if err := d.cfg.validateSnapshotMode(poolSize); err != nil {
 		return fmt.Errorf("reactor-python: %w", err)
 	}
-	flyweight, err := newReactorPythonFlyweight(ctx, d.wasmBytes, d.cfg, d.log)
+	flyweight, err := newReactorPythonFlyweight(ctx, wasmBytes, d.cfg, d.log)
 	if err != nil {
 		return fmt.Errorf("reactor-python: create shared runtime: %w", err)
 	}
@@ -1336,11 +1346,19 @@ func (d *ReactorPythonDispatcher) Start(ctx context.Context) error {
 	results := make([]result, poolSize)
 	var wg sync.WaitGroup
 	wg.Add(poolSize)
+	initSlots := make(chan struct{}, reactorPythonInitConcurrency(poolSize))
 
 	for i := 0; i < poolSize; i++ {
 		i := i
 		go func() {
 			defer wg.Done()
+			select {
+			case initSlots <- struct{}{}:
+				defer func() { <-initSlots }()
+			case <-ctx.Done():
+				results[i] = result{index: i, err: fmt.Errorf("initialization cancelled: %w", ctx.Err())}
+				return
+			}
 			runner := newReactorPythonRunnerWithFlyweight(d.cfg.ModulePath, d.flyweight, d.cfg, d.log, d.cowCoordinator)
 			if err := runner.Init(ctx); err != nil {
 				results[i] = result{index: i, err: err}

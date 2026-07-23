@@ -14,7 +14,7 @@ This is a density/lifecycle change, not an expansion of the reset claim: COW sti
 
 ### Dispatcher flyweight (shared, immutable after Start)
 
-- one loaded Guest artifact byte slice and digest;
+- one Guest artifact digest retained after one-time read/compile; the raw 241 MiB slice is released;
 - one `wazero.CompilationCache` when configured;
 - one `wazero.Runtime` / Store;
 - one instantiated WASI host module and one `env` host module definition;
@@ -61,6 +61,6 @@ This is a density/lifecycle change, not an expansion of the reset claim: COW sti
 - distinct mutable module instances and COW mappings;
 - one module timeout cannot invalidate a healthy sibling;
 - replacement does not create a new Runtime or recompile;
-- no pool hard cap of four; configured capacity remains bounded by Host policy/configuration;
+- no pool hard cap of four; configured capacity remains bounded by Host policy/configuration, while concurrent prepare is capped at four to bound startup peak;
 - startup/steady-state PSS claims are generated from raw Linux evidence, not estimated `H` constants;
 - clean signed commit and pushed branch after all gates pass.

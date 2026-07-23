@@ -199,10 +199,9 @@ def evaluation_function(response, answer, params=None):
 	statusAfter, err := readProcStatusKB()
 	require.NoError(t, err)
 
-	artifactDigest := sha256.Sum256(dispatcher.wasmBytes)
 	evidence := map[string]any{
 		"schema_version":             1,
-		"artifact_sha256":            hex.EncodeToString(artifactDigest[:]),
+		"artifact_sha256":            hex.EncodeToString(dispatcher.artifactDigest[:]),
 		"canonical_image_sha256":     imageID,
 		"instances":                  instances,
 		"memory_bytes":               memorySize,
@@ -295,10 +294,9 @@ func writeCowPythonEvidence(t *testing.T, dispatcher *ReactorPythonDispatcher, i
 	if path == "" {
 		return
 	}
-	artifactDigest := sha256.Sum256(dispatcher.wasmBytes)
 	kernelBytes, _ := os.ReadFile("/proc/version")
 	evidence := map[string]any{
-		"artifact_sha256":        hex.EncodeToString(artifactDigest[:]),
+		"artifact_sha256":        hex.EncodeToString(dispatcher.artifactDigest[:]),
 		"canonical_image_sha256": imageID,
 		"memory_bytes":           memorySize,
 		"instances":              cap(dispatcher.pool),

@@ -54,7 +54,7 @@ jobs:
       - name: Run focused COW correctness tests
         run: |
           go test ./internal/execution/wasm \
-            -run='^(TestCow|TestReactorPython(PoolSize|Flyweight|DispatcherPartialStart)|TestBorrowedReactorPythonRunner)' \
+            -run='^(TestCow|TestReactorPython(PoolSize|InitConcurrency|Flyweight|DispatcherPartialStart)|TestBorrowedReactorPythonRunner)' \
             -count=1 -v -timeout=120s
 
       - name: Run full Linux test suite

@@ -375,6 +375,7 @@ func (r *ReactorPythonRunner) SendRequest(ctx context.Context, script, method st
 	// stderr is Host-side mutable state and is not part of the linear-memory
 	// image. Bound it to one request so diagnostics cannot bleed across leases.
 	r.stderrBuf.Reset()
+	defer r.stderrBuf.Reset()
 
 	reqTimeout := r.cfg.Timeout
 	if reqTimeout == 0 {

@@ -70,3 +70,25 @@ func TestCowWazeroMemoryGrowthFailsAfterPreparedImageAttach(t *testing.T) {
 	require.Equal(t, before, supervisor.mod.Memory().Size())
 	require.True(t, supervisor.IsHealthy(), "a rejected grow leaves the fixed mapping valid")
 }
+
+func TestCowSupervisorRestoreFailureMarksInstanceUnhealthy(t *testing.T) {
+	cfg := Config{
+		ModulePath:     echoModulePath(t),
+		MaxInstances:   1,
+		Timeout:        5 * time.Second,
+		SnapshotMode:   "cow",
+		MaxMemoryPages: 256,
+	}
+	dispatcher := NewDispatcher(cfg, newTestLogger(t))
+	require.NoError(t, dispatcher.Start(context.Background()))
+	t.Cleanup(func() { require.NoError(t, dispatcher.Shutdown(context.Background())) })
+
+	supervisor := <-dispatcher.pool
+	defer func() { dispatcher.pool <- supervisor }()
+	require.NoError(t, dispatcher.cowCoordinator.Close(), "inject canonical-image loss")
+
+	_, err := supervisor.Send(context.Background(), "eval", map[string]any{"restore": "must-fail"})
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrCowImageClosed)
+	require.False(t, supervisor.IsHealthy(), "restore failure must prevent pool reuse")
+}

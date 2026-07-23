@@ -33,6 +33,8 @@ def evaluation_function(response, answer, params=None):
     if params and params.get("loop"):
         while True:
             pass
+    if params and params.get("raise"):
+        raise ValueError("recoverable-cow-test")
     _counter += 1
     return {"is_correct": True, "feedback": f"counter={_counter}"}
 `)
@@ -82,6 +84,17 @@ def evaluation_function(response, answer, params=None):
 		memorySize = assertCowPythonPoolAtBaseline(t, dispatcher, imageID)
 	}
 
+	errorResult, recoverableErr := dispatcher.Send(context.Background(), "eval", map[string]any{
+		"response": "x",
+		"answer":   "x",
+		"params":   map[string]any{"raise": true},
+	})
+	require.NoError(t, recoverableErr, "Python exceptions remain structured guest results")
+	errorPayload, ok := errorResult["result"].(map[string]any)
+	require.True(t, ok)
+	require.NotEmpty(t, errorPayload["error"])
+	memorySize = assertCowPythonPoolAtBaseline(t, dispatcher, imageID)
+
 	timeoutCtx, timeoutCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	_, timeoutErr := dispatcher.Send(timeoutCtx, "eval", map[string]any{
 		"response": "x",
@@ -105,6 +118,7 @@ func assertCowPythonPoolAtBaseline(t *testing.T, dispatcher *ReactorPythonDispat
 	for range cap(dispatcher.pool) {
 		runner := <-dispatcher.pool
 		runners = append(runners, runner)
+		require.Zero(t, runner.stderrBuf.Len(), "Host stderr must be empty before pool return")
 
 		strategy, ok := runner.strategy.(*CowSnapshotStrategy)
 		require.True(t, ok, "expected CowSnapshotStrategy, got %T", runner.strategy)
@@ -142,6 +156,7 @@ func writeCowPythonEvidence(t *testing.T, dispatcher *ReactorPythonDispatcher, i
 		"memory_bytes":           memorySize,
 		"instances":              cap(dispatcher.pool),
 		"successful_requests":    6,
+		"recoverable_errors":     1,
 		"timeout_replacements":   1,
 		"fallback_count":         0,
 		"go_version":             runtime.Version(),

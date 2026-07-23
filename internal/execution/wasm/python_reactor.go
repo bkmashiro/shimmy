@@ -407,6 +407,20 @@ func (r *ReactorPythonRunner) SendRequest(ctx context.Context, script, method st
 	// and UFFD this preserves the same request-isolation contract while moving
 	// the copy from the next lease to the end of the current one.
 	defer func() {
+		if contextErr := execCtx.Err(); contextErr != nil {
+			// WithCloseOnContextDone can permanently close the module from any
+			// exported call (alloc/evaluate/py_exec/response helpers), not only the
+			// main evaluator call. Conservatively discard on every ended request
+			// context even if response parsing happened to finish concurrently.
+			r.closed = true
+			result = nil
+			if err == nil {
+				err = fmt.Errorf("reactor python: request context ended: %w", contextErr)
+			} else if !errors.Is(err, contextErr) {
+				err = errors.Join(err, fmt.Errorf("reactor python: request context ended: %w", contextErr))
+			}
+			return
+		}
 		if r.closed {
 			// WithCloseOnContextDone permanently closed the module. The dispatcher
 			// will discard it; trying to restore a dead module adds no safety.

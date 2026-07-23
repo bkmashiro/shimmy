@@ -76,10 +76,11 @@ jobs:
       - name: Download pinned Python reactor artifact
         run: |
           curl -fsSL \
-            "https://github.com/bkmashiro/shimmy-wasm-go/releases/download/wasm-artifacts/python-reactor.wasm" \
+            "https://github.com/bkmashiro/webassembly-language-runtimes/releases/download/v1.0.14/python-reactor.wasm" \
             -o python-reactor.wasm
-          test -s python-reactor.wasm
-          shasum -a 256 python-reactor.wasm | tee python-reactor.sha256
+          echo "78dcbb6d673351c0d3b776c42d2fb93b6f638cdc714d58072dece4b115edaa72  python-reactor.wasm" \
+            | sha256sum --check
+          sha256sum python-reactor.wasm | tee python-reactor.sha256
 
       - name: Run prepared-baseline and repeated-state proof
         env:
@@ -88,7 +89,7 @@ jobs:
         run: |
           go test ./internal/execution/wasm \
             -run='^TestCowPythonReactorPreparedBaselines$' \
-            -count=1 -v -timeout=30m
+            -count=1 -v -timeout=30m 2>&1 | tee cow-python-test.log
 
       - name: Upload prepared-image evidence
         if: always()
@@ -98,5 +99,6 @@ jobs:
           path: |
             python-reactor.sha256
             cow-python-evidence.json
+            cow-python-test.log
           if-no-files-found: warn
           retention-days: 90

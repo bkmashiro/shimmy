@@ -62,6 +62,113 @@ import (
 	"go.uber.org/zap"
 )
 
+// reactorPythonFlyweight owns the immutable wazero state shared by every
+// Python reactor module in one dispatcher. Runtime.InstantiateModule is safe
+// to call repeatedly with the same CompiledModule; each returned api.Module
+// still owns distinct mutable memory, globals, tables, WASI state, and close
+// state.
+type reactorPythonFlyweight struct {
+	mu       sync.RWMutex
+	closed   bool
+	runtime  wazero.Runtime
+	compiled wazero.CompiledModule
+	cache    wazero.CompilationCache
+}
+
+func newReactorPythonFlyweight(ctx context.Context, wasmBytes []byte, cfg Config, log *zap.Logger) (*reactorPythonFlyweight, error) {
+	if len(wasmBytes) == 0 {
+		return nil, fmt.Errorf("reactor python: empty wasm artifact")
+	}
+
+	rtCfg := wazero.NewRuntimeConfig().WithCloseOnContextDone(true)
+	var cache wazero.CompilationCache
+	if cfg.CompileCacheDir != "" {
+		var err error
+		cache, err = wazero.NewCompilationCacheWithDir(cfg.CompileCacheDir)
+		if err != nil {
+			log.Warn("failed to create wazero compilation cache, continuing without cache",
+				zap.String("dir", cfg.CompileCacheDir), zap.Error(err))
+			cache = nil
+		} else {
+			rtCfg = rtCfg.WithCompilationCache(cache)
+			log.Info("wazero compilation cache enabled", zap.String("dir", cfg.CompileCacheDir))
+		}
+	}
+	if cfg.MaxMemoryPages > 0 {
+		rtCfg = rtCfg.WithMemoryLimitPages(cfg.MaxMemoryPages)
+	}
+
+	rt := wazero.NewRuntimeWithConfig(ctx, rtCfg)
+	closePartial := func() {
+		_ = rt.Close(ctx)
+		if cache != nil {
+			_ = cache.Close(ctx)
+		}
+	}
+	if _, err := wasi_snapshot_preview1.Instantiate(ctx, rt); err != nil {
+		closePartial()
+		return nil, fmt.Errorf("reactor python: instantiate wasi: %w", err)
+	}
+	if err := instantiateEnvModule(ctx, rt); err != nil {
+		closePartial()
+		return nil, fmt.Errorf("reactor python: instantiate env module: %w", err)
+	}
+	if cfg.CompileCacheDir == "" {
+		log.Info("compiling python-reactor.wasm (~1-3 min cold, set FUNCTION_WASM_COMPILE_CACHE to skip on repeat starts)")
+	}
+	compiled, err := rt.CompileModule(ctx, wasmBytes)
+	if err != nil {
+		closePartial()
+		return nil, fmt.Errorf("reactor python: compile: %w", err)
+	}
+	return &reactorPythonFlyweight{runtime: rt, compiled: compiled, cache: cache}, nil
+}
+
+func (f *reactorPythonFlyweight) Instantiate(ctx context.Context, cfg wazero.ModuleConfig) (api.Module, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if f.closed || f.runtime == nil || f.compiled == nil {
+		return nil, fmt.Errorf("reactor python: shared runtime is closed")
+	}
+	return f.runtime.InstantiateModule(ctx, f.compiled, cfg)
+}
+
+func (f *reactorPythonFlyweight) Close(ctx context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closed {
+		return nil
+	}
+	f.closed = true
+	var compiledErr, runtimeErr, cacheErr error
+	if f.compiled != nil {
+		compiledErr = f.compiled.Close(ctx)
+		f.compiled = nil
+	}
+	if f.runtime != nil {
+		runtimeErr = f.runtime.Close(ctx)
+		f.runtime = nil
+	}
+	if f.cache != nil {
+		cacheErr = f.cache.Close(ctx)
+		f.cache = nil
+	}
+	return errors.Join(compiledErr, runtimeErr, cacheErr)
+}
+
+func reactorPythonPoolSize(configured, cpuCount int) int {
+	if configured > 0 {
+		return configured
+	}
+	if cpuCount < 1 {
+		cpuCount = 1
+	}
+	if cpuCount > 4 {
+		return 4
+	}
+	return cpuCount
+}
+
 // ReactorPythonRunner keeps one python-reactor.wasm instance alive and
 // executes requests against it with snapshot/restore isolation.
 //
@@ -83,11 +190,13 @@ type ReactorPythonRunner struct {
 
 	stderrBuf bytes.Buffer // CPython stderr — readable from SendRequest errors
 
-	rt         wazero.Runtime
-	mod        api.Module
-	strategy   SnapshotStrategy // taken after trusted prepare; restored after each request
-	cowSupport *cowRuntimeSupport
-	prepared   bool
+	rt            wazero.Runtime
+	mod           api.Module
+	flyweight     *reactorPythonFlyweight
+	ownsFlyweight bool
+	strategy      SnapshotStrategy // taken after trusted prepare; restored after each request
+	cowSupport    *cowRuntimeSupport
+	prepared      bool
 
 	// Cached exported functions.
 	fnPyInit    api.Function
@@ -137,6 +246,13 @@ func newReactorPythonRunnerWithBytes(wasmPath string, wasmBytes []byte, cfg Conf
 	return r
 }
 
+func newReactorPythonRunnerWithFlyweight(wasmPath string, flyweight *reactorPythonFlyweight, cfg Config, log *zap.Logger, cowCoordinator *cowImageCoordinator) *ReactorPythonRunner {
+	r := NewReactorPythonRunner(wasmPath, cfg, log, cowCoordinator)
+	r.flyweight = flyweight
+	r.rt = flyweight.runtime
+	return r
+}
+
 // Init loads python-reactor.wasm, instantiates it in reactor mode (calling
 // _initialize), invokes py_init(), performs trusted evaluator preparation, and
 // then captures the prepared linear-memory baseline. This is the expensive
@@ -149,71 +265,31 @@ func (r *ReactorPythonRunner) Init(ctx context.Context) error {
 		return nil
 	}
 
-	wasmBytes := r.wasmBytes
-	if wasmBytes == nil {
-		if r.wasmPath == "" {
-			return fmt.Errorf("reactor python: wasmPath must be set")
-		}
-		r.log.Info("reading python-reactor.wasm", zap.String("path", r.wasmPath))
-		b, err := os.ReadFile(r.wasmPath)
-		if err != nil {
-			return fmt.Errorf("reactor python: read %q: %w", r.wasmPath, err)
-		}
-		wasmBytes = b
-	} else {
-		r.log.Debug("reusing pre-loaded python-reactor.wasm bytes", zap.Int("size", len(wasmBytes)))
-	}
-
-	rtCfg := wazero.NewRuntimeConfig().
-		// WithCloseOnContextDone causes wazero to interrupt a running WASM module
-		// when the call context is cancelled or times out. Without this flag, a
-		// Python infinite loop would block the runner goroutine indefinitely even
-		// after context.WithTimeout fires. When the module is interrupted it is
-		// permanently closed; the runner is then marked unhealthy and dropped from
-		// the pool by ReactorPythonDispatcher.
-		WithCloseOnContextDone(true)
-
-	if r.cfg.CompileCacheDir != "" {
-		cache, err := wazero.NewCompilationCacheWithDir(r.cfg.CompileCacheDir)
-		if err != nil {
-			r.log.Warn("failed to create wazero compilation cache, continuing without cache",
-				zap.String("dir", r.cfg.CompileCacheDir),
-				zap.Error(err))
+	if r.flyweight == nil {
+		wasmBytes := r.wasmBytes
+		if wasmBytes == nil {
+			if r.wasmPath == "" {
+				return fmt.Errorf("reactor python: wasmPath must be set")
+			}
+			r.log.Info("reading python-reactor.wasm", zap.String("path", r.wasmPath))
+			b, err := os.ReadFile(r.wasmPath)
+			if err != nil {
+				return fmt.Errorf("reactor python: read %q: %w", r.wasmPath, err)
+			}
+			wasmBytes = b
 		} else {
-			rtCfg = rtCfg.WithCompilationCache(cache)
-			r.log.Info("wazero compilation cache enabled", zap.String("dir", r.cfg.CompileCacheDir))
+			r.log.Debug("reusing pre-loaded python-reactor.wasm bytes", zap.Int("size", len(wasmBytes)))
 		}
+		flyweight, err := newReactorPythonFlyweight(ctx, wasmBytes, r.cfg, r.log)
+		if err != nil {
+			return err
+		}
+		r.flyweight = flyweight
+		r.ownsFlyweight = true
+		r.rt = flyweight.runtime
+	} else {
+		r.log.Debug("reusing dispatcher-owned wazero runtime and compiled module")
 	}
-
-	if r.cfg.MaxMemoryPages > 0 {
-		rtCfg = rtCfg.WithMemoryLimitPages(r.cfg.MaxMemoryPages)
-	}
-	rt := wazero.NewRuntimeWithConfig(ctx, rtCfg)
-
-	if _, err := wasi_snapshot_preview1.Instantiate(ctx, rt); err != nil {
-		_ = rt.Close(ctx)
-		return fmt.Errorf("reactor python: instantiate wasi: %w", err)
-	}
-
-	// CPython 3.14 WASM built with WASI SDK 33 imports ~90 symbols from the
-	// "env" host module: dynamic-linking stubs, numpy complex math, float16
-	// helpers, float status setters, and random hypergeometric stubs.
-	// All are registered by instantiateEnvModule.
-	if err := instantiateEnvModule(ctx, rt); err != nil {
-		_ = rt.Close(ctx)
-		return fmt.Errorf("reactor python: instantiate env module: %w", err)
-	}
-
-	// Compile module (instant on cache hit; ~1-3 min cold for 242 MB binary).
-	if r.cfg.CompileCacheDir == "" {
-		r.log.Info("compiling python-reactor.wasm (~1-3 min cold, set FUNCTION_WASM_COMPILE_CACHE to skip on repeat starts)")
-	}
-	compiled, err := rt.CompileModule(ctx, wasmBytes)
-	if err != nil {
-		_ = rt.Close(ctx)
-		return fmt.Errorf("reactor python: compile: %w", err)
-	}
-	defer func() { _ = compiled.Close(ctx) }()
 
 	// Reactor mode: wazero calls _initialize (not _start) on instantiation.
 	// PYTHONHOME tells CPython where to find the stdlib that wasi-vfs packed
@@ -258,13 +334,16 @@ func (r *ReactorPythonRunner) Init(ctx context.Context) error {
 	if r.cowSupport != nil {
 		instantiateCtx = r.cowSupport.instantiateContext(ctx)
 	}
-	mod, err := rt.InstantiateModule(instantiateCtx, compiled, mc)
+	mod, err := r.flyweight.Instantiate(instantiateCtx, mc)
 	if err != nil {
-		_ = rt.Close(ctx)
+		if r.ownsFlyweight {
+			_ = r.flyweight.Close(ctx)
+			r.flyweight = nil
+			r.rt = nil
+		}
 		return fmt.Errorf("reactor python: instantiate module: %w", err)
 	}
 
-	r.rt = rt
 	r.mod = mod
 
 	// Cache and validate exported functions.
@@ -1082,17 +1161,25 @@ func (r *ReactorPythonRunner) runInitScript(ctx context.Context, phase, script s
 	return nil
 }
 
-// closeAll closes the module and runtime. Must be called with r.mu held.
+// closeAll closes the runner-owned module and, for standalone runners, its
+// owned flyweight. Dispatcher runners borrow the shared Runtime and must never
+// close it while siblings are alive. Must be called with r.mu held.
 func (r *ReactorPythonRunner) closeAll(ctx context.Context) error {
+	var moduleErr, flyweightErr, runtimeErr error
 	if r.mod != nil {
-		_ = r.mod.Close(ctx)
+		moduleErr = r.mod.Close(ctx)
 		r.mod = nil
 	}
-	if r.rt != nil {
-		_ = r.rt.Close(ctx)
-		r.rt = nil
+	if r.ownsFlyweight && r.flyweight != nil {
+		flyweightErr = r.flyweight.Close(ctx)
+		r.flyweight = nil
+		r.ownsFlyweight = false
+	} else if r.flyweight == nil && r.rt != nil {
+		// Compatibility for manually-constructed legacy runners.
+		runtimeErr = r.rt.Close(ctx)
 	}
-	return nil
+	r.rt = nil
+	return errors.Join(moduleErr, flyweightErr, runtimeErr)
 }
 
 // Shutdown closes the WASM module and runtime.
@@ -1127,21 +1214,22 @@ func (r *ReactorPythonRunner) newSnapshotStrategy(mem api.Memory) SnapshotStrate
 // ReactorPythonDispatcher implements dispatcher.Dispatcher using a pool of
 // ReactorPythonRunner instances backed by python-reactor.wasm.
 //
-// Each runner initialises CPython once (~7-8 s) and then handles requests with
-// true per-request interpreter reset via snapshot/restore (~20-100 ms/request).
-//
-// Pool size defaults to min(runtime.NumCPU(), 4) since each runner consumes
-// ~100 MB of WASM linear memory (CPython heap after py_init).
+// Each runner initialises an independent CPython module instance once and then
+// handles requests with per-request linear-memory reset. The dispatcher shares
+// one wazero Runtime and CompiledModule across the pool; configured capacity is
+// honored, while the automatic default remains min(runtime.NumCPU(), 4) to
+// avoid surprising startup/prepare pressure.
 type ReactorPythonDispatcher struct {
 	cfg    Config
 	log    *zap.Logger
 	pool   chan *ReactorPythonRunner
 	script string
 
-	// wasmBytes holds the python-reactor.wasm file contents, loaded once in
-	// Start and shared by every pool runner (and replacement spawn) so the
-	// 242 MB binary is not re-read from disk per runner.
+	// wasmBytes holds the python-reactor.wasm file contents loaded once in Start.
+	// The dispatcher compiles this slice once into flyweight and replacement
+	// runners instantiate from that shared compiled module.
 	wasmBytes []byte
+	flyweight *reactorPythonFlyweight
 	// cowCoordinator owns one canonical post-py_prepare linear-memory image for
 	// this exact dispatcher/module/evaluator/config deployment.
 	cowCoordinator *cowImageCoordinator
@@ -1216,19 +1304,18 @@ func (d *ReactorPythonDispatcher) Start(ctx context.Context) error {
 		zap.Int("size", len(wasmBytes)),
 	)
 
-	poolSize := d.cfg.MaxInstances
-	if poolSize <= 0 {
-		poolSize = runtime.NumCPU()
-	}
-	if poolSize > 4 {
-		poolSize = 4 // each runner uses ~100 MB; cap conservatively
-	}
+	poolSize := reactorPythonPoolSize(d.cfg.MaxInstances, runtime.NumCPU())
 
 	// Guard: snapshot modes that use process-wide state are only safe with a
 	// single instance.
 	if err := d.cfg.validateSnapshotMode(poolSize); err != nil {
 		return fmt.Errorf("reactor-python: %w", err)
 	}
+	flyweight, err := newReactorPythonFlyweight(ctx, d.wasmBytes, d.cfg, d.log)
+	if err != nil {
+		return fmt.Errorf("reactor-python: create shared runtime: %w", err)
+	}
+	d.flyweight = flyweight
 	if d.cfg.SnapshotMode == "cow" {
 		d.cowCoordinator = newCowImageCoordinator()
 	}
@@ -1254,7 +1341,7 @@ func (d *ReactorPythonDispatcher) Start(ctx context.Context) error {
 		i := i
 		go func() {
 			defer wg.Done()
-			runner := newReactorPythonRunnerWithBytes(d.cfg.ModulePath, d.wasmBytes, d.cfg, d.log, d.cowCoordinator)
+			runner := newReactorPythonRunnerWithFlyweight(d.cfg.ModulePath, d.flyweight, d.cfg, d.log, d.cowCoordinator)
 			if err := runner.Init(ctx); err != nil {
 				results[i] = result{index: i, err: err}
 				return
@@ -1279,8 +1366,7 @@ func (d *ReactorPythonDispatcher) Start(ctx context.Context) error {
 		for _, runner := range started {
 			_ = runner.Shutdown(ctx)
 		}
-		_ = d.closeCowCoordinator()
-		return firstErr
+		return errors.Join(firstErr, d.closeSharedResources(ctx))
 	}
 	for _, runner := range started {
 		d.pool <- runner
@@ -1397,7 +1483,7 @@ func (d *ReactorPythonDispatcher) spawnReplacement() {
 	defer cancel()
 
 	d.log.Info("reactor-python: initialising replacement runner")
-	runner := newReactorPythonRunnerWithBytes(d.cfg.ModulePath, d.wasmBytes, d.cfg, d.log, d.cowCoordinator)
+	runner := newReactorPythonRunnerWithFlyweight(d.cfg.ModulePath, d.flyweight, d.cfg, d.log, d.cowCoordinator)
 	if err := runner.Init(ctx); err != nil {
 		d.log.Error("reactor-python: replacement runner init failed", zap.Error(err))
 		return
@@ -1451,9 +1537,19 @@ func (d *ReactorPythonDispatcher) Shutdown(ctx context.Context) error {
 				}
 			}
 		default:
-			return errors.Join(firstErr, d.closeCowCoordinator())
+			return errors.Join(firstErr, d.closeSharedResources(ctx))
 		}
 	}
+}
+
+func (d *ReactorPythonDispatcher) closeSharedResources(ctx context.Context) error {
+	cowErr := d.closeCowCoordinator()
+	var flyweightErr error
+	if d.flyweight != nil {
+		flyweightErr = d.flyweight.Close(ctx)
+		d.flyweight = nil
+	}
+	return errors.Join(cowErr, flyweightErr)
 }
 
 func (d *ReactorPythonDispatcher) closeCowCoordinator() error {

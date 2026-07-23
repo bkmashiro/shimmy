@@ -21,10 +21,11 @@ package wasm
 //
 // # Snapshot / Restore
 //
-// After py_init() returns, the entire WASM linear memory is copied into a
-// Go []byte snapshot. Before each py_exec() call the snapshot is written back.
-// This resets CPython's heap to its exact post-initialisation state, providing
-// true per-request interpreter isolation:
+// After trusted py_init(), evaluator preparation, imports, and headroom
+// reservation, the configured SnapshotStrategy captures the WASM linear-memory
+// baseline. Every request restores that baseline after copying its response to
+// Go, so only clean runners return to the pool. This resets CPython's heap and
+// provides per-request interpreter isolation within the linear-memory contract:
 //
 //   - No sys.modules state from a previous request can bleed in.
 //   - User-defined globals, class state, etc. are fully reset.
@@ -36,20 +37,18 @@ package wasm
 //
 // # Host protocol
 //
-//  1. Restore memory snapshot (linear memory ← post-py_init state).
-//  2. ptr ← alloc(len(reqJSON))
-//  3. Write reqJSON into memory[ptr:ptr+len]
-//  4. py_exec(ptr, len)
-//  5. bufPtr ← resp_buf(); lenPtr ← resp_len()
-//  6. respLen ← int32 at memory[lenPtr:]
-//  7. result ← memory[bufPtr : bufPtr+respLen]
-//  8. (dealloc not needed — next restore clears the heap)
+//  1. Acquire a runner already at the prepared baseline.
+//  2. ptr ← alloc(len(reqJSON)); write reqJSON into linear memory.
+//  3. evaluate(ptr, len), or the legacy py_exec ABI.
+//  4. Copy and parse the response into a Go-owned value.
+//  5. Restore/remap the prepared baseline before returning the runner.
 
 import (
 	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -84,10 +83,11 @@ type ReactorPythonRunner struct {
 
 	stderrBuf bytes.Buffer // CPython stderr — readable from SendRequest errors
 
-	rt       wazero.Runtime
-	mod      api.Module
-	strategy SnapshotStrategy // snapshot taken after py_init(); restored before each py_exec()
-	prepared bool
+	rt         wazero.Runtime
+	mod        api.Module
+	strategy   SnapshotStrategy // taken after trusted prepare; restored after each request
+	cowSupport *cowRuntimeSupport
+	prepared   bool
 
 	// Cached exported functions.
 	fnPyInit    api.Function
@@ -112,12 +112,17 @@ func (r *ReactorPythonRunner) IsHealthy() bool {
 
 // NewReactorPythonRunner creates a ReactorPythonRunner.
 // Call Init before SendRequest.
-func NewReactorPythonRunner(wasmPath string, cfg Config, log *zap.Logger) *ReactorPythonRunner {
+func NewReactorPythonRunner(wasmPath string, cfg Config, log *zap.Logger, cowCoordinator ...*cowImageCoordinator) *ReactorPythonRunner {
 	cfg.applyDefaults()
+	var coordinator *cowImageCoordinator
+	if len(cowCoordinator) > 0 {
+		coordinator = cowCoordinator[0]
+	}
 	return &ReactorPythonRunner{
-		wasmPath: wasmPath,
-		cfg:      cfg,
-		log:      log.Named("reactor_python"),
+		wasmPath:   wasmPath,
+		cfg:        cfg,
+		log:        log.Named("reactor_python"),
+		cowSupport: newCowRuntimeSupport(cfg.SnapshotMode, coordinator),
 	}
 }
 
@@ -126,15 +131,16 @@ func NewReactorPythonRunner(wasmPath string, cfg Config, log *zap.Logger) *React
 // python-reactor.wasm once and hands the same slice to every pool runner so
 // the 242 MB file is not re-read per runner. wasmPath is retained for
 // diagnostics only.
-func newReactorPythonRunnerWithBytes(wasmPath string, wasmBytes []byte, cfg Config, log *zap.Logger) *ReactorPythonRunner {
-	r := NewReactorPythonRunner(wasmPath, cfg, log)
+func newReactorPythonRunnerWithBytes(wasmPath string, wasmBytes []byte, cfg Config, log *zap.Logger, cowCoordinator ...*cowImageCoordinator) *ReactorPythonRunner {
+	r := NewReactorPythonRunner(wasmPath, cfg, log, cowCoordinator...)
 	r.wasmBytes = wasmBytes
 	return r
 }
 
 // Init loads python-reactor.wasm, instantiates it in reactor mode (calling
-// _initialize), invokes py_init() to start CPython, then snapshots linear
-// memory. This is the expensive step (~7-8 s for Python startup).
+// _initialize), invokes py_init(), performs trusted evaluator preparation, and
+// then captures the prepared linear-memory baseline. This is the expensive
+// step (~7-8 s for Python startup, plus trusted imports).
 func (r *ReactorPythonRunner) Init(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -248,7 +254,11 @@ func (r *ReactorPythonRunner) Init(ctx context.Context) error {
 	}
 
 	r.log.Info("instantiating (reactor mode, _initialize)...")
-	mod, err := rt.InstantiateModule(ctx, compiled, mc)
+	instantiateCtx := ctx
+	if r.cowSupport != nil {
+		instantiateCtx = r.cowSupport.instantiateContext(ctx)
+	}
+	mod, err := rt.InstantiateModule(instantiateCtx, compiled, mc)
 	if err != nil {
 		_ = rt.Close(ctx)
 		return fmt.Errorf("reactor python: instantiate module: %w", err)
@@ -325,9 +335,14 @@ func (r *ReactorPythonRunner) Init(ctx context.Context) error {
 		}
 	}
 
-	// Create snapshot strategy based on config. selectSnapshotStrategy handles
-	// fallback to memcpy internally when the requested strategy is unavailable.
-	r.strategy = r.newSnapshotStrategy(mod.Memory())
+	// Create the snapshot only after trusted py_init/py_prepare/import work and
+	// headroom reservation. COW needs the concrete experimental allocator
+	// backing; all other modes continue through the api.Memory strategy factory.
+	if r.cowSupport != nil {
+		r.strategy = r.cowSupport.snapshotStrategy(mod.Memory(), r.log)
+	} else {
+		r.strategy = r.newSnapshotStrategy(mod.Memory())
+	}
 	if err := r.strategy.Take(mod.Memory()); err != nil {
 		_ = r.closeAll(ctx)
 		return fmt.Errorf("reactor python: take snapshot: %w", err)
@@ -341,21 +356,25 @@ func (r *ReactorPythonRunner) Init(ctx context.Context) error {
 	return nil
 }
 
-// SendRequest restores the post-init memory snapshot, writes the request JSON
-// into WASM memory via alloc(), executes one request, and reads the JSON
-// response. New python-reactor modules use the same host-facing per-request ABI
+// SendRequest starts from the prepared baseline, writes the request JSON into
+// WASM memory via alloc(), executes one request, copies the JSON response, and
+// restores the baseline before returning. New python-reactor modules use the
+// same host-facing per-request ABI
 // as generic WASM (alloc + evaluate). Older modules fall back to the historical
 // py_exec + resp_buf/resp_len exports.
 //
 // The script, method, and inputJSON fields follow the same convention as
 // ResidentPythonRunner.SendRequest.
-func (r *ReactorPythonRunner) SendRequest(ctx context.Context, script, method string, inputJSON string) (map[string]any, error) {
+func (r *ReactorPythonRunner) SendRequest(ctx context.Context, script, method string, inputJSON string) (result map[string]any, err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if !r.initialized || r.closed {
 		return nil, fmt.Errorf("reactor python: not initialized — call Init first")
 	}
+	// stderr is Host-side mutable state and is not part of the linear-memory
+	// image. Bound it to one request so diagnostics cannot bleed across leases.
+	r.stderrBuf.Reset()
 
 	reqTimeout := r.cfg.Timeout
 	if reqTimeout == 0 {
@@ -382,20 +401,25 @@ func (r *ReactorPythonRunner) SendRequest(ctx context.Context, script, method st
 		return nil, fmt.Errorf("reactor python: marshal request: %w", err)
 	}
 
-	// ── Step 1: Restore snapshot ──────────────────────────────────────────
-	// Write the post-py_init() memory image back into WASM linear memory.
-	// This resets the Python heap, _resp_buf, _resp_len, and all CPython globals
-	// to their exact post-initialisation values. py_exec() will then run in a
-	// clean interpreter as if py_init() just completed.
-	if err := r.strategy.Restore(r.mod.Memory()); err != nil {
-		// Restore failure means the WASM module's memory state is undefined.
-		// Mark the runner closed so IsHealthy() returns false and the dispatcher
-		// discards rather than returning it to the pool.
-		r.closed = true
-		return nil, fmt.Errorf("reactor python: restore snapshot: %w", err)
-	}
+	// A healthy runner enters SendRequest at the prepared baseline. Restore in
+	// this defer only after response bytes have been copied into a Go-owned map,
+	// so idle pooled runners do not retain request-private COW pages. For memcpy
+	// and UFFD this preserves the same request-isolation contract while moving
+	// the copy from the next lease to the end of the current one.
+	defer func() {
+		if r.closed {
+			// WithCloseOnContextDone permanently closed the module. The dispatcher
+			// will discard it; trying to restore a dead module adds no safety.
+			return
+		}
+		if restoreErr := r.strategy.Restore(r.mod.Memory()); restoreErr != nil {
+			r.closed = true
+			result = nil
+			err = errors.Join(err, fmt.Errorf("reactor python: restore snapshot: %w", restoreErr))
+		}
+	}()
 
-	// ── Step 2: Allocate scratch for request JSON ─────────────────────────
+	// ── Step 1: Allocate scratch for request JSON ─────────────────────────
 	allocRes, err := r.fnAlloc.Call(execCtx, uint64(len(reqBytes)))
 	if err != nil {
 		return nil, fmt.Errorf("reactor python: alloc(%d): %w", len(reqBytes), err)
@@ -405,7 +429,7 @@ func (r *ReactorPythonRunner) SendRequest(ctx context.Context, script, method st
 		return nil, fmt.Errorf("reactor python: alloc returned NULL")
 	}
 
-	// ── Step 3: Write request JSON ────────────────────────────────────────
+	// ── Step 2: Write request JSON ────────────────────────────────────────
 	if !r.mod.Memory().Write(reqPtr, reqBytes) {
 		return nil, fmt.Errorf("reactor python: write request JSON to memory at ptr=%d", reqPtr)
 	}
@@ -1099,6 +1123,9 @@ type ReactorPythonDispatcher struct {
 	// Start and shared by every pool runner (and replacement spawn) so the
 	// 242 MB binary is not re-read from disk per runner.
 	wasmBytes []byte
+	// cowCoordinator owns one canonical post-py_prepare linear-memory image for
+	// this exact dispatcher/module/evaluator/config deployment.
+	cowCoordinator *cowImageCoordinator
 
 	// mu protects closed and serialises the closed/push transitions so a
 	// replacement runner cannot land in the pool after Shutdown has begun.
@@ -1183,6 +1210,9 @@ func (d *ReactorPythonDispatcher) Start(ctx context.Context) error {
 	if err := d.cfg.validateSnapshotMode(poolSize); err != nil {
 		return fmt.Errorf("reactor-python: %w", err)
 	}
+	if d.cfg.SnapshotMode == "cow" {
+		d.cowCoordinator = newCowImageCoordinator()
+	}
 
 	d.log.Info("starting reactor-python dispatcher",
 		zap.String("module", d.cfg.ModulePath),
@@ -1205,7 +1235,7 @@ func (d *ReactorPythonDispatcher) Start(ctx context.Context) error {
 		i := i
 		go func() {
 			defer wg.Done()
-			runner := newReactorPythonRunnerWithBytes(d.cfg.ModulePath, d.wasmBytes, d.cfg, d.log)
+			runner := newReactorPythonRunnerWithBytes(d.cfg.ModulePath, d.wasmBytes, d.cfg, d.log, d.cowCoordinator)
 			if err := runner.Init(ctx); err != nil {
 				results[i] = result{index: i, err: err}
 				return
@@ -1230,6 +1260,7 @@ func (d *ReactorPythonDispatcher) Start(ctx context.Context) error {
 		for _, runner := range started {
 			_ = runner.Shutdown(ctx)
 		}
+		_ = d.closeCowCoordinator()
 		return firstErr
 	}
 	for _, runner := range started {
@@ -1347,7 +1378,7 @@ func (d *ReactorPythonDispatcher) spawnReplacement() {
 	defer cancel()
 
 	d.log.Info("reactor-python: initialising replacement runner")
-	runner := newReactorPythonRunnerWithBytes(d.cfg.ModulePath, d.wasmBytes, d.cfg, d.log)
+	runner := newReactorPythonRunnerWithBytes(d.cfg.ModulePath, d.wasmBytes, d.cfg, d.log, d.cowCoordinator)
 	if err := runner.Init(ctx); err != nil {
 		d.log.Error("reactor-python: replacement runner init failed", zap.Error(err))
 		return
@@ -1401,7 +1432,19 @@ func (d *ReactorPythonDispatcher) Shutdown(ctx context.Context) error {
 				}
 			}
 		default:
-			return firstErr
+			return errors.Join(firstErr, d.closeCowCoordinator())
 		}
 	}
+}
+
+func (d *ReactorPythonDispatcher) closeCowCoordinator() error {
+	if d.cowCoordinator == nil {
+		return nil
+	}
+	err := d.cowCoordinator.Close()
+	d.cowCoordinator = nil
+	if err != nil {
+		return fmt.Errorf("reactor-python: close COW image coordinator: %w", err)
+	}
+	return nil
 }

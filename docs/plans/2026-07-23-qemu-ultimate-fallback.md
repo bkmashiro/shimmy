@@ -29,7 +29,7 @@ Shimmy's deployment portfolio remains conceptually:
 ```text
 generic WASM / python-reactor / Pyodide when suitable
 native file or RPC worker, optionally wrapped by DynamoRIO
-same complete native worker stack transparently rehosted by QEMU as the terminal fallback
+original file or RPC worker transparently rehosted by QEMU alone as the terminal fallback
 ```
 
 “Terminal fallback” means the deployment chooses the QEMU wrapper when ordinary Host execution is unsuitable or unavailable. It does not mean:
@@ -112,18 +112,9 @@ Env:  [MODEL_PATH=/opt/evaluator/model.bin]
 IO:   file
 ```
 
-### Optional DBI transformation
-
-The existing DBI layer may first produce:
-
-```text
-Cmd:  /opt/dr/bin64/drrun
-Args: [-logdir, /tmp/drlogs, -c, /opt/dr/policy.so, --, python3, evaluation.py]
-```
-
 ### QEMU transformation
 
-QEMU then wraps the entire current worker stack:
+QEMU wraps the original worker directly:
 
 ```text
 Cmd: shimmy-qemu-runner
@@ -131,25 +122,24 @@ Args:
   [
     --runtime-config, <private-config-descriptor>,
     --,
-    <complete current Cmd>,
-    <complete current Args...>
+    <original Cmd>,
+    <original Args...>
   ]
 ```
 
-The transformation order is therefore:
+QEMU and DynamoRIO are alternative wrappers:
 
 ```text
-original evaluator
-→ optional DBI wrapper
-→ QEMU wrapper
+native/DBI lane: original evaluator → optional DynamoRIO wrapper
+QEMU lane:       original evaluator → QEMU wrapper
 ```
 
-If DBI is enabled with QEMU, DynamoRIO and its client must be present at the same paths inside the guest. This causes DBI to instrument the evaluator in the guest. The Host must never run `drrun` around `qemu-system` and falsely claim that the guest evaluator was instrumented.
+If both `FUNCTION_DBI_SECURITY_ENABLED=true` and `FUNCTION_QEMU_ENABLED=true` are configured, startup fails before the worker starts and tells the operator to select one wrapper. QEMU does not require DynamoRIO, a DBI client, or a DBI policy inside or outside the guest.
 
 `applyQEMUFallbackConfig` must:
 
 - leave `cfg.IO.Interface` and all RPC transport config unchanged;
-- capture the complete already-transformed command/cwd/args/env;
+- capture the original command/cwd/args/env;
 - replace only the Host process command with `shimmy-qemu-runner`;
 - avoid secrets in argv/logs;
 - preserve argument boundaries without a shell;
@@ -261,6 +251,7 @@ FUNCTION_QEMU_NETWORK_PROFILE=inherit|none
 Rules:
 
 - existing worker timeouts and `FUNCTION_MAX_PROCS` remain canonical;
+- QEMU and DBI are mutually exclusive; enabling both fails closed before worker startup;
 - `auto` is experiment-only and records the selected accelerator;
 - Lambda uses explicit TCG unless the exact target proves KVM;
 - missing binary/image/manifest/digest fails before the worker starts;
@@ -373,7 +364,7 @@ All are required:
 - original command/cwd/args/explicit env execute inside the guest without evaluator source changes;
 - file remains transient and RPC remains persistent;
 - Python and Lean are parity fixtures, not allowlisted runtimes;
-- optional DBI is nested inside QEMU around the evaluator, never around QEMU itself;
+- QEMU runs the original evaluator without a DBI dependency or nested DBI layer;
 - evaluator result/error/exit/timeout behavior remains equivalent at Shimmy's public boundary;
 - `FUNCTION_MAX_PROCS` and cancellation still bound worker/VM ownership;
 - process, socket, bridge and work-directory cleanup passes under success, error, timeout and cancellation;
@@ -382,7 +373,7 @@ All are required:
 
 ### PARTIAL
 
-Use when a transport, target environment, evaluator parity case, DBI composition or cleanup proof remains incomplete. Do not document a transport-independent transparent takeover while PARTIAL.
+Use when a transport, target environment, evaluator parity case or cleanup proof remains incomplete. Do not document a transport-independent transparent takeover while PARTIAL.
 
 ### INVALIDATED
 
@@ -422,7 +413,7 @@ After verdict and evidence, stop. No automatic request replay, VM snapshots, mig
 2. RED: invalid boolean, runner/image/binary/manifest/accelerator/resource config fails closed.
 3. RED: file and every RPC transport retain their `IOConfig` exactly.
 4. RED: command/cwd/args/env are captured without shell flattening or secret logging.
-5. RED: DBI is applied first, then QEMU wraps the resulting `drrun ... -- evaluator` stack.
+5. RED: enabling DBI and QEMU together fails before worker startup; QEMU wraps only the original worker command.
 6. GREEN: implement `applyQEMUFallbackConfig` adjacent to `applyDBISecurityConfig`.
 7. Focused and full execution tests.
 8. Commit: `feat(qemu): define transparent worker wrapper`.
@@ -510,8 +501,7 @@ After verdict and evidence, stop. No automatic request replay, VM snapshots, mig
 - `rpc-ipc` × representative evaluator;
 - `rpc-tcp` × representative evaluator;
 - `rpc-http` × representative evaluator;
-- `rpc-ws` × representative evaluator;
-- DBI inside QEMU fixture when pinned guest artifact contains DBI.
+- `rpc-ws` × representative evaluator.
 
 For each row, run the same HTTP corpus with QEMU off/on and compare schema-normalized results, errors, lifecycle and state behavior. Manual workflow only during the spike.
 

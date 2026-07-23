@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shimmy.dev/schemas/qemu-image-manifest-v1.json",
+  "title": "Shimmy QEMU image manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "architecture", "source_lock_sha256", "kernel", "initrd", "rootfs"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "architecture": {"const": "x86_64"},
+    "source_lock_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "kernel": {"$ref": "#/$defs/artifact"},
+    "initrd": {"$ref": "#/$defs/artifact"},
+    "rootfs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "format"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "format": {"const": "qcow2"}
+      }
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  }
+}

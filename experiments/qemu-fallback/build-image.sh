@@ -10,8 +10,7 @@ EVALUATOR_BINARY=${EVALUATOR_BINARY:-"$BUILD_DIR/file-evaluator"}
 RPC_EVALUATOR_BINARY=${RPC_EVALUATOR_BINARY:-"$BUILD_DIR/rpc-evaluator"}
 BUSYBOX_BINARY=${BUSYBOX_BINARY:-/bin/busybox}
 KERNEL_PATH=${KERNEL_PATH:-}
-INITRD_PATH=${INITRD_PATH:-}
-ROOTFS_SIZE_MB=${ROOTFS_SIZE_MB:-256}
+LOCK_FILE="$SCRIPT_DIR/sources.lock.json"
 
 require_file() {
   if [[ ! -f "$1" ]]; then
@@ -20,7 +19,7 @@ require_file() {
   fi
 }
 
-for command_name in go mkfs.ext4 qemu-img sha256sum; do
+for command_name in go mkfs.ext4 mkinitramfs python3 qemu-img sha256sum; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     printf 'required command is missing: %s\n' "$command_name" >&2
     exit 1
@@ -30,12 +29,49 @@ done
 if [[ -z "$KERNEL_PATH" && -e /boot/vmlinuz ]]; then
   KERNEL_PATH=$(readlink -f /boot/vmlinuz)
 fi
-if [[ -z "$INITRD_PATH" && -e /boot/initrd.img ]]; then
-  INITRD_PATH=$(readlink -f /boot/initrd.img)
-fi
 require_file "$KERNEL_PATH"
-require_file "$INITRD_PATH"
 require_file "$BUSYBOX_BINARY"
+require_file "$LOCK_FILE"
+
+readarray -t lock_values < <(python3 - "$LOCK_FILE" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    lock = json.load(handle)
+if lock.get("schema_version") != 1 or lock.get("architecture") != "x86_64":
+    raise SystemExit("unsupported QEMU source lock")
+for key in ("source_date_epoch", "filesystem_uuid", "kernel_sha256", "rootfs_size_mb"):
+    print(lock[key])
+PY
+)
+SOURCE_DATE_EPOCH=${lock_values[0]}
+FILESYSTEM_UUID=${lock_values[1]}
+EXPECTED_KERNEL_SHA=${lock_values[2]}
+ROOTFS_SIZE_MB=${lock_values[3]}
+
+RAW_BUILD_DIR=$BUILD_DIR
+if [[ -L "$RAW_BUILD_DIR" || -L "$RAW_BUILD_DIR/rootfs" ]]; then
+  printf 'unsafe symlinked QEMU build root: %s\n' "$RAW_BUILD_DIR" >&2
+  exit 1
+fi
+BUILD_DIR=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$RAW_BUILD_DIR")
+OUTPUT_DIR=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$OUTPUT_DIR")
+if [[ "$BUILD_DIR" == / || "$BUILD_DIR" == "$REPO_ROOT" ]]; then
+  printf 'unsafe QEMU build root: %s\n' "$BUILD_DIR" >&2
+  exit 1
+fi
+
+actual_kernel_sha=$(sha256sum "$KERNEL_PATH" | cut -d' ' -f1)
+if [[ "$actual_kernel_sha" != "$EXPECTED_KERNEL_SHA" ]]; then
+  printf 'kernel digest mismatch: got %s, want %s\n' "$actual_kernel_sha" "$EXPECTED_KERNEL_SHA" >&2
+  exit 1
+fi
+KERNEL_VERSION=$(basename "$KERNEL_PATH")
+KERNEL_VERSION=${KERNEL_VERSION#vmlinuz-}
+if [[ ! -d "/lib/modules/$KERNEL_VERSION" ]]; then
+  printf 'matching kernel modules are missing: /lib/modules/%s\n' "$KERNEL_VERSION" >&2
+  exit 1
+fi
 
 rm -rf "$BUILD_DIR/rootfs"
 mkdir -p "$BUILD_DIR/rootfs" "$OUTPUT_DIR"
@@ -92,22 +128,44 @@ exec /usr/bin/shimmy-qemu-guest \
 INIT
 chmod 0755 "$ROOT/init"
 
+python3 - "$ROOT" "$SOURCE_DATE_EPOCH" <<'PY'
+import os
+import sys
+root = sys.argv[1]
+epoch = int(sys.argv[2])
+for current, directories, files in os.walk(root, topdown=False):
+    for name in files + directories:
+        os.utime(os.path.join(current, name), (epoch, epoch), follow_symlinks=False)
+    os.utime(current, (epoch, epoch), follow_symlinks=False)
+PY
+
 RAW_ROOTFS="$BUILD_DIR/rootfs.raw"
 QCOW_ROOTFS="$OUTPUT_DIR/evaluator.qcow2"
 rm -f "$RAW_ROOTFS" "$QCOW_ROOTFS"
 truncate -s "${ROOTFS_SIZE_MB}M" "$RAW_ROOTFS"
-mkfs.ext4 -q -F -d "$ROOT" "$RAW_ROOTFS"
-qemu-img convert -f raw -O qcow2 "$RAW_ROOTFS" "$QCOW_ROOTFS"
+E2FSPROGS_FAKE_TIME="$SOURCE_DATE_EPOCH" mkfs.ext4 -q -F \
+  -U "$FILESYSTEM_UUID" \
+  -E "lazy_itable_init=0,lazy_journal_init=0,hash_seed=$FILESYSTEM_UUID" \
+  -d "$ROOT" \
+  "$RAW_ROOTFS"
+qemu-img convert -f raw -O qcow2 \
+  -o compat=1.1,cluster_size=65536,lazy_refcounts=off \
+  "$RAW_ROOTFS" "$QCOW_ROOTFS"
 cp "$KERNEL_PATH" "$OUTPUT_DIR/vmlinuz"
-cp "$INITRD_PATH" "$OUTPUT_DIR/initramfs.img"
+SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" mkinitramfs \
+  -o "$OUTPUT_DIR/initramfs.img" \
+  "$KERNEL_VERSION"
+touch -d "@$SOURCE_DATE_EPOCH" "$OUTPUT_DIR/vmlinuz" "$OUTPUT_DIR/initramfs.img" "$QCOW_ROOTFS"
 
 kernel_sha=$(sha256sum "$OUTPUT_DIR/vmlinuz" | cut -d' ' -f1)
 initrd_sha=$(sha256sum "$OUTPUT_DIR/initramfs.img" | cut -d' ' -f1)
 rootfs_sha=$(sha256sum "$QCOW_ROOTFS" | cut -d' ' -f1)
+source_lock_sha=$(sha256sum "$LOCK_FILE" | cut -d' ' -f1)
 cat >"$OUTPUT_DIR/manifest.json" <<MANIFEST
 {
   "schema_version": 1,
   "architecture": "x86_64",
+  "source_lock_sha256": "$source_lock_sha",
   "kernel": {"path": "vmlinuz", "sha256": "$kernel_sha"},
   "initrd": {"path": "initramfs.img", "sha256": "$initrd_sha"},
   "rootfs": {"path": "evaluator.qcow2", "sha256": "$rootfs_sha", "format": "qcow2"}

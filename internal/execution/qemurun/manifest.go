@@ -28,11 +28,12 @@ type imageArtifact struct {
 }
 
 type imageManifest struct {
-	SchemaVersion int           `json:"schema_version"`
-	Architecture  string        `json:"architecture"`
-	Kernel        imageArtifact `json:"kernel"`
-	Initrd        imageArtifact `json:"initrd"`
-	RootFS        imageArtifact `json:"rootfs"`
+	SchemaVersion    int           `json:"schema_version"`
+	Architecture     string        `json:"architecture"`
+	SourceLockSHA256 string        `json:"source_lock_sha256,omitempty"`
+	Kernel           imageArtifact `json:"kernel"`
+	Initrd           imageArtifact `json:"initrd"`
+	RootFS           imageArtifact `json:"rootfs"`
 }
 
 type ResolvedImage struct {
@@ -55,6 +56,12 @@ func LoadImageManifest(manifestPath, configuredRootFS string) (ResolvedImage, er
 	}
 	if manifest.RootFS.Format != "qcow2" {
 		return ResolvedImage{}, fmt.Errorf("%w: unsupported rootfs format %q", ErrInvalidImageManifest, manifest.RootFS.Format)
+	}
+	if manifest.SourceLockSHA256 != "" {
+		decoded, err := hex.DecodeString(strings.TrimSpace(manifest.SourceLockSHA256))
+		if err != nil || len(decoded) != sha256.Size {
+			return ResolvedImage{}, fmt.Errorf("%w: source_lock_sha256 must contain 64 hex characters", ErrInvalidImageManifest)
+		}
 	}
 
 	base := filepath.Dir(manifestPath)

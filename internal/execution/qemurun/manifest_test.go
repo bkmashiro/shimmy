@@ -17,11 +17,12 @@ func TestLoadImageManifestResolvesAndVerifiesArtifacts(t *testing.T) {
 	initrd := writeArtifact(t, root, "initramfs.gz", []byte("initrd"))
 	rootfs := writeArtifact(t, root, "evaluator.qcow2", []byte("rootfs"))
 	manifestPath := writeManifest(t, root, imageManifestFixture{
-		SchemaVersion: 1,
-		Architecture:  "x86_64",
-		Kernel:        artifactFixture{Path: filepath.Base(kernel), SHA256: digestFixture([]byte("kernel"))},
-		Initrd:        artifactFixture{Path: filepath.Base(initrd), SHA256: digestFixture([]byte("initrd"))},
-		RootFS:        artifactFixture{Path: filepath.Base(rootfs), SHA256: digestFixture([]byte("rootfs")), Format: "qcow2"},
+		SchemaVersion:    1,
+		Architecture:     "x86_64",
+		SourceLockSHA256: digestFixture([]byte("source-lock")),
+		Kernel:           artifactFixture{Path: filepath.Base(kernel), SHA256: digestFixture([]byte("kernel"))},
+		Initrd:           artifactFixture{Path: filepath.Base(initrd), SHA256: digestFixture([]byte("initrd"))},
+		RootFS:           artifactFixture{Path: filepath.Base(rootfs), SHA256: digestFixture([]byte("rootfs")), Format: "qcow2"},
 	})
 
 	got, err := LoadImageManifest(manifestPath, rootfs)
@@ -137,11 +138,12 @@ type artifactFixture struct {
 }
 
 type imageManifestFixture struct {
-	SchemaVersion int             `json:"schema_version"`
-	Architecture  string          `json:"architecture"`
-	Kernel        artifactFixture `json:"kernel"`
-	Initrd        artifactFixture `json:"initrd"`
-	RootFS        artifactFixture `json:"rootfs"`
+	SchemaVersion    int             `json:"schema_version"`
+	Architecture     string          `json:"architecture"`
+	SourceLockSHA256 string          `json:"source_lock_sha256,omitempty"`
+	Kernel           artifactFixture `json:"kernel"`
+	Initrd           artifactFixture `json:"initrd"`
+	RootFS           artifactFixture `json:"rootfs"`
 }
 
 func writeArtifact(t *testing.T, root, name string, data []byte) string {

@@ -22,6 +22,7 @@ type vmSession interface {
 type runnerDependencies struct {
 	loadRuntime func() (qemurun.RuntimeConfig, error)
 	startVM     func(context.Context, qemurun.RuntimeConfig) (vmSession, error)
+	listen      func(string, string) (net.Listener, error)
 	stdin       io.Reader
 	stdout      io.Writer
 }
@@ -34,6 +35,7 @@ func defaultRunnerDependencies() runnerDependencies {
 		startVM: func(ctx context.Context, config qemurun.RuntimeConfig) (vmSession, error) {
 			return qemurun.StartVM(ctx, config)
 		},
+		listen: net.Listen,
 		stdin:  os.Stdin,
 		stdout: os.Stdout,
 	}
@@ -84,23 +86,75 @@ func runRunner(ctx context.Context, args, effectiveEnv []string, dependencies ru
 		}
 		return writeHostResponse(invocation.HostResponsePath, result.Response)
 	case qemurun.ModeRPC:
-		if invocation.Start.Transport != "stdio" {
-			return fmt.Errorf("qemu runner: RPC transport %q is not wired yet", invocation.Start.Transport)
+		if invocation.Start.Transport == "stdio" {
+			if dependencies.stdin == nil || dependencies.stdout == nil {
+				return errors.New("qemu runner: stdio RPC requires stdin and stdout")
+			}
+			return qemurun.RunRPCStdio(
+				ctx,
+				vm.Connection(),
+				invocation.Start,
+				dependencies.stdin,
+				dependencies.stdout,
+				runtimeConfig.MaxFrameBytes,
+			)
 		}
-		if dependencies.stdin == nil || dependencies.stdout == nil {
-			return errors.New("qemu runner: stdio RPC requires stdin and stdout")
+		if dependencies.listen == nil {
+			return errors.New("qemu runner: RPC listener dependency is missing")
 		}
-		return qemurun.RunRPCStdio(
+		network, address, err := qemurun.NetworkListenAddress(invocation.Start.Transport, invocation.Start.Endpoint)
+		if err != nil {
+			return err
+		}
+		listener, err := listenRPCEndpoint(dependencies.listen, network, address)
+		if err != nil {
+			return err
+		}
+		invocation.Start.GuestEndpoint, err = qemurun.PrepareGuestEndpoint(
+			invocation.Start.Transport,
+			invocation.Start.Endpoint,
+			"/run/shimmy",
+		)
+		if err != nil {
+			_ = listener.Close()
+			return err
+		}
+		return qemurun.RunRPCNetwork(
 			ctx,
 			vm.Connection(),
 			invocation.Start,
-			dependencies.stdin,
-			dependencies.stdout,
+			listener,
 			runtimeConfig.MaxFrameBytes,
+			64,
 		)
 	default:
 		return fmt.Errorf("qemu runner: unsupported mode %q", invocation.Start.Mode)
 	}
+}
+
+func listenRPCEndpoint(
+	listen func(string, string) (net.Listener, error),
+	network string,
+	address string,
+) (net.Listener, error) {
+	if network == "unix" {
+		info, err := os.Lstat(address)
+		switch {
+		case err == nil && info.Mode()&os.ModeSocket == 0:
+			return nil, fmt.Errorf("qemu runner: IPC endpoint %q exists and is not a socket", address)
+		case err == nil:
+			if err := os.Remove(address); err != nil {
+				return nil, fmt.Errorf("qemu runner: remove stale IPC socket %q: %w", address, err)
+			}
+		case !errors.Is(err, os.ErrNotExist):
+			return nil, fmt.Errorf("qemu runner: inspect IPC endpoint %q: %w", address, err)
+		}
+	}
+	listener, err := listen(network, address)
+	if err != nil {
+		return nil, fmt.Errorf("qemu runner: listen on %s %q: %w", network, address, err)
+	}
+	return listener, nil
 }
 
 func readHostRequest(path string, maxFrameBytes int) ([]byte, error) {

@@ -6,9 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/gorilla/websocket"
 )
 
 const maxRPCFixtureFrameBytes = 4 << 20
@@ -32,14 +38,9 @@ type rpcError struct {
 	Message string `json:"message"`
 }
 
-type evaluatorResponse struct {
-	Command string          `json:"command"`
-	Result  evaluatorResult `json:"result"`
-}
-
 type evaluatorResult struct {
-	IsCorrect bool            `json:"is_correct"`
-	Echo      json.RawMessage `json:"echo"`
+	IsCorrect bool `json:"is_correct"`
+	Echo      any  `json:"echo"`
 }
 
 func serveOne(input *bufio.Reader, output io.Writer) error {
@@ -51,6 +52,14 @@ func serveOne(input *bufio.Reader, output io.Writer) error {
 	if err := json.Unmarshal(payload, &request); err != nil {
 		return writeRPCError(output, nil, -32700, "parse error")
 	}
+	encoded, err := json.Marshal(evaluateRequest(request))
+	if err != nil {
+		return err
+	}
+	return writeLSPFrame(output, encoded)
+}
+
+func evaluateRequest(request rpcRequest) rpcResponse {
 	response := rpcResponse{JSONRPC: "2.0", ID: request.ID}
 	if request.JSONRPC != "2.0" || len(request.ID) == 0 {
 		response.Error = &rpcError{Code: -32600, Message: "invalid request"}
@@ -61,16 +70,9 @@ func serveOne(input *bufio.Reader, output io.Writer) error {
 		if len(request.Params) > 0 && len(request.Params[0]) > 0 {
 			echo = request.Params[0]
 		}
-		response.Result = evaluatorResponse{
-			Command: "eval",
-			Result:  evaluatorResult{IsCorrect: true, Echo: echo},
-		}
+		response.Result = evaluatorResult{IsCorrect: true, Echo: echo}
 	}
-	encoded, err := json.Marshal(response)
-	if err != nil {
-		return err
-	}
-	return writeLSPFrame(output, encoded)
+	return response
 }
 
 func writeRPCError(output io.Writer, id json.RawMessage, code int, message string) error {
@@ -153,8 +155,116 @@ func run(input io.Reader, output io.Writer) error {
 	}
 }
 
+func serveRaw(network, address string) error {
+	if network == "unix" {
+		if info, err := os.Lstat(address); err == nil {
+			if info.Mode()&os.ModeSocket == 0 {
+				return fmt.Errorf("RPC fixture IPC endpoint exists and is not a socket")
+			}
+			if err := os.Remove(address); err != nil {
+				return err
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(address), 0o700); err != nil {
+			return err
+		}
+	}
+	listener, err := net.Listen(network, address)
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+	for {
+		connection, err := listener.Accept()
+		if err != nil {
+			return err
+		}
+		go func() { _ = serveRawConnection(connection) }()
+	}
+}
+
+func serveRawConnection(connection io.ReadWriteCloser) error {
+	defer connection.Close()
+	decoder := json.NewDecoder(connection)
+	encoder := json.NewEncoder(connection)
+	for {
+		var request rpcRequest
+		if err := decoder.Decode(&request); err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+		if err := encoder.Encode(evaluateRequest(request)); err != nil {
+			return err
+		}
+	}
+}
+
+func serveHTTP(endpoint string, websocketMode bool) error {
+	parsed, err := url.Parse(endpoint)
+	if err != nil || parsed.Host == "" {
+		return fmt.Errorf("invalid RPC fixture URL %q", endpoint)
+	}
+	handler := http.Handler(http.HandlerFunc(serveHTTPRequest))
+	if websocketMode {
+		handler = http.HandlerFunc(serveWebsocket)
+	}
+	return http.ListenAndServe(parsed.Host, handler)
+}
+
+func serveHTTPRequest(response http.ResponseWriter, request *http.Request) {
+	defer request.Body.Close()
+	request.Body = http.MaxBytesReader(response, request.Body, maxRPCFixtureFrameBytes)
+	var message rpcRequest
+	if err := json.NewDecoder(request.Body).Decode(&message); err != nil {
+		http.Error(response, "invalid JSON-RPC request", http.StatusBadRequest)
+		return
+	}
+	response.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(response).Encode(evaluateRequest(message))
+}
+
+var fixtureUpgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+
+func serveWebsocket(response http.ResponseWriter, request *http.Request) {
+	connection, err := fixtureUpgrader.Upgrade(response, request, nil)
+	if err != nil {
+		return
+	}
+	defer connection.Close()
+	for {
+		var message rpcRequest
+		if err := connection.ReadJSON(&message); err != nil {
+			return
+		}
+		if err := connection.WriteJSON(evaluateRequest(message)); err != nil {
+			return
+		}
+	}
+}
+
+func runConfigured() error {
+	switch os.Getenv("EVAL_RPC_TRANSPORT") {
+	case "", "stdio":
+		return run(os.Stdin, os.Stdout)
+	case "ipc":
+		return serveRaw("unix", os.Getenv("EVAL_RPC_IPC_ENDPOINT"))
+	case "tcp":
+		return serveRaw("tcp", os.Getenv("EVAL_RPC_TCP_ADDRESS"))
+	case "http":
+		return serveHTTP(os.Getenv("EVAL_RPC_HTTP_URL"), false)
+	case "ws":
+		return serveHTTP(os.Getenv("EVAL_RPC_WS_URL"), true)
+	default:
+		return fmt.Errorf("unsupported RPC fixture transport %q", os.Getenv("EVAL_RPC_TRANSPORT"))
+	}
+}
+
 func main() {
-	if err := run(os.Stdin, os.Stdout); err != nil {
+	if err := runConfigured(); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

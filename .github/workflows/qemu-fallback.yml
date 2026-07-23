@@ -64,7 +64,7 @@ jobs:
           go test -race ./internal/execution/qemurun ./internal/execution/qemuguest
           go test ./cmd/shimmy-qemu-runner ./cmd/shimmy-qemu-guest ./experiments/qemu-fallback/file-evaluator ./experiments/qemu-fallback/rpc-evaluator
           go vet ./internal/execution/qemurun ./internal/execution/qemuguest ./cmd/shimmy-qemu-runner ./cmd/shimmy-qemu-guest
-          bash -n experiments/qemu-fallback/build-image.sh experiments/qemu-fallback/smoke-file.sh experiments/qemu-fallback/smoke-rpc-stdio.sh
+          bash -n experiments/qemu-fallback/build-image.sh experiments/qemu-fallback/smoke-file.sh experiments/qemu-fallback/smoke-rpc.sh
 
       - name: Build pinned guest fixture
         env:
@@ -78,11 +78,21 @@ jobs:
           BIN_DIR: ${{ runner.temp }}/qemu-fallback-smoke
         run: experiments/qemu-fallback/smoke-file.sh
 
-      - name: Run persistent RPC stdio parity
+      - name: Run persistent RPC transport parity
         env:
           ARTIFACT_DIR: ${{ github.workspace }}/artifacts/qemu-fallback
           BIN_DIR: ${{ runner.temp }}/qemu-fallback-rpc-smoke
-        run: experiments/qemu-fallback/smoke-rpc-stdio.sh
+        run: |
+          index=0
+          for transport in stdio ipc tcp http ws; do
+            RPC_TRANSPORT="$transport" \
+              NATIVE_PORT=$((18100 + index * 2)) \
+              QEMU_PORT=$((18101 + index * 2)) \
+              NATIVE_RPC_PORT=$((19100 + index * 2)) \
+              QEMU_RPC_PORT=$((19101 + index * 2)) \
+              experiments/qemu-fallback/smoke-rpc.sh
+            index=$((index + 1))
+          done
 
       - name: Upload evidence
         if: always()
@@ -95,5 +105,5 @@ jobs:
             artifacts/qemu-fallback/manifest.json
             ${{ runner.temp }}/qemu-fallback-smoke/native.log
             ${{ runner.temp }}/qemu-fallback-smoke/qemu.log
-            ${{ runner.temp }}/qemu-fallback-rpc-smoke/native-rpc.log
-            ${{ runner.temp }}/qemu-fallback-rpc-smoke/qemu-rpc.log
+            ${{ runner.temp }}/qemu-fallback-rpc-smoke/native-rpc-*.log
+            ${{ runner.temp }}/qemu-fallback-rpc-smoke/qemu-rpc-*.log

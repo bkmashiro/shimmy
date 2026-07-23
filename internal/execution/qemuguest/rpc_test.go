@@ -3,6 +3,7 @@ package qemuguest
 import (
 	"bytes"
 	"context"
+	"io"
 	"net"
 	"os"
 	"testing"
@@ -64,3 +65,27 @@ func TestServeRPCStdioReportsEvaluatorExit(t *testing.T) {
 		t.Fatalf("Serve: %v", err)
 	}
 }
+
+func TestCopyRPCOutputTreatsClosedProcessPipeAsEOF(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var wire bytes.Buffer
+	codec := qemurun.NewCodec(1024)
+	writer := qemurun.NewSerializedFrameWriter(ctx, &wire, codec, 1)
+	if err := copyRPCOutput(ctx, writer, closedProcessPipe{}); err != nil {
+		t.Fatalf("copyRPCOutput: %v", err)
+	}
+	frame, err := codec.ReadFrame(&wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frame.Type != qemurun.FrameHalfClose {
+		t.Fatalf("frame type = %s", frame.Type)
+	}
+}
+
+type closedProcessPipe struct{}
+
+func (closedProcessPipe) Read([]byte) (int, error) { return 0, os.ErrClosed }
+
+var _ io.Reader = closedProcessPipe{}

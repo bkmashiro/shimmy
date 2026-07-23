@@ -58,8 +58,9 @@ set -eu
 /bin/busybox mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
 /bin/busybox mount -t proc proc /proc 2>/dev/null || true
 /bin/busybox mount -t sysfs sysfs /sys 2>/dev/null || true
-/bin/busybox mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs /run
-/bin/busybox mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs /tmp
+/bin/busybox mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs /run 2>/dev/null || true
+/bin/busybox mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs /tmp 2>/dev/null || true
+/bin/busybox ip link set lo up 2>/dev/null || true
 /bin/busybox modprobe virtio_console 2>/dev/null || true
 
 control_device=""

@@ -157,7 +157,7 @@ func copyRPCOutput(ctx context.Context, writer *qemurun.SerializedFrameWriter, o
 				return err
 			}
 		}
-		if readErr == io.EOF {
+		if readErr == io.EOF || errors.Is(readErr, os.ErrClosed) {
 			return writer.Write(ctx, qemurun.Frame{Type: qemurun.FrameHalfClose, StreamID: qemurun.StdioStreamID})
 		}
 		if readErr != nil {

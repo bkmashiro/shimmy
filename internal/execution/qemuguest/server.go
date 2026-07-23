@@ -90,10 +90,14 @@ func Serve(ctx context.Context, conn io.ReadWriteCloser, config ServerConfig) er
 		}
 		return nil
 	case qemurun.ModeRPC:
-		if start.Transport != "stdio" {
+		switch start.Transport {
+		case "stdio":
+			return serveRPCStdio(ctx, conn, codec, start)
+		case "ipc", "tcp", "http", "ws":
+			return serveRPCNetwork(ctx, conn, codec, start, config.WorkRoot)
+		default:
 			return fmt.Errorf("qemu guest: unsupported RPC transport %q", start.Transport)
 		}
-		return serveRPCStdio(ctx, conn, codec, start)
 	default:
 		return fmt.Errorf("qemu guest: unsupported mode %q", start.Mode)
 	}

@@ -19,13 +19,14 @@ type ReadyMessage struct {
 }
 
 type StartMessage struct {
-	Mode      Mode     `json:"mode"`
-	Command   string   `json:"command"`
-	Args      []string `json:"args,omitempty"`
-	Cwd       string   `json:"cwd,omitempty"`
-	Env       []string `json:"env,omitempty"`
-	Transport string   `json:"transport,omitempty"`
-	Endpoint  string   `json:"endpoint,omitempty"`
+	Mode          Mode     `json:"mode"`
+	Command       string   `json:"command"`
+	Args          []string `json:"args,omitempty"`
+	Cwd           string   `json:"cwd,omitempty"`
+	Env           []string `json:"env,omitempty"`
+	Transport     string   `json:"transport,omitempty"`
+	Endpoint      string   `json:"endpoint,omitempty"`
+	GuestEndpoint string   `json:"guest_endpoint,omitempty"`
 }
 
 type FileResultMessage struct {

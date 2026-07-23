@@ -112,6 +112,31 @@ func TestRunRunnerRPCStdioPreservesOuterPipes(t *testing.T) {
 	}
 }
 
+func TestListenRPCEndpointRejectsRegularIPCFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix sockets are unavailable on Windows")
+	}
+	path := filepath.Join(t.TempDir(), "eval.sock")
+	if err := os.WriteFile(path, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	_, err := listenRPCEndpoint(func(string, string) (net.Listener, error) {
+		called = true
+		return nil, nil
+	}, "unix", path)
+	if err == nil {
+		t.Fatal("listenRPCEndpoint replaced a regular file")
+	}
+	if called {
+		t.Fatal("listener called for unsafe IPC path")
+	}
+	data, readErr := os.ReadFile(path)
+	if readErr != nil || string(data) != "keep" {
+		t.Fatalf("regular file changed: %q, err=%v", data, readErr)
+	}
+}
+
 func TestRunRunnerRejectsFileResponseSymlink(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink semantics differ on Windows")

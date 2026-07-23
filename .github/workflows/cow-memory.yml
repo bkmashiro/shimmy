@@ -1,0 +1,110 @@
+name: COW Prepared Memory
+
+on:
+  push:
+    branches:
+      - feat/wasm-backend
+    paths:
+      - "internal/execution/wasm/snapshot_cow*"
+      - "internal/execution/wasm/snapshot.go"
+      - "internal/execution/wasm/snapshot_stub.go"
+      - "internal/execution/wasm/config.go"
+      - "internal/execution/wasm/supervisor.go"
+      - "internal/execution/wasm/dispatcher.go"
+      - "internal/execution/wasm/python_reactor.go"
+      - ".github/workflows/cow-memory.yml"
+  pull_request:
+    paths:
+      - "internal/execution/wasm/snapshot_cow*"
+      - "internal/execution/wasm/snapshot.go"
+      - "internal/execution/wasm/snapshot_stub.go"
+      - "internal/execution/wasm/config.go"
+      - "internal/execution/wasm/supervisor.go"
+      - "internal/execution/wasm/dispatcher.go"
+      - "internal/execution/wasm/python_reactor.go"
+      - ".github/workflows/cow-memory.yml"
+  workflow_dispatch:
+    inputs:
+      python_reactor:
+        description: Download the pinned Python reactor and run the heavy prepared-baseline proof
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  cow-linux:
+    name: COW correctness (bare Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download Go modules
+        run: go mod download
+
+      - name: Run focused COW correctness tests
+        run: |
+          go test ./internal/execution/wasm \
+            -run='^TestCow' \
+            -count=1 -v -timeout=120s
+
+      - name: Run full Linux test suite
+        run: go test ./... -count=1 -timeout=15m
+
+  python-reactor-cow:
+    name: Python reactor prepared-image proof
+    if: github.event_name == 'workflow_dispatch' && inputs.python_reactor
+    needs: cow-linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download pinned Python reactor artifact
+        run: |
+          curl -fsSL \
+            "https://github.com/bkmashiro/shimmy-wasm-go/releases/download/wasm-artifacts/python-reactor.wasm" \
+            -o python-reactor.wasm
+          test -s python-reactor.wasm
+          shasum -a 256 python-reactor.wasm | tee python-reactor.sha256
+
+      - name: Run prepared-baseline and repeated-state proof
+        env:
+          PYTHON_REACTOR_WASM: ${{ github.workspace }}/python-reactor.wasm
+          COW_EVIDENCE_PATH: ${{ github.workspace }}/cow-python-evidence.json
+        run: |
+          go test ./internal/execution/wasm \
+            -run='^TestCowPythonReactorPreparedBaselines$' \
+            -count=1 -v -timeout=30m
+
+      - name: Upload prepared-image evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: cow-python-${{ github.sha }}
+          path: |
+            python-reactor.sha256
+            cow-python-evidence.json
+          if-no-files-found: warn
+          retention-days: 90

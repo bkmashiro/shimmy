@@ -58,7 +58,7 @@ env "${common_env[@]}" \
   FUNCTION_QEMU_MEMORY_MB=512 \
   FUNCTION_QEMU_VCPUS=1 \
   FUNCTION_QEMU_NETWORK_PROFILE=none \
-  FUNCTION_QEMU_BOOT_TIMEOUT=60s \
+  FUNCTION_QEMU_BOOT_TIMEOUT=120s \
   "$BIN_DIR/shimmy" serve --port "$QEMU_PORT" >"$qemu_log" 2>&1 &
 qemu_pid=$!
 
@@ -91,7 +91,7 @@ post_eval() {
   local server_log=$3
   local response_file="$BIN_DIR/${label}-response.json"
   local status
-  status=$(curl -sS -o "$response_file" -w '%{http_code}' -X POST "http://127.0.0.1:${port}/" \
+  status=$(curl --max-time 150 -sS -o "$response_file" -w '%{http_code}' -X POST "http://127.0.0.1:${port}/" \
     -H 'Content-Type: application/json' \
     -H 'Command: eval' \
     -d "$payload")

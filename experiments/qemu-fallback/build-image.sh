@@ -84,7 +84,7 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -trimpath -ldflag
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -trimpath -ldflags='-s -w -buildid=' -o "$RPC_EVALUATOR_BINARY" ./experiments/qemu-fallback/rpc-evaluator
 
 ROOT="$BUILD_DIR/rootfs"
-mkdir -p "$ROOT/bin" "$ROOT/dev" "$ROOT/proc" "$ROOT/sys" "$ROOT/run" "$ROOT/tmp" "$ROOT/usr/bin" "$ROOT/opt/evaluator"
+mkdir -p "$ROOT/bin" "$ROOT/dev" "$ROOT/proc" "$ROOT/sys" "$ROOT/run" "$ROOT/sbin" "$ROOT/tmp" "$ROOT/usr/bin" "$ROOT/opt/evaluator"
 install -m 0755 "$BUSYBOX_BINARY" "$ROOT/bin/busybox"
 ln -s busybox "$ROOT/bin/sh"
 install -m 0755 "$GUEST_BINARY" "$ROOT/usr/bin/shimmy-qemu-guest"
@@ -133,6 +133,7 @@ exec /usr/bin/shimmy-qemu-guest \
   --max-frame-bytes 4194304
 INIT
 chmod 0755 "$ROOT/init"
+ln -s /init "$ROOT/sbin/init"
 
 python3 - "$ROOT" "$SOURCE_DATE_EPOCH" <<'PY'
 import os

@@ -110,6 +110,7 @@ env "${common_env[@]}" \
   FUNCTION_QEMU_MEMORY_MB=512 \
   FUNCTION_QEMU_VCPUS=1 \
   FUNCTION_QEMU_NETWORK_PROFILE=none \
+  FUNCTION_QEMU_BOOT_TIMEOUT=120s \
   "$SHIMMY_BINARY" serve >"$run_dir/qemu.log" 2>&1 &
 qemu_pid=$!
 
@@ -134,14 +135,14 @@ payload='{"response":"same","answer":"same","params":{"source":"doc-profile"}}'
 : >"$run_dir/native-times.txt"
 : >"$run_dir/qemu-times.txt"
 for index in $(seq 1 "$REQUEST_COUNT"); do
-  curl --silent --show-error --fail \
+  curl --max-time 180 --silent --show-error --fail \
     --output "$run_dir/native-$index.json" \
     --write-out '%{time_total}\n' \
     --header 'Content-Type: application/json' \
     --header 'Command: eval' \
     --data "$payload" \
     "http://127.0.0.1:$NATIVE_PORT/" >>"$run_dir/native-times.txt"
-  curl --silent --show-error --fail \
+  curl --max-time 180 --silent --show-error --fail \
     --output "$run_dir/qemu-$index.json" \
     --write-out '%{time_total}\n' \
     --header 'Content-Type: application/json' \

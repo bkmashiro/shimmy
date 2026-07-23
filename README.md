@@ -91,7 +91,7 @@ branch in the HTTP handler is required:
 | Pyodide | `FUNCTION_INTERFACE=pyodide` | Node.js, the provided runner, its npm dependencies, and a script/package config |
 | Native + DynamoRIO | `FUNCTION_INTERFACE=file` or `rpc`, plus `FUNCTION_DBI_SECURITY_ENABLED=true` | DynamoRIO, a policy client, and (when used) a readable policy config |
 
-The supervisor has additionally requested a full Linux QEMU lane as Shimmy's terminal compatibility fallback. It is currently a plan, not an implemented interface or deployment recipe: see the [QEMU ultimate fallback implementation plan](docs/plans/2026-07-23-qemu-ultimate-fallback.md). “Fallback” means explicit deployment-time portfolio selection; Shimmy must not replay an ambiguously started request through QEMU after another backend fails.
+The supervisor has additionally requested a full Linux QEMU wrapper as Shimmy's terminal compatibility fallback. It is currently a plan, not an implemented wrapper or deployment recipe: see the [QEMU transparent ultimate fallback implementation plan](docs/plans/2026-07-23-qemu-ultimate-fallback.md). Like the DynamoRIO path, it preserves the selected `file`/`rpc` interface, transport, evaluator command and lifecycle; it must not add `FUNCTION_INTERFACE=qemu` or replay an ambiguously started request after another backend fails.
 
 Environment variables select and configure an already deployed runtime. They do
 not download external runtimes or policy clients automatically. See

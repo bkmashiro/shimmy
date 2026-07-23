@@ -4,6 +4,7 @@ package wasm
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -71,6 +72,28 @@ func TestReactorPythonFlyweightTimeoutClosesOnlyAffectedInstance(t *testing.T) {
 	require.NoError(t, err, "replacement must reuse the live flyweight")
 	_, err = replacement.ExportedFunction("return").Call(ctx)
 	require.NoError(t, err)
+}
+
+func TestReactorPythonDispatcherPartialStartClosesSharedResources(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	wasmPath := root + "/minimal.wasm"
+	scriptPath := root + "/evaluator.py"
+	require.NoError(t, os.WriteFile(wasmPath, buildTestMemoryModule(t, 1), 0o600))
+	require.NoError(t, os.WriteFile(scriptPath, []byte("def evaluation_function(*args): return {}\n"), 0o600))
+
+	dispatcher := NewReactorPythonDispatcher(Config{
+		ModulePath:       wasmPath,
+		PythonScriptPath: scriptPath,
+		SnapshotMode:     "cow",
+		MaxInstances:     2,
+		MaxMemoryPages:   16,
+	}, zap.NewNop())
+	err := dispatcher.Start(ctx)
+	require.ErrorContains(t, err, `missing required export "py_init"`)
+	require.Nil(t, dispatcher.flyweight, "failed Start must close and clear shared Runtime")
+	require.Nil(t, dispatcher.cowCoordinator, "failed Start must close and clear canonical-image owner")
+	require.NoError(t, dispatcher.Shutdown(ctx))
 }
 
 func TestBorrowedReactorPythonRunnerShutdownDoesNotCloseFlyweight(t *testing.T) {

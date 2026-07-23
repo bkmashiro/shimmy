@@ -7,9 +7,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -108,6 +111,12 @@ def evaluation_function(response, answer, params=None):
 	})
 	timeoutCancel()
 	require.Error(t, timeoutErr)
+
+	// WithCloseOnContextDone must invalidate only timedOutRunner. The held
+	// sibling borrows the same Runtime/CompiledModule and must remain callable.
+	siblingResult, siblingErr := heldRunner.SendRequest(context.Background(), "", "eval", `{"response":"x","answer":"x","params":{"sibling":true}}`)
+	require.NoError(t, siblingErr, "timing out one shared-runtime module must not close its sibling")
+	require.NotNil(t, siblingResult)
 	dispatcher.pool <- heldRunner
 	require.Eventually(t, func() bool {
 		return len(dispatcher.pool) == cap(dispatcher.pool)
@@ -122,6 +131,130 @@ def evaluation_function(response, answer, params=None):
 	writeCowPythonEvidence(t, dispatcher, imageID, memorySize)
 }
 
+func TestCowPythonReactorFlyweightDensity(t *testing.T) {
+	wasmPath := os.Getenv("PYTHON_REACTOR_WASM")
+	if wasmPath == "" {
+		t.Skip("PYTHON_REACTOR_WASM not set")
+	}
+	instancesText := os.Getenv("COW_DENSITY_INSTANCES")
+	if instancesText == "" {
+		t.Skip("COW_DENSITY_INSTANCES not set")
+	}
+	instances, err := strconv.Atoi(instancesText)
+	require.NoError(t, err)
+	require.Positive(t, instances)
+
+	evaluatorPath := filepath.Join(t.TempDir(), "density_evaluator.py")
+	require.NoError(t, os.WriteFile(evaluatorPath, []byte(`
+def evaluation_function(response, answer, params=None):
+    return {"is_correct": response == answer, "feedback": "density"}
+`), 0o600))
+	cacheDir := os.Getenv("COW_DENSITY_CACHE_DIR")
+	if cacheDir == "" {
+		cacheDir = filepath.Join(t.TempDir(), "wazero-cache")
+	}
+
+	runtime.GC()
+	debug.FreeOSMemory()
+	before, err := readSmapsRollupKB()
+	require.NoError(t, err)
+	statusBefore, err := readProcStatusKB()
+	require.NoError(t, err)
+
+	cfg := Config{
+		ModulePath:                  wasmPath,
+		PythonScriptPath:            evaluatorPath,
+		PythonPreloadMode:           "evaluator",
+		PythonSnapshotHeadroomBytes: 8 * 1024 * 1024,
+		SnapshotMode:                "cow",
+		MaxInstances:                instances,
+		MaxMemoryPages:              8192,
+		CompileCacheDir:             cacheDir,
+		Timeout:                     120 * time.Second,
+	}
+	dispatcher := NewReactorPythonDispatcher(cfg, newTestLogger(t))
+	startedAt := time.Now()
+	initCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	require.NoError(t, dispatcher.Start(initCtx))
+	cancel()
+	startupDuration := time.Since(startedAt)
+	t.Cleanup(func() {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer shutdownCancel()
+		require.NoError(t, dispatcher.Shutdown(shutdownCtx))
+	})
+
+	require.NotNil(t, dispatcher.flyweight)
+	require.NotNil(t, dispatcher.flyweight.runtime)
+	require.NotNil(t, dispatcher.flyweight.compiled)
+	imageID := dispatcher.cowCoordinator.ImageID()
+	require.NotEmpty(t, imageID)
+	memorySize := assertCowPythonPoolAtBaseline(t, dispatcher, imageID)
+
+	runtime.GC()
+	debug.FreeOSMemory()
+	time.Sleep(250 * time.Millisecond)
+	after, err := readSmapsRollupKB()
+	require.NoError(t, err)
+	statusAfter, err := readProcStatusKB()
+	require.NoError(t, err)
+
+	artifactDigest := sha256.Sum256(dispatcher.wasmBytes)
+	evidence := map[string]any{
+		"schema_version":             1,
+		"artifact_sha256":            hex.EncodeToString(artifactDigest[:]),
+		"canonical_image_sha256":     imageID,
+		"instances":                  instances,
+		"memory_bytes":               memorySize,
+		"shared_runtime_count":       1,
+		"shared_compiled_count":      1,
+		"startup_nanoseconds":        startupDuration.Nanoseconds(),
+		"smaps_before_kb":            before,
+		"smaps_idle_kb":              after,
+		"proc_status_before_kb":      statusBefore,
+		"proc_status_idle_kb":        statusAfter,
+		"go_version":                 runtime.Version(),
+		"platform":                   runtime.GOOS + "/" + runtime.GOARCH,
+		"wazero_version":             "v1.11.0",
+		"all_instances_concurrently": false,
+	}
+	encoded, err := json.MarshalIndent(evidence, "", "  ")
+	require.NoError(t, err)
+	path := os.Getenv("COW_DENSITY_EVIDENCE_PATH")
+	if path != "" {
+		require.NoError(t, os.WriteFile(path, append(encoded, '\n'), 0o644))
+	}
+	t.Logf("COW flyweight density evidence: %s", encoded)
+}
+
+func readProcStatusKB() (map[string]uint64, error) {
+	data, err := os.ReadFile("/proc/self/status")
+	if err != nil {
+		return nil, err
+	}
+	wanted := map[string]bool{
+		"VmPeak": true, "VmSize": true, "VmHWM": true, "VmRSS": true,
+		"RssAnon": true, "RssFile": true, "RssShmem": true, "VmPTE": true,
+	}
+	result := make(map[string]uint64, len(wanted))
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		name := strings.TrimSuffix(fields[0], ":")
+		if !wanted[name] {
+			continue
+		}
+		value, parseErr := strconv.ParseUint(fields[1], 10, 64)
+		if parseErr != nil {
+			return nil, fmt.Errorf("parse /proc/self/status %s: %w", name, parseErr)
+		}
+		result[name] = value
+	}
+	return result, nil
+}
+
 func assertCowPythonPoolAtBaseline(t *testing.T, dispatcher *ReactorPythonDispatcher, imageID string) uint32 {
 	t.Helper()
 	runners := make([]*ReactorPythonRunner, 0, cap(dispatcher.pool))
@@ -129,6 +262,9 @@ func assertCowPythonPoolAtBaseline(t *testing.T, dispatcher *ReactorPythonDispat
 	for range cap(dispatcher.pool) {
 		runner := <-dispatcher.pool
 		runners = append(runners, runner)
+		require.Same(t, dispatcher.flyweight, runner.flyweight, "all pooled runners must borrow one flyweight")
+		require.False(t, runner.ownsFlyweight)
+		require.Equal(t, dispatcher.flyweight.runtime, runner.rt)
 		require.Zero(t, runner.stderrBuf.Len(), "Host stderr must be empty before pool return")
 
 		strategy, ok := runner.strategy.(*CowSnapshotStrategy)

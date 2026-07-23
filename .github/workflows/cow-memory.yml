@@ -54,7 +54,7 @@ jobs:
       - name: Run focused COW correctness tests
         run: |
           go test ./internal/execution/wasm \
-            -run='^TestCow' \
+            -run='^(TestCow|TestReactorPython(PoolSize|Flyweight|DispatcherPartialStart)|TestBorrowedReactorPythonRunner)' \
             -count=1 -v -timeout=120s
 
       - name: Run full Linux test suite
@@ -96,6 +96,20 @@ jobs:
             -run='^TestCowPythonReactorPreparedBaselines$' \
             -count=1 -v -timeout=30m 2>&1 | tee cow-python-test.log
 
+      - name: Record shared-runtime density at N=1/2/4/8
+        env:
+          PYTHON_REACTOR_WASM: ${{ github.workspace }}/python-reactor.wasm
+          COW_DENSITY_CACHE_DIR: ${{ runner.temp }}/wazero-density-cache
+        run: |
+          for instances in 1 2 4 8; do
+            COW_DENSITY_INSTANCES="$instances" \
+            COW_DENSITY_EVIDENCE_PATH="${GITHUB_WORKSPACE}/cow-python-density-${instances}.json" \
+              go test ./internal/execution/wasm \
+                -run='^TestCowPythonReactorFlyweightDensity$' \
+                -count=1 -v -timeout=30m \
+                2>&1 | tee "cow-python-density-${instances}.log"
+          done
+
       - name: Compare complete prepared request latency
         env:
           PYTHON_REACTOR_WASM: ${{ github.workspace }}/python-reactor.wasm
@@ -114,6 +128,8 @@ jobs:
             python-reactor.sha256
             cow-python-evidence.json
             cow-python-test.log
+            cow-python-density-*.json
+            cow-python-density-*.log
             cow-python-benchmark.log
           if-no-files-found: warn
           retention-days: 90

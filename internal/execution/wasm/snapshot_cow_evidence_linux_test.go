@@ -230,7 +230,10 @@ func readSmapsRollupKB() (map[string]uint64, error) {
 	if err != nil {
 		return nil, err
 	}
-	wanted := map[string]bool{"Rss": true, "Pss": true, "Shared_Clean": true, "Shared_Dirty": true, "Private_Clean": true, "Private_Dirty": true}
+	wanted := map[string]bool{
+		"Rss": true, "Pss": true, "Pss_Anon": true, "Pss_File": true, "Pss_Shmem": true,
+		"Shared_Clean": true, "Shared_Dirty": true, "Private_Clean": true, "Private_Dirty": true,
+	}
 	result := make(map[string]uint64, len(wanted))
 	for _, line := range strings.Split(string(data), "\n") {
 		fields := strings.Fields(line)

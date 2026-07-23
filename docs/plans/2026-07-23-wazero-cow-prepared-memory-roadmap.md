@@ -215,6 +215,7 @@ Slices:
 - 2026-07-23: Mechanism run `29971226763` passed: four private mappings of one 64 MiB memfd, 1/10/50% dirty cases, exact reset hashes, PSS/RSS/private-dirty/minor-fault JSON, reset-only COW/full-copy benchmark, and explicit `userfaultfd unavailable` evidence rather than fallback substitution. Results and limitations are recorded in `docs/cow-memory-image-evidence-2026-07-23.md`.
 - 2026-07-23: Local non-Docker gates repeatedly passed: `go test ./...`, `go vet ./...`, `go build ./...`, `git diff --check`, and Linux/amd64 test-binary cross-compilation. Operator boundaries are documented in `docs/deployment-recipes.md` and `docs/wasm-backend-model.md`.
 - 2026-07-23: Final lifecycle review found that timeout-set `closed=true` made runner `Shutdown` return before releasing its wazero runtime. Commit `f074b7f8b12bb79df1d3b8c263887851cb54c393` changed idempotence to test owned-resource state and added a fixed-runner cleanup assertion. Final heavy run `29972072029` passed the full Linux suite, prepared-image/error/timeout/replacement/resource-release proof, and complete-request benchmark.
+- 2026-07-23: An extra local `go test -race ./internal/execution/...` gate exposed two pre-existing pooled-dispatcher tests that read asynchronous counters after a 1 ms sleep. Commit `56ee46d` replaced the sleeps with completion-channel synchronization; dispatcher `-race -count=20`, full execution race, and ordinary repository gates all passed. Production dispatcher code was unchanged.
 
 ## Current execution pointer
 

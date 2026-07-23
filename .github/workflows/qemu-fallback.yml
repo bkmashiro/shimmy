@@ -1,0 +1,91 @@
+name: QEMU Fallback
+
+on:
+  push:
+    paths:
+      - "cmd/shimmy-qemu-*/**"
+      - "internal/execution/dispatcher_qemu*"
+      - "internal/execution/qemuguest/**"
+      - "internal/execution/qemurun/**"
+      - "experiments/qemu-fallback/**"
+      - ".github/workflows/qemu-fallback.yml"
+  pull_request:
+    paths:
+      - "cmd/shimmy-qemu-*/**"
+      - "internal/execution/dispatcher_qemu*"
+      - "internal/execution/qemuguest/**"
+      - "internal/execution/qemurun/**"
+      - "experiments/qemu-fallback/**"
+      - ".github/workflows/qemu-fallback.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  file-tcg:
+    name: File parity / x86_64 TCG
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ./go.mod
+          cache: true
+
+      - name: Install QEMU and guest image tools
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            busybox-static \
+            e2fsprogs \
+            linux-image-virtual \
+            qemu-system-x86 \
+            qemu-utils
+          qemu-system-x86_64 --version
+          qemu-img --version
+
+      - name: Resolve boot artifacts
+        run: |
+          kernel=$(readlink -f /vmlinuz)
+          initrd=$(readlink -f /initrd.img)
+          test -f "$kernel"
+          test -f "$initrd"
+          sudo chmod a+r "$kernel" "$initrd"
+          printf 'KERNEL_PATH=%s\n' "$kernel" >> "$GITHUB_ENV"
+          printf 'INITRD_PATH=%s\n' "$initrd" >> "$GITHUB_ENV"
+
+      - name: Focused tests and static checks
+        run: |
+          go test -race ./internal/execution/qemurun ./internal/execution/qemuguest
+          go test ./cmd/shimmy-qemu-runner ./cmd/shimmy-qemu-guest ./experiments/qemu-fallback/file-evaluator
+          go vet ./internal/execution/qemurun ./internal/execution/qemuguest ./cmd/shimmy-qemu-runner ./cmd/shimmy-qemu-guest
+          bash -n experiments/qemu-fallback/build-image.sh experiments/qemu-fallback/smoke-file.sh
+
+      - name: Build pinned guest fixture
+        env:
+          OUTPUT_DIR: ${{ github.workspace }}/artifacts/qemu-fallback
+          BUILD_DIR: ${{ runner.temp }}/qemu-fallback-image
+        run: experiments/qemu-fallback/build-image.sh
+
+      - name: Run native versus QEMU public HTTP parity
+        env:
+          ARTIFACT_DIR: ${{ github.workspace }}/artifacts/qemu-fallback
+          BIN_DIR: ${{ runner.temp }}/qemu-fallback-smoke
+        run: experiments/qemu-fallback/smoke-file.sh
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-fallback-file-tcg-evidence
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            artifacts/qemu-fallback/manifest.json
+            ${{ runner.temp }}/qemu-fallback-smoke/native.log
+            ${{ runner.temp }}/qemu-fallback-smoke/qemu.log

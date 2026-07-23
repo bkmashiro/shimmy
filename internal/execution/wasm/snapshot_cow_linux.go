@@ -3,6 +3,7 @@
 package wasm
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -13,7 +14,9 @@ import (
 	"syscall"
 	"unsafe"
 
+	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/experimental"
+	"go.uber.org/zap"
 	"golang.org/x/sys/unix"
 )
 
@@ -307,4 +310,201 @@ func remapCowImage(region []byte, size uint64, fd int) error {
 		return fmt.Errorf("%w: requested=%#x mapped=%#x", ErrCowMemoryDrifted, base, mapped)
 	}
 	return nil
+}
+
+// cowMemoryAllocator is scoped to one module instantiation. Wazero invokes
+// Allocate for the target module's linear memory and later owns the returned
+// LinearMemory lifecycle through Free.
+type cowMemoryAllocator struct {
+	mu       sync.Mutex
+	backings []*cowLinearMemory
+	err      error
+}
+
+var _ experimental.MemoryAllocator = (*cowMemoryAllocator)(nil)
+
+func newCowMemoryAllocator() *cowMemoryAllocator {
+	return &cowMemoryAllocator{}
+}
+
+func (a *cowMemoryAllocator) Allocate(capacity, maximum uint64) experimental.LinearMemory {
+	memory, err := newCowLinearMemory(maximum)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err != nil {
+		if a.err == nil {
+			a.err = err
+		}
+		return &heapLinearMemory{maximum: maximum, capacity: capacity}
+	}
+	a.backings = append(a.backings, memory)
+	return memory
+}
+
+func (a *cowMemoryAllocator) backingFor(mem api.Memory) (*cowLinearMemory, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.err != nil {
+		return nil, a.err
+	}
+	if len(a.backings) != 1 {
+		return nil, fmt.Errorf("%w: expected one target memory allocation, got %d", ErrCowUnavailable, len(a.backings))
+	}
+	backing := a.backings[0]
+	if !backing.matches(mem) {
+		return nil, fmt.Errorf("%w: allocator backing does not match module memory", ErrCowMemoryDrifted)
+	}
+	return backing, nil
+}
+
+// heapLinearMemory preserves module availability if the experimental mmap
+// allocator cannot reserve its requested range. The COW strategy observes the
+// allocator error and falls back to the ordinary full-copy snapshot.
+type heapLinearMemory struct {
+	buf      []byte
+	maximum  uint64
+	capacity uint64
+}
+
+var _ experimental.LinearMemory = (*heapLinearMemory)(nil)
+
+func (m *heapLinearMemory) Reallocate(size uint64) []byte {
+	if size > m.maximum || size > uint64(math.MaxInt) {
+		return nil
+	}
+	if size <= uint64(cap(m.buf)) {
+		oldLen := len(m.buf)
+		m.buf = m.buf[:int(size)]
+		if int(size) > oldLen {
+			clear(m.buf[oldLen:])
+		}
+		return m.buf
+	}
+	capacity := size
+	if m.capacity > capacity && m.capacity <= uint64(math.MaxInt) {
+		capacity = m.capacity
+	}
+	next := make([]byte, int(size), int(capacity))
+	copy(next, m.buf)
+	m.buf = next
+	return m.buf
+}
+
+func (m *heapLinearMemory) Free() {
+	m.buf = nil
+}
+
+func (m *cowLinearMemory) matches(mem api.Memory) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.freed || mem == nil || uint64(mem.Size()) != m.length || m.length == 0 {
+		return false
+	}
+	buf, ok := mem.Read(0, mem.Size())
+	if !ok || len(buf) == 0 {
+		return false
+	}
+	return unsafe.SliceData(buf) == unsafe.SliceData(m.region)
+}
+
+// CowSnapshotStrategy publishes/attaches a prepared image on Take and resets
+// the attached private mapping on Restore. If COW setup is unavailable or a
+// candidate baseline differs, it falls back to an owned full-copy snapshot.
+type CowSnapshotStrategy struct {
+	backing     *cowLinearMemory
+	coordinator *cowImageCoordinator
+	log         *zap.Logger
+
+	fallback *FullMemcpyStrategy
+	usingCow bool
+	imageID  string
+}
+
+var _ SnapshotStrategy = (*CowSnapshotStrategy)(nil)
+
+func newCowSnapshotStrategy(backing *cowLinearMemory, coordinator *cowImageCoordinator, log *zap.Logger) *CowSnapshotStrategy {
+	return &CowSnapshotStrategy{backing: backing, coordinator: coordinator, log: log}
+}
+
+func (s *CowSnapshotStrategy) Take(mem api.Memory) error {
+	if s.fallback != nil {
+		return s.fallback.Take(mem)
+	}
+	if s.usingCow {
+		if !s.backing.matches(mem) {
+			return ErrCowMemoryDrifted
+		}
+		return nil
+	}
+	if s.backing == nil || s.coordinator == nil || !s.backing.matches(mem) {
+		return s.useFullCopy(mem, fmt.Errorf("%w: missing or mismatched allocator backing", ErrCowUnavailable))
+	}
+	if err := s.coordinator.PublishOrAttach(s.backing); err != nil {
+		return s.useFullCopy(mem, err)
+	}
+	s.usingCow = true
+	s.imageID = s.backing.ImageID()
+	return nil
+}
+
+func (s *CowSnapshotStrategy) useFullCopy(mem api.Memory, reason error) error {
+	if s.log != nil {
+		s.log.Warn("prepared-memory COW unavailable for instance; falling back to full memcpy", zap.Error(reason))
+	}
+	s.fallback = NewFullMemcpyStrategy()
+	s.usingCow = false
+	s.imageID = ""
+	return s.fallback.Take(mem)
+}
+
+func (s *CowSnapshotStrategy) Restore(mem api.Memory) error {
+	if s.fallback != nil {
+		return s.fallback.Restore(mem)
+	}
+	if !s.usingCow || s.backing == nil {
+		return ErrCowNotAttached
+	}
+	if !s.backing.matches(mem) {
+		return ErrCowMemoryDrifted
+	}
+	return s.backing.Reset()
+}
+
+func (s *CowSnapshotStrategy) Close() error {
+	if s.fallback != nil {
+		return s.fallback.Close()
+	}
+	return nil
+}
+
+func (s *CowSnapshotStrategy) UsingCow() bool  { return s.usingCow }
+func (s *CowSnapshotStrategy) ImageID() string { return s.imageID }
+
+// cowRuntimeSupport binds one per-instance allocator to one dispatcher-scoped
+// image coordinator while keeping construction details outside the hot path.
+type cowRuntimeSupport struct {
+	allocator   *cowMemoryAllocator
+	coordinator *cowImageCoordinator
+}
+
+func newCowRuntimeSupport(mode string, coordinator *cowImageCoordinator) *cowRuntimeSupport {
+	if mode != "cow" || coordinator == nil {
+		return nil
+	}
+	return &cowRuntimeSupport{allocator: newCowMemoryAllocator(), coordinator: coordinator}
+}
+
+func (s *cowRuntimeSupport) instantiateContext(ctx context.Context) context.Context {
+	return experimental.WithMemoryAllocator(ctx, s.allocator)
+}
+
+func (s *cowRuntimeSupport) snapshotStrategy(mem api.Memory, log *zap.Logger) SnapshotStrategy {
+	backing, err := s.allocator.backingFor(mem)
+	if err != nil {
+		if log != nil {
+			log.Warn("COW allocator backing unavailable; falling back to full memcpy", zap.Error(err))
+		}
+		return NewFullMemcpyStrategy()
+	}
+	return newCowSnapshotStrategy(backing, s.coordinator, log)
 }

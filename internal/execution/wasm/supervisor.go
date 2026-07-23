@@ -40,6 +40,7 @@ type wasmSupervisor struct {
 	// snapshotMode selects the snapshot strategy. See Config.SnapshotMode for
 	// valid values. Resolved from Config.UseUffd by Config.applyDefaults().
 	snapshotMode string
+	cowSupport   *cowRuntimeSupport
 
 	// healthy is true when the supervisor is in a known-good state and can be
 	// safely returned to the pool. It is set to false when restoreSnapshot fails,
@@ -63,12 +64,18 @@ func newWasmSupervisor(
 	timeout time.Duration,
 	snapshotMode string,
 	log *zap.Logger,
+	cowCoordinator ...*cowImageCoordinator,
 ) *wasmSupervisor {
+	var coordinator *cowImageCoordinator
+	if len(cowCoordinator) > 0 {
+		coordinator = cowCoordinator[0]
+	}
 	return &wasmSupervisor{
 		runtime:      rt,
 		compiled:     compiled,
 		modCfg:       modCfg,
 		snapshotMode: snapshotMode,
+		cowSupport:   newCowRuntimeSupport(snapshotMode, coordinator),
 		timeout:      timeout,
 		log:          log.Named("supervisor_wasm"),
 	}
@@ -89,7 +96,11 @@ func (s *wasmSupervisor) Start(ctx context.Context) error {
 	// Apply start functions on top of the provided (sandboxed) module config.
 	instCfg := s.modCfg.WithStartFunctions("_initialize", "_start")
 
-	mod, err := s.runtime.InstantiateModule(ctx, s.compiled, instCfg)
+	instantiateCtx := ctx
+	if s.cowSupport != nil {
+		instantiateCtx = s.cowSupport.instantiateContext(ctx)
+	}
+	mod, err := s.runtime.InstantiateModule(instantiateCtx, s.compiled, instCfg)
 	if err != nil {
 		return fmt.Errorf("wasm: instantiate module: %w", err)
 	}
@@ -98,8 +109,14 @@ func (s *wasmSupervisor) Start(ctx context.Context) error {
 	s.adapter = newWasmAdapter(mod, s.log)
 	s.healthy = true
 
-	// Select snapshot strategy now that memory is available.
-	s.strategy = s.selectStrategy(mod.Memory())
+	// Select snapshot strategy now that memory is available. COW construction
+	// needs the concrete backing returned by the per-instance allocator; other
+	// strategies continue through the shared api.Memory factory.
+	if s.cowSupport != nil {
+		s.strategy = s.cowSupport.snapshotStrategy(mod.Memory(), s.log)
+	} else {
+		s.strategy = s.selectStrategy(mod.Memory())
+	}
 
 	// Snapshot linear memory so we can restore it before each request.
 	if err := s.takeSnapshot(); err != nil {

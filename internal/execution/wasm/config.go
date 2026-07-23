@@ -64,6 +64,9 @@ type Config struct {
 	//                  it silently falls back to "memcpy" with a warning log.
 	//                  Not recommended for production.)
 	//   "uffd"       — use userfaultfd write-protect (Linux, requires privilege)
+	//   "cow"        — Linux-only sealed prepared image + MAP_PRIVATE per instance
+	//                  via wazero's experimental memory allocator; fixed size
+	//                  after Take and full-copy fallback on mismatch/unavailability
 	//
 	// Falls back to "memcpy" if the requested strategy is unavailable.
 	// FUNCTION_WASM_SNAPSHOT_MODE env var.
@@ -131,9 +134,9 @@ func (c *Config) validateSnapshotMode(poolSize int) error {
 	}
 	switch c.SnapshotMode {
 	case "soft-dirty":
-		return fmt.Errorf("snapshot mode %q is not safe with pool_size=%d > 1 (process-wide dirty bits cannot be attributed to individual instances); use \"memcpy\" or \"uffd\" instead", c.SnapshotMode, poolSize)
+		return fmt.Errorf("snapshot mode %q is not safe with pool_size=%d > 1 (process-wide dirty bits cannot be attributed to individual instances); use \"memcpy\", \"uffd\", or \"cow\" instead", c.SnapshotMode, poolSize)
 	case "mprotect":
-		return fmt.Errorf("snapshot mode %q is not safe with pool_size=%d > 1 (global SIGSEGV handler cannot distinguish instances); use \"memcpy\" or \"uffd\" instead", c.SnapshotMode, poolSize)
+		return fmt.Errorf("snapshot mode %q is not safe with pool_size=%d > 1 (global SIGSEGV handler cannot distinguish instances); use \"memcpy\", \"uffd\", or \"cow\" instead", c.SnapshotMode, poolSize)
 	}
 	return nil
 }

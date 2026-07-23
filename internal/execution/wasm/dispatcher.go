@@ -2,6 +2,7 @@ package wasm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -29,8 +30,11 @@ type Dispatcher struct {
 	rt       wazero.Runtime
 	compiled wazero.CompiledModule
 	modCfg   wazero.ModuleConfig
-	pool     chan *wasmSupervisor
-	log      *zap.Logger
+	// cowCoordinator owns the dispatcher-scoped sealed prepared-memory image.
+	// It must outlive every module instance because reset remaps from its fd.
+	cowCoordinator *cowImageCoordinator
+	pool           chan *wasmSupervisor
+	log            *zap.Logger
 
 	// mu protects closed and serialises the closed/push transitions so that a
 	// replacement supervisor cannot land in the pool after Shutdown has begun
@@ -183,19 +187,26 @@ func (d *Dispatcher) Start(ctx context.Context) error {
 	// Guard: snapshot modes that use process-wide state are only safe with a
 	// single WASM instance.
 	if err := d.cfg.validateSnapshotMode(maxInstances); err != nil {
+		_ = rt.Close(ctx)
+		d.rt = nil
 		return fmt.Errorf("wasm: %w", err)
+	}
+	if d.cfg.SnapshotMode == "cow" {
+		d.cowCoordinator = newCowImageCoordinator()
 	}
 
 	// Build the pool.
 	d.pool = make(chan *wasmSupervisor, maxInstances)
 
 	for i := 0; i < maxInstances; i++ {
-		sv := newWasmSupervisor(rt, compiled, modCfg, d.cfg.Timeout, d.cfg.SnapshotMode, d.log)
+		sv := newWasmSupervisor(rt, compiled, modCfg, d.cfg.Timeout, d.cfg.SnapshotMode, d.log, d.cowCoordinator)
 
 		if err := sv.Start(ctx); err != nil {
 			// Clean up already-started supervisors.
 			drainPool(ctx, d.pool, d.log)
 			_ = rt.Close(ctx)
+			d.rt = nil
+			_ = d.closeCowCoordinator()
 			return fmt.Errorf("wasm: start instance %d: %w", i, err)
 		}
 
@@ -314,7 +325,7 @@ func (d *Dispatcher) spawnOne() {
 	defer cancel()
 
 	d.log.Info("wasm: initialising replacement supervisor")
-	sv := newWasmSupervisor(d.rt, d.compiled, d.modCfg, d.cfg.Timeout, d.cfg.SnapshotMode, d.log)
+	sv := newWasmSupervisor(d.rt, d.compiled, d.modCfg, d.cfg.Timeout, d.cfg.SnapshotMode, d.log, d.cowCoordinator)
 	if err := sv.Start(ctx); err != nil {
 		d.log.Error("wasm: replacement supervisor init failed", zap.Error(err))
 		return
@@ -371,12 +382,25 @@ func (d *Dispatcher) Shutdown(ctx context.Context) error {
 	}
 drained:
 
+	var closeErr error
 	if d.rt != nil {
 		if err := d.rt.Close(ctx); err != nil {
-			return fmt.Errorf("wasm: close runtime: %w", err)
+			closeErr = errors.Join(closeErr, fmt.Errorf("wasm: close runtime: %w", err))
 		}
 		d.rt = nil
 	}
+	closeErr = errors.Join(closeErr, d.closeCowCoordinator())
+	return closeErr
+}
 
+func (d *Dispatcher) closeCowCoordinator() error {
+	if d.cowCoordinator == nil {
+		return nil
+	}
+	err := d.cowCoordinator.Close()
+	d.cowCoordinator = nil
+	if err != nil {
+		return fmt.Errorf("wasm: close COW image coordinator: %w", err)
+	}
 	return nil
 }

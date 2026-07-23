@@ -95,6 +95,11 @@ def evaluation_function(response, answer, params=None):
 	require.NotEmpty(t, errorPayload["error"])
 	memorySize = assertCowPythonPoolAtBaseline(t, dispatcher, imageID)
 
+	// Hold one runner aside and leave exactly one in the pool, so the dispatcher
+	// must time out the runner whose eventual resource cleanup we inspect.
+	heldRunner := <-dispatcher.pool
+	timedOutRunner := <-dispatcher.pool
+	dispatcher.pool <- timedOutRunner
 	timeoutCtx, timeoutCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	_, timeoutErr := dispatcher.Send(timeoutCtx, "eval", map[string]any{
 		"response": "x",
@@ -102,10 +107,16 @@ def evaluation_function(response, answer, params=None):
 		"params":   map[string]any{"loop": true},
 	})
 	timeoutCancel()
-	require.Error(t, timeoutErr, "infinite evaluator must be interrupted and discarded")
+	require.Error(t, timeoutErr)
+	dispatcher.pool <- heldRunner
 	require.Eventually(t, func() bool {
 		return len(dispatcher.pool) == cap(dispatcher.pool)
 	}, 5*time.Minute, 250*time.Millisecond, "timed-out runner must be replaced")
+	require.Eventually(t, func() bool {
+		timedOutRunner.mu.Lock()
+		defer timedOutRunner.mu.Unlock()
+		return timedOutRunner.mod == nil && timedOutRunner.rt == nil
+	}, time.Minute, 100*time.Millisecond, "discard must release the timed-out runner runtime")
 	memorySize = assertCowPythonPoolAtBaseline(t, dispatcher, imageID)
 
 	writeCowPythonEvidence(t, dispatcher, imageID, memorySize)

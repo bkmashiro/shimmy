@@ -1100,7 +1100,11 @@ func (r *ReactorPythonRunner) Shutdown(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.closed {
+	// r.closed can also mean WithCloseOnContextDone invalidated the module after
+	// a timeout. In that state the dispatcher still calls Shutdown to release the
+	// per-runner wazero runtime and snapshot resources. Only return early once
+	// the owned runtime/module have actually been cleared.
+	if r.mod == nil && r.rt == nil {
 		return nil
 	}
 	r.log.Debug("shutting down reactor python runner")

@@ -22,6 +22,11 @@ on:
         required: true
         default: false
         type: boolean
+      mechanism_evidence:
+        description: Record reset-only RSS/PSS, page-fault, COW/full-copy, and optional UFFD mechanism evidence
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -100,5 +105,50 @@ jobs:
             python-reactor.sha256
             cow-python-evidence.json
             cow-python-test.log
+          if-no-files-found: warn
+          retention-days: 90
+
+  mechanism-evidence:
+    name: COW mechanism evidence (reset-only)
+    if: github.event_name == 'workflow_dispatch' && inputs.mechanism_evidence
+    needs: cow-linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Record RSS/PSS, faults, and strategy availability
+        env:
+          COW_MECHANISM_EVIDENCE_PATH: ${{ github.workspace }}/cow-mechanism-evidence.json
+        run: |
+          go test ./internal/execution/wasm \
+            -run='^TestCowLinuxMechanismEvidence$' \
+            -count=1 -v -timeout=10m 2>&1 | tee cow-mechanism-test.log
+
+      - name: Compare reset mechanisms without end-to-end claims
+        run: |
+          go test ./internal/execution/wasm \
+            -run='^$' -bench='^BenchmarkCowVsFullCopyResetOnly$' \
+            -benchtime=3x -count=1 -benchmem -timeout=10m \
+            2>&1 | tee cow-reset-benchmark.log
+
+      - name: Upload mechanism evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: cow-mechanism-${{ github.sha }}
+          path: |
+            cow-mechanism-evidence.json
+            cow-mechanism-test.log
+            cow-reset-benchmark.log
           if-no-files-found: warn
           retention-days: 90

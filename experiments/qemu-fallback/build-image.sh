@@ -26,11 +26,11 @@ for command_name in go mkfs.ext4 qemu-img sha256sum; do
   fi
 done
 
-if [[ -z "$KERNEL_PATH" && -e /vmlinuz ]]; then
-  KERNEL_PATH=$(readlink -f /vmlinuz)
+if [[ -z "$KERNEL_PATH" && -e /boot/vmlinuz ]]; then
+  KERNEL_PATH=$(readlink -f /boot/vmlinuz)
 fi
-if [[ -z "$INITRD_PATH" && -e /initrd.img ]]; then
-  INITRD_PATH=$(readlink -f /initrd.img)
+if [[ -z "$INITRD_PATH" && -e /boot/initrd.img ]]; then
+  INITRD_PATH=$(readlink -f /boot/initrd.img)
 fi
 require_file "$KERNEL_PATH"
 require_file "$INITRD_PATH"

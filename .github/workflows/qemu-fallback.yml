@@ -51,8 +51,8 @@ jobs:
 
       - name: Resolve boot artifacts
         run: |
-          kernel=$(readlink -f /vmlinuz)
-          initrd=$(readlink -f /initrd.img)
+          kernel=$(readlink -f /boot/vmlinuz)
+          initrd=$(readlink -f /boot/initrd.img)
           test -f "$kernel"
           test -f "$initrd"
           sudo chmod a+r "$kernel" "$initrd"

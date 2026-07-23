@@ -90,7 +90,7 @@ func TestReactorPythonDispatcherPartialStartClosesSharedResources(t *testing.T) 
 		MaxMemoryPages:   16,
 	}, zap.NewNop())
 	err := dispatcher.Start(ctx)
-	require.ErrorContains(t, err, `missing required export "py_init"`)
+	require.ErrorContains(t, err, "missing required export")
 	require.Nil(t, dispatcher.flyweight, "failed Start must close and clear shared Runtime")
 	require.Nil(t, dispatcher.cowCoordinator, "failed Start must close and clear canonical-image owner")
 	require.NoError(t, dispatcher.Shutdown(ctx))

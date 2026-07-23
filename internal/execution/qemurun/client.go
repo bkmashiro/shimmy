@@ -3,9 +3,12 @@ package qemurun
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"strings"
+	"time"
 )
 
 type RemoteExitError struct {
@@ -41,7 +44,7 @@ func RunFile(
 	if err := writeJSONFrame(codec, conn, FrameHello, HelloMessage{Version: ProtocolVersion}); err != nil {
 		return FileResultMessage{}, ReadyMessage{}, err
 	}
-	readyFrame, err := readExpectedFrame(codec, conn, FrameReady)
+	readyFrame, err := readReadyFrame(codec, conn)
 	if err != nil {
 		return FileResultMessage{}, ReadyMessage{}, err
 	}
@@ -51,6 +54,9 @@ func RunFile(
 	}
 	if ready.Version != ProtocolVersion {
 		return FileResultMessage{}, ready, fmt.Errorf("qemu client: guest protocol version %d, want %d", ready.Version, ProtocolVersion)
+	}
+	if err := clearGuestBootDeadline(conn); err != nil {
+		return FileResultMessage{}, ready, err
 	}
 
 	if err := writeJSONFrame(codec, conn, FrameStart, start); err != nil {
@@ -87,6 +93,39 @@ func RunFile(
 		return result, ready, &RemoteExitError{Code: result.ExitCode, Detail: detail}
 	}
 	return result, ready, nil
+}
+
+func SetGuestBootDeadline(connection net.Conn, timeout time.Duration) error {
+	if timeout <= 0 {
+		return fmt.Errorf("qemu runner: guest boot timeout must be positive")
+	}
+	if err := connection.SetDeadline(time.Now().Add(timeout)); err != nil {
+		return fmt.Errorf("qemu runner: set guest boot deadline: %w", err)
+	}
+	return nil
+}
+
+func readReadyFrame(codec Codec, reader io.Reader) (Frame, error) {
+	frame, err := readExpectedFrame(codec, reader, FrameReady)
+	if err == nil {
+		return frame, nil
+	}
+	var networkError net.Error
+	if errors.As(err, &networkError) && networkError.Timeout() {
+		return Frame{}, fmt.Errorf("%w: guest did not send ready: %v", ErrVMBootTimeout, err)
+	}
+	return Frame{}, err
+}
+
+func clearGuestBootDeadline(connection any) error {
+	deadliner, ok := connection.(interface{ SetDeadline(time.Time) error })
+	if !ok {
+		return nil
+	}
+	if err := deadliner.SetDeadline(time.Time{}); err != nil {
+		return fmt.Errorf("qemu runner: clear guest boot deadline: %w", err)
+	}
+	return nil
 }
 
 func writeJSONFrame(codec Codec, w io.Writer, typ FrameType, value any) error {

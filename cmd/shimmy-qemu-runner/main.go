@@ -68,6 +68,9 @@ func runRunner(ctx context.Context, args, effectiveEnv []string, dependencies ru
 			returnErr = closeErr
 		}
 	}()
+	if err := qemurun.SetGuestBootDeadline(vm.Connection(), runtimeConfig.BootTimeout); err != nil {
+		return err
+	}
 
 	switch invocation.Start.Mode {
 	case qemurun.ModeFile:

@@ -49,6 +49,35 @@ func TestRunFileExchangesOneEvaluatorInvocation(t *testing.T) {
 	}
 }
 
+func TestRunFileClearsBootDeadlineAfterReady(t *testing.T) {
+	host, guest := net.Pipe()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	guestErr := make(chan error, 1)
+	go func() {
+		guestErr <- qemuguest.Serve(ctx, guest, qemuguest.ServerConfig{WorkRoot: t.TempDir(), MaxFrameBytes: 1 << 20})
+	}()
+	if err := qemurun.SetGuestBootDeadline(host, 30*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	request := []byte(`{"slow":true}`)
+	result, _, err := qemurun.RunFile(ctx, host, qemurun.StartMessage{
+		Mode:    qemurun.ModeFile,
+		Command: "/bin/sh",
+		Args:    []string{"-c", `sleep 0.1; cp "$1" "$2"`, "shimmy-evaluator"},
+		Env:     os.Environ(),
+	}, request, 1<<20)
+	if err != nil {
+		t.Fatalf("RunFile: %v", err)
+	}
+	if !bytes.Equal(result.Response, request) {
+		t.Fatalf("response = %q", result.Response)
+	}
+	if err := <-guestErr; err != nil {
+		t.Fatalf("guest Serve: %v", err)
+	}
+}
+
 func TestRunFileReturnsEvaluatorFailureWithoutProtocolLoss(t *testing.T) {
 	host, guest := net.Pipe()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

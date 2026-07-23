@@ -38,7 +38,7 @@ func RunRPCStdio(
 	if err := writeJSONSerialized(ctx, writer, FrameHello, 0, HelloMessage{Version: ProtocolVersion}); err != nil {
 		return err
 	}
-	readyFrame, err := readExpectedFrame(codec, connection, FrameReady)
+	readyFrame, err := readReadyFrame(codec, connection)
 	if err != nil {
 		return err
 	}
@@ -48,6 +48,9 @@ func RunRPCStdio(
 	}
 	if ready.Version != ProtocolVersion {
 		return fmt.Errorf("qemu client: guest protocol version %d, want %d", ready.Version, ProtocolVersion)
+	}
+	if err := clearGuestBootDeadline(connection); err != nil {
+		return err
 	}
 	if err := writeJSONSerialized(ctx, writer, FrameStart, 0, start); err != nil {
 		return err

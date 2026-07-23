@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -40,7 +42,7 @@ func TestRunRunnerFilePathExchangesAndWritesHostResponse(t *testing.T) {
 	guestErr := make(chan error, 1)
 	deps := runnerDependencies{
 		loadRuntime: func() (qemurun.RuntimeConfig, error) {
-			return qemurun.RuntimeConfig{MaxFrameBytes: 1 << 20, ShutdownTimeout: time.Second}, nil
+			return qemurun.RuntimeConfig{MaxFrameBytes: 1 << 20, BootTimeout: time.Second, ShutdownTimeout: time.Second}, nil
 		},
 		startVM: func(context.Context, qemurun.RuntimeConfig) (vmSession, error) {
 			host, guest := net.Pipe()
@@ -93,7 +95,7 @@ func TestRunRunnerRPCStdioPreservesOuterPipes(t *testing.T) {
 		"FUNCTION_QEMU_ENABLED=true",
 	}, runnerDependencies{
 		loadRuntime: func() (qemurun.RuntimeConfig, error) {
-			return qemurun.RuntimeConfig{MaxFrameBytes: 1 << 20, ShutdownTimeout: time.Second}, nil
+			return qemurun.RuntimeConfig{MaxFrameBytes: 1 << 20, BootTimeout: time.Second, ShutdownTimeout: time.Second}, nil
 		},
 		startVM: func(context.Context, qemurun.RuntimeConfig) (vmSession, error) {
 			return &fakeVMSession{connection: host}, nil
@@ -109,6 +111,51 @@ func TestRunRunnerRPCStdioPreservesOuterPipes(t *testing.T) {
 	}
 	if err := <-guestErr; err != nil {
 		t.Fatalf("guest: %v", err)
+	}
+}
+
+func TestRunRunnerTimesOutWaitingForGuestReady(t *testing.T) {
+	root := t.TempDir()
+	requestPath := filepath.Join(root, "request.json")
+	responsePath := filepath.Join(root, "response.json")
+	if err := os.WriteFile(requestPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(responsePath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	host, guest := net.Pipe()
+	defer guest.Close()
+	go func() {
+		codec := qemurun.NewCodec(1 << 20)
+		_, _ = codec.ReadFrame(guest)
+		_, _ = io.Copy(io.Discard, guest)
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	started := time.Now()
+	err := runRunner(ctx, []string{"--", "/bin/true", requestPath, responsePath}, []string{
+		"EVAL_IO=file",
+		"EVAL_FILE_NAME_REQUEST=" + requestPath,
+		"EVAL_FILE_NAME_RESPONSE=" + responsePath,
+	}, runnerDependencies{
+		loadRuntime: func() (qemurun.RuntimeConfig, error) {
+			return qemurun.RuntimeConfig{
+				MaxFrameBytes:   1 << 20,
+				BootTimeout:     40 * time.Millisecond,
+				ShutdownTimeout: 10 * time.Millisecond,
+			}, nil
+		},
+		startVM: func(context.Context, qemurun.RuntimeConfig) (vmSession, error) {
+			return &fakeVMSession{connection: host}, nil
+		},
+	})
+	if !errors.Is(err, qemurun.ErrVMBootTimeout) {
+		t.Fatalf("error = %v, want ErrVMBootTimeout", err)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("guest readiness timeout took %s", elapsed)
 	}
 }
 

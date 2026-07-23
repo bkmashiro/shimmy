@@ -159,7 +159,7 @@ func beginRPCSession(
 	if err := writeJSONSerialized(ctx, writer, FrameHello, 0, HelloMessage{Version: ProtocolVersion}); err != nil {
 		return err
 	}
-	readyFrame, err := readExpectedFrame(codec, guest, FrameReady)
+	readyFrame, err := readReadyFrame(codec, guest)
 	if err != nil {
 		return err
 	}
@@ -169,6 +169,9 @@ func beginRPCSession(
 	}
 	if ready.Version != ProtocolVersion {
 		return fmt.Errorf("qemu client: guest protocol version %d, want %d", ready.Version, ProtocolVersion)
+	}
+	if err := clearGuestBootDeadline(guest); err != nil {
+		return err
 	}
 	return writeJSONSerialized(ctx, writer, FrameStart, 0, start)
 }

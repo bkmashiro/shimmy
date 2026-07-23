@@ -13,8 +13,13 @@ type requestEnvelope struct {
 }
 
 type responseEnvelope struct {
-	Command string          `json:"command"`
-	Result  json.RawMessage `json:"result"`
+	Command string         `json:"command"`
+	Result  resultEnvelope `json:"result"`
+}
+
+type resultEnvelope struct {
+	IsCorrect bool            `json:"is_correct"`
+	Echo      json.RawMessage `json:"echo"`
 }
 
 func evaluate(request []byte) ([]byte, error) {
@@ -28,7 +33,13 @@ func evaluate(request []byte) ([]byte, error) {
 	if len(envelope.Params) == 0 {
 		envelope.Params = json.RawMessage(`{}`)
 	}
-	response, err := json.Marshal(responseEnvelope{Command: envelope.Command, Result: envelope.Params})
+	response, err := json.Marshal(responseEnvelope{
+		Command: envelope.Command,
+		Result: resultEnvelope{
+			IsCorrect: true,
+			Echo:      envelope.Params,
+		},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("encode response: %w", err)
 	}

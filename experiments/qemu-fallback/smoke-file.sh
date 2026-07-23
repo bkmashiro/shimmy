@@ -85,9 +85,28 @@ wait_for_health() {
 wait_for_health "$NATIVE_PORT" "$native_pid" "$native_log"
 wait_for_health "$QEMU_PORT" "$qemu_pid" "$qemu_log"
 
-payload='{"response":"same","answer":"same","nested":{"value":42}}'
-native_response=$(curl -fsS -X POST "http://127.0.0.1:${NATIVE_PORT}/" -H 'Content-Type: application/json' -H 'Command: evaluation' -d "$payload")
-qemu_response=$(curl -fsS -X POST "http://127.0.0.1:${QEMU_PORT}/" -H 'Content-Type: application/json' -H 'Command: evaluation' -d "$payload")
+post_eval() {
+  local port=$1
+  local label=$2
+  local server_log=$3
+  local response_file="$BIN_DIR/${label}-response.json"
+  local status
+  status=$(curl -sS -o "$response_file" -w '%{http_code}' -X POST "http://127.0.0.1:${port}/" \
+    -H 'Content-Type: application/json' \
+    -H 'Command: eval' \
+    -d "$payload")
+  if [[ "$status" != 200 ]]; then
+    printf '%s evaluation returned HTTP %s\n' "$label" "$status" >&2
+    cat "$response_file" >&2
+    cat "$server_log" >&2
+    return 1
+  fi
+  cat "$response_file"
+}
+
+payload='{"response":"same","answer":"same","params":{"nested":{"value":42}}}'
+native_response=$(post_eval "$NATIVE_PORT" native "$native_log")
+qemu_response=$(post_eval "$QEMU_PORT" qemu "$qemu_log")
 
 NATIVE_RESPONSE="$native_response" QEMU_RESPONSE="$qemu_response" python3 - <<'PY'
 import json
@@ -95,7 +114,8 @@ import os
 native = json.loads(os.environ["NATIVE_RESPONSE"])
 qemu = json.loads(os.environ["QEMU_RESPONSE"])
 assert native == qemu, {"native": native, "qemu": qemu}
-assert native["command"] == "evaluation", native
-assert native["result"]["nested"]["value"] == 42, native
+assert native["command"] == "eval", native
+assert native["result"]["is_correct"] is True, native
+assert native["result"]["echo"]["params"]["nested"]["value"] == 42, native
 print(json.dumps({"status": "pass", "native": native, "qemu": qemu}, sort_keys=True))
 PY

@@ -6,7 +6,7 @@ import (
 )
 
 func TestEvaluateReturnsCommandAndParamsDeterministically(t *testing.T) {
-	request := []byte(`{"command":"evaluation","params":{"answer":"42","nested":{"ok":true}}}`)
+	request := []byte(`{"command":"eval","params":{"answer":"42","nested":{"ok":true}}}`)
 	response, err := evaluate(request)
 	if err != nil {
 		t.Fatalf("evaluate: %v", err)
@@ -15,11 +15,12 @@ func TestEvaluateReturnsCommandAndParamsDeterministically(t *testing.T) {
 	if err := json.Unmarshal(response, &got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if got["command"] != "evaluation" {
+	if got["command"] != "eval" {
 		t.Fatalf("command = %#v", got["command"])
 	}
 	result, ok := got["result"].(map[string]any)
-	if !ok || result["answer"] != "42" {
+	echo, echoOK := result["echo"].(map[string]any)
+	if !ok || !echoOK || result["is_correct"] != true || echo["answer"] != "42" {
 		t.Fatalf("result = %#v", got["result"])
 	}
 }

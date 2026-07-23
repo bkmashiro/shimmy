@@ -79,9 +79,9 @@ fi
 rm -rf "$BUILD_DIR/rootfs"
 mkdir -p "$BUILD_DIR/rootfs" "$OUTPUT_DIR"
 
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w -buildid=' -o "$GUEST_BINARY" ./cmd/shimmy-qemu-guest
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w -buildid=' -o "$EVALUATOR_BINARY" ./experiments/qemu-fallback/file-evaluator
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w -buildid=' -o "$RPC_EVALUATOR_BINARY" ./experiments/qemu-fallback/rpc-evaluator
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -trimpath -ldflags='-s -w -buildid=' -o "$GUEST_BINARY" ./cmd/shimmy-qemu-guest
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -trimpath -ldflags='-s -w -buildid=' -o "$EVALUATOR_BINARY" ./experiments/qemu-fallback/file-evaluator
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -trimpath -ldflags='-s -w -buildid=' -o "$RPC_EVALUATOR_BINARY" ./experiments/qemu-fallback/rpc-evaluator
 
 ROOT="$BUILD_DIR/rootfs"
 mkdir -p "$ROOT/bin" "$ROOT/dev" "$ROOT/proc" "$ROOT/sys" "$ROOT/run" "$ROOT/tmp" "$ROOT/usr/bin" "$ROOT/opt/evaluator"

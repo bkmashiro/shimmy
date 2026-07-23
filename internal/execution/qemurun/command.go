@@ -60,7 +60,7 @@ func BuildQEMUCommand(config VMConfig) (*exec.Cmd, error) {
 		"-m", strconv.Itoa(config.MemoryMB) + "M",
 		"-kernel", config.Kernel,
 		"-initrd", config.Initrd,
-		"-append", "root=/dev/vda ro rootfstype=ext4 init=/init panic=-1 reboot=t",
+		"-append", "root=/dev/vda ro rootfstype=squashfs init=/init panic=-1 reboot=t",
 		"-drive", "file=" + config.RootFS + ",format=qcow2,if=virtio,readonly=on",
 		"-device", "virtio-serial-pci",
 		"-chardev", "socket,id=shimmy,path=" + config.ControlSocket + ",server=on,wait=off",

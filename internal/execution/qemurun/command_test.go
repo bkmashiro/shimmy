@@ -69,7 +69,7 @@ func TestBuildQEMUCommandBootsReadOnlyGuestRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildQEMUCommand: %v", err)
 	}
-	const want = "root=/dev/vda ro rootfstype=ext4 init=/init panic=-1 reboot=t"
+	const want = "root=/dev/vda ro rootfstype=squashfs init=/init panic=-1 reboot=t"
 	if !adjacentArgs(cmd.Args, "-append", want) {
 		t.Fatalf("kernel append args absent: %#v", cmd.Args)
 	}

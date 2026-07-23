@@ -2,9 +2,8 @@
   "schema_version": 1,
   "architecture": "x86_64",
   "source_date_epoch": 1767225600,
-  "filesystem_uuid": "66d10a72-4930-4ac6-936b-67c550f4c2db",
   "kernel_sha256": "09d55bc6cb91a2926e363516a3b249fdf8b3fc3d32c3811b84e6577e63644ef2",
-  "rootfs_size_mb": 256,
+  "rootfs_filesystem": "squashfs",
   "rootfs_format": "qcow2",
   "guest_control_port": "org.shimmy.control",
   "network_default": "none",
@@ -13,6 +12,7 @@
     "matching kernel modules",
     "busybox-static",
     "dracut reproducible initramfs builder",
+    "squashfs-tools deterministic rootfs builder",
     "Go module at the checked-out Shimmy commit"
   ]
 }

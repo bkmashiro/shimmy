@@ -43,7 +43,7 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             busybox-static \
             dracut-core \
-            e2fsprogs \
+            squashfs-tools \
             linux-image-virtual \
             qemu-system-x86 \
             qemu-utils

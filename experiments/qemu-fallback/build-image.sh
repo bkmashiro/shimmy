@@ -19,7 +19,7 @@ require_file() {
   fi
 }
 
-for command_name in dracut go mkfs.ext4 python3 qemu-img sha256sum; do
+for command_name in dracut go mksquashfs python3 qemu-img sha256sum; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     printf 'required command is missing: %s\n' "$command_name" >&2
     exit 1
@@ -40,14 +40,12 @@ with open(sys.argv[1], encoding="utf-8") as handle:
     lock = json.load(handle)
 if lock.get("schema_version") != 1 or lock.get("architecture") != "x86_64":
     raise SystemExit("unsupported QEMU source lock")
-for key in ("source_date_epoch", "filesystem_uuid", "kernel_sha256", "rootfs_size_mb"):
+for key in ("source_date_epoch", "kernel_sha256"):
     print(lock[key])
 PY
 )
 SOURCE_DATE_EPOCH=${lock_values[0]}
-FILESYSTEM_UUID=${lock_values[1]}
-EXPECTED_KERNEL_SHA=${lock_values[2]}
-ROOTFS_SIZE_MB=${lock_values[3]}
+EXPECTED_KERNEL_SHA=${lock_values[1]}
 
 RAW_BUILD_DIR=$BUILD_DIR
 if [[ -L "$RAW_BUILD_DIR" || -L "$RAW_BUILD_DIR/rootfs" ]]; then
@@ -139,16 +137,17 @@ for current, directories, files in os.walk(root, topdown=False):
     os.utime(current, (epoch, epoch), follow_symlinks=False)
 PY
 
-RAW_ROOTFS="$BUILD_DIR/rootfs.raw"
+RAW_ROOTFS="$BUILD_DIR/rootfs.squashfs"
 QCOW_ROOTFS="$OUTPUT_DIR/evaluator.qcow2"
 rm -f "$RAW_ROOTFS" "$QCOW_ROOTFS"
-truncate -s "${ROOTFS_SIZE_MB}M" "$RAW_ROOTFS"
-E2FSPROGS_FAKE_TIME="$SOURCE_DATE_EPOCH" mkfs.ext4 -q -F \
-  -U "$FILESYSTEM_UUID" \
-  -O ^has_journal,^orphan_file \
-  -E "lazy_itable_init=0,lazy_journal_init=0,hash_seed=$FILESYSTEM_UUID" \
-  -d "$ROOT" \
-  "$RAW_ROOTFS"
+mksquashfs "$ROOT" "$RAW_ROOTFS" \
+  -noappend \
+  -all-root \
+  -all-time "$SOURCE_DATE_EPOCH" \
+  -mkfs-time "$SOURCE_DATE_EPOCH" \
+  -no-xattrs \
+  -no-progress \
+  -comp gzip
 qemu-img convert -f raw -O qcow2 \
   -o compat=1.1,cluster_size=65536,lazy_refcounts=off \
   "$RAW_ROOTFS" "$QCOW_ROOTFS"

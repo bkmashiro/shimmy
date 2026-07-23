@@ -85,7 +85,7 @@ With QEMU enabled, all of the following remain semantically unchanged from the u
 - `FUNCTION_COMMAND` as the command executed inside the guest;
 - `FUNCTION_ARGS` and ordering;
 - `FUNCTION_WORKING_DIR` inside the guest;
-- explicit `FUNCTION_ENV` entries inside the guest;
+- the current effective worker environment inside the guest: Host `os.Environ()`, explicit `FUNCTION_ENV`, and adapter-added `EVAL_*`, with only QEMU wrapper-private control variables removed;
 - `FUNCTION_WORKER_SEND_TIMEOUT` and stop timeout;
 - `FUNCTION_MAX_PROCS` worker concurrency;
 - `file` transient lifecycle;
@@ -209,16 +209,16 @@ This supports every currently advertised RPC transport without evaluator changes
 
 ## 7. Environment, cwd and filesystem mapping
 
-Transparent execution requires the explicit worker configuration inside the guest:
+Transparent execution requires the current effective worker configuration inside the guest:
 
 - original command path;
 - original cwd;
 - original args;
-- exact explicit `FUNCTION_ENV` entries;
+- Host ambient environment inherited by `ProcessWorker` today, plus exact explicit `FUNCTION_ENV` entries in the same override order;
 - transport environment produced by the current adapter;
 - file request/response environment translated to guest paths.
 
-Do not forward the entire ambient Shimmy/Lambda Host environment. Only the worker environment that the current supervisor intentionally supplies belongs to the evaluator contract.
+`shimmy-qemu-runner` therefore forwards the environment it actually inherits after the current `ProcessWorker` assembly, preserving duplicate-key/last-value behavior, and removes only wrapper-private `FUNCTION_QEMU_*`/internal control entries that did not belong to the original evaluator. This deliberately preserves the existing native path's ambient environment, including any deployment credentials; tightening that authority would be a separate all-backend security change, not a QEMU transparency change.
 
 The deployment image builder preserves evaluator paths inside the guest. It may use:
 
@@ -361,7 +361,7 @@ All are required:
 - disabled mode leaves `StartConfig` byte-for-byte/semantically unchanged;
 - enabled mode preserves `file` and `rpc` interface selection;
 - stdio, IPC, TCP, HTTP and WS RPC transports retain equivalent behavior;
-- original command/cwd/args/explicit env execute inside the guest without evaluator source changes;
+- original command/cwd/args/effective worker environment execute inside the guest without evaluator source changes;
 - file remains transient and RPC remains persistent;
 - Python and Lean are parity fixtures, not allowlisted runtimes;
 - QEMU runs the original evaluator without a DBI dependency or nested DBI layer;
@@ -412,7 +412,7 @@ After verdict and evidence, stop. No automatic request replay, VM snapshots, mig
 1. RED: disabled/unset wrapper leaves config unchanged.
 2. RED: invalid boolean, runner/image/binary/manifest/accelerator/resource config fails closed.
 3. RED: file and every RPC transport retain their `IOConfig` exactly.
-4. RED: command/cwd/args/env are captured without shell flattening or secret logging.
+4. RED: command/cwd/args and effective `os.Environ()+FUNCTION_ENV+EVAL_*` order are preserved without shell flattening or secret logging; only wrapper-private QEMU controls are removed.
 5. RED: enabling DBI and QEMU together fails before worker startup; QEMU wraps only the original worker command.
 6. GREEN: implement `applyQEMUFallbackConfig` adjacent to `applyDBISecurityConfig`.
 7. Focused and full execution tests.

@@ -54,45 +54,49 @@ func Serve(ctx context.Context, conn io.ReadWriteCloser, config ServerConfig) er
 	if err := json.Unmarshal(startFrame.Payload, &start); err != nil {
 		return fmt.Errorf("qemu guest: decode start: %w", err)
 	}
-	if start.Mode != qemurun.ModeFile {
+	switch start.Mode {
+	case qemurun.ModeFile:
+		requestFrame, err := codec.ReadFrame(conn)
+		if err != nil {
+			return fmt.Errorf("qemu guest: read file request: %w", err)
+		}
+		if requestFrame.Type != qemurun.FrameFileRequest {
+			return fmt.Errorf("qemu guest: frame is %s, want file_request", requestFrame.Type)
+		}
+		result, executeErr := ExecuteFile(ctx, config.WorkRoot, ProcessSpec{
+			Command: start.Command,
+			Args:    start.Args,
+			Cwd:     start.Cwd,
+			Env:     start.Env,
+		}, requestFrame.Payload)
+		resultMessage := qemurun.FileResultMessage{
+			Response: result.Response,
+			Stdout:   result.Stdout,
+			Stderr:   result.Stderr,
+			ExitCode: result.ExitCode,
+		}
+		if executeErr != nil {
+			resultMessage.Error = executeErr.Error()
+		}
+		if err := writeJSON(codec, conn, qemurun.FrameFileResult, resultMessage); err != nil {
+			return err
+		}
+		exitMessage := qemurun.ExitMessage{Code: result.ExitCode}
+		if executeErr != nil {
+			exitMessage.Error = executeErr.Error()
+		}
+		if err := writeJSON(codec, conn, qemurun.FrameExit, exitMessage); err != nil {
+			return err
+		}
+		return nil
+	case qemurun.ModeRPC:
+		if start.Transport != "stdio" {
+			return fmt.Errorf("qemu guest: unsupported RPC transport %q", start.Transport)
+		}
+		return serveRPCStdio(ctx, conn, codec, start)
+	default:
 		return fmt.Errorf("qemu guest: unsupported mode %q", start.Mode)
 	}
-
-	requestFrame, err := codec.ReadFrame(conn)
-	if err != nil {
-		return fmt.Errorf("qemu guest: read file request: %w", err)
-	}
-	if requestFrame.Type != qemurun.FrameFileRequest {
-		return fmt.Errorf("qemu guest: frame is %s, want file_request", requestFrame.Type)
-	}
-
-	result, executeErr := ExecuteFile(ctx, config.WorkRoot, ProcessSpec{
-		Command: start.Command,
-		Args:    start.Args,
-		Cwd:     start.Cwd,
-		Env:     start.Env,
-	}, requestFrame.Payload)
-	resultMessage := qemurun.FileResultMessage{
-		Response: result.Response,
-		Stdout:   result.Stdout,
-		Stderr:   result.Stderr,
-		ExitCode: result.ExitCode,
-	}
-	if executeErr != nil {
-		resultMessage.Error = executeErr.Error()
-	}
-	if err := writeJSON(codec, conn, qemurun.FrameFileResult, resultMessage); err != nil {
-		return err
-	}
-
-	exit := qemurun.ExitMessage{Code: result.ExitCode}
-	if executeErr != nil {
-		exit.Error = executeErr.Error()
-	}
-	if err := writeJSON(codec, conn, qemurun.FrameExit, exit); err != nil {
-		return err
-	}
-	return nil
 }
 
 func writeJSON(codec qemurun.Codec, w io.Writer, typ qemurun.FrameType, value any) error {

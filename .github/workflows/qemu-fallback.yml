@@ -62,9 +62,9 @@ jobs:
       - name: Focused tests and static checks
         run: |
           go test -race ./internal/execution/qemurun ./internal/execution/qemuguest
-          go test ./cmd/shimmy-qemu-runner ./cmd/shimmy-qemu-guest ./experiments/qemu-fallback/file-evaluator
+          go test ./cmd/shimmy-qemu-runner ./cmd/shimmy-qemu-guest ./experiments/qemu-fallback/file-evaluator ./experiments/qemu-fallback/rpc-evaluator
           go vet ./internal/execution/qemurun ./internal/execution/qemuguest ./cmd/shimmy-qemu-runner ./cmd/shimmy-qemu-guest
-          bash -n experiments/qemu-fallback/build-image.sh experiments/qemu-fallback/smoke-file.sh
+          bash -n experiments/qemu-fallback/build-image.sh experiments/qemu-fallback/smoke-file.sh experiments/qemu-fallback/smoke-rpc-stdio.sh
 
       - name: Build pinned guest fixture
         env:
@@ -78,6 +78,12 @@ jobs:
           BIN_DIR: ${{ runner.temp }}/qemu-fallback-smoke
         run: experiments/qemu-fallback/smoke-file.sh
 
+      - name: Run persistent RPC stdio parity
+        env:
+          ARTIFACT_DIR: ${{ github.workspace }}/artifacts/qemu-fallback
+          BIN_DIR: ${{ runner.temp }}/qemu-fallback-rpc-smoke
+        run: experiments/qemu-fallback/smoke-rpc-stdio.sh
+
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -89,3 +95,5 @@ jobs:
             artifacts/qemu-fallback/manifest.json
             ${{ runner.temp }}/qemu-fallback-smoke/native.log
             ${{ runner.temp }}/qemu-fallback-smoke/qemu.log
+            ${{ runner.temp }}/qemu-fallback-rpc-smoke/native-rpc.log
+            ${{ runner.temp }}/qemu-fallback-rpc-smoke/qemu-rpc.log

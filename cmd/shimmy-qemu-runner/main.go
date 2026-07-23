@@ -22,6 +22,7 @@ type vmSession interface {
 type runnerDependencies struct {
 	loadRuntime func() (qemurun.RuntimeConfig, error)
 	startVM     func(context.Context, qemurun.RuntimeConfig) (vmSession, error)
+	stdin       io.Reader
 	stdout      io.Writer
 }
 
@@ -33,6 +34,7 @@ func defaultRunnerDependencies() runnerDependencies {
 		startVM: func(ctx context.Context, config qemurun.RuntimeConfig) (vmSession, error) {
 			return qemurun.StartVM(ctx, config)
 		},
+		stdin:  os.Stdin,
 		stdout: os.Stdout,
 	}
 }
@@ -82,7 +84,20 @@ func runRunner(ctx context.Context, args, effectiveEnv []string, dependencies ru
 		}
 		return writeHostResponse(invocation.HostResponsePath, result.Response)
 	case qemurun.ModeRPC:
-		return errors.New("qemu runner: rpc bridge is not wired yet")
+		if invocation.Start.Transport != "stdio" {
+			return fmt.Errorf("qemu runner: RPC transport %q is not wired yet", invocation.Start.Transport)
+		}
+		if dependencies.stdin == nil || dependencies.stdout == nil {
+			return errors.New("qemu runner: stdio RPC requires stdin and stdout")
+		}
+		return qemurun.RunRPCStdio(
+			ctx,
+			vm.Connection(),
+			invocation.Start,
+			dependencies.stdin,
+			dependencies.stdout,
+			runtimeConfig.MaxFrameBytes,
+		)
 	default:
 		return fmt.Errorf("qemu runner: unsupported mode %q", invocation.Start.Mode)
 	}

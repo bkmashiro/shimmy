@@ -7,6 +7,7 @@ OUTPUT_DIR=${OUTPUT_DIR:-"$REPO_ROOT/artifacts/qemu-fallback"}
 BUILD_DIR=${BUILD_DIR:-"$REPO_ROOT/.cache/qemu-fallback-image"}
 GUEST_BINARY=${GUEST_BINARY:-"$BUILD_DIR/shimmy-qemu-guest"}
 EVALUATOR_BINARY=${EVALUATOR_BINARY:-"$BUILD_DIR/file-evaluator"}
+RPC_EVALUATOR_BINARY=${RPC_EVALUATOR_BINARY:-"$BUILD_DIR/rpc-evaluator"}
 BUSYBOX_BINARY=${BUSYBOX_BINARY:-/bin/busybox}
 KERNEL_PATH=${KERNEL_PATH:-}
 INITRD_PATH=${INITRD_PATH:-}
@@ -41,6 +42,7 @@ mkdir -p "$BUILD_DIR/rootfs" "$OUTPUT_DIR"
 
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o "$GUEST_BINARY" ./cmd/shimmy-qemu-guest
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o "$EVALUATOR_BINARY" ./experiments/qemu-fallback/file-evaluator
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o "$RPC_EVALUATOR_BINARY" ./experiments/qemu-fallback/rpc-evaluator
 
 ROOT="$BUILD_DIR/rootfs"
 mkdir -p "$ROOT/bin" "$ROOT/dev" "$ROOT/proc" "$ROOT/sys" "$ROOT/run" "$ROOT/tmp" "$ROOT/usr/bin" "$ROOT/opt/evaluator"
@@ -48,6 +50,7 @@ install -m 0755 "$BUSYBOX_BINARY" "$ROOT/bin/busybox"
 ln -s busybox "$ROOT/bin/sh"
 install -m 0755 "$GUEST_BINARY" "$ROOT/usr/bin/shimmy-qemu-guest"
 install -m 0755 "$EVALUATOR_BINARY" "$ROOT/opt/evaluator/file-evaluator"
+install -m 0755 "$RPC_EVALUATOR_BINARY" "$ROOT/opt/evaluator/rpc-evaluator"
 
 cat >"$ROOT/init" <<'INIT'
 #!/bin/busybox sh

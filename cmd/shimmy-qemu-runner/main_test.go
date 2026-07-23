@@ -77,6 +77,41 @@ func TestRunRunnerFilePathExchangesAndWritesHostResponse(t *testing.T) {
 	}
 }
 
+func TestRunRunnerRPCStdioPreservesOuterPipes(t *testing.T) {
+	host, guest := net.Pipe()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	guestErr := make(chan error, 1)
+	go func() {
+		guestErr <- qemuguest.Serve(ctx, guest, qemuguest.ServerConfig{WorkRoot: t.TempDir(), MaxFrameBytes: 1 << 20})
+	}()
+	var output bytes.Buffer
+	err := runRunner(ctx, []string{"--", "/bin/cat"}, []string{
+		"PATH=/usr/bin:/bin",
+		"EVAL_IO=rpc",
+		"EVAL_RPC_TRANSPORT=stdio",
+		"FUNCTION_QEMU_ENABLED=true",
+	}, runnerDependencies{
+		loadRuntime: func() (qemurun.RuntimeConfig, error) {
+			return qemurun.RuntimeConfig{MaxFrameBytes: 1 << 20, ShutdownTimeout: time.Second}, nil
+		},
+		startVM: func(context.Context, qemurun.RuntimeConfig) (vmSession, error) {
+			return &fakeVMSession{connection: host}, nil
+		},
+		stdin:  bytes.NewBufferString("rpc request\n"),
+		stdout: &output,
+	})
+	if err != nil {
+		t.Fatalf("runRunner: %v", err)
+	}
+	if output.String() != "rpc request\n" {
+		t.Fatalf("stdout = %q", output.String())
+	}
+	if err := <-guestErr; err != nil {
+		t.Fatalf("guest: %v", err)
+	}
+}
+
 func TestRunRunnerRejectsFileResponseSymlink(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink semantics differ on Windows")

@@ -133,7 +133,7 @@ exec /usr/bin/shimmy-qemu-guest \
   --max-frame-bytes 4194304
 INIT
 chmod 0755 "$ROOT/init"
-ln -s /init "$ROOT/sbin/init"
+ln -s ../init "$ROOT/sbin/init"
 
 python3 - "$ROOT" "$SOURCE_DATE_EPOCH" <<'PY'
 import os

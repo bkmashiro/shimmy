@@ -62,7 +62,7 @@ jobs:
           go test -race ./internal/execution/qemurun ./internal/execution/qemuguest
           go test ./cmd/shimmy-qemu-runner ./cmd/shimmy-qemu-guest ./experiments/qemu-fallback/file-evaluator ./experiments/qemu-fallback/rpc-evaluator
           go vet ./internal/execution/qemurun ./internal/execution/qemuguest ./cmd/shimmy-qemu-runner ./cmd/shimmy-qemu-guest
-          bash -n experiments/qemu-fallback/build-image.sh experiments/qemu-fallback/smoke-file.sh experiments/qemu-fallback/smoke-rpc.sh
+          bash -n experiments/qemu-fallback/build-image.sh experiments/qemu-fallback/smoke-file.sh experiments/qemu-fallback/smoke-rpc.sh experiments/qemu-fallback/run-doc-profile.sh
 
       - name: Build pinned guest fixture
         env:
@@ -119,11 +119,15 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: qemu-fallback-file-tcg-evidence
-          if-no-files-found: warn
+          name: qemu-fallback-tcg-evidence
           retention-days: 14
+          if-no-files-found: warn
           path: |
             artifacts/qemu-fallback/manifest.json
+            artifacts/qemu-fallback/vmlinuz
+            artifacts/qemu-fallback/initramfs.img
+            artifacts/qemu-fallback/evaluator.squashfs
+            experiments/qemu-fallback/sources.lock.json
             ${{ runner.temp }}/qemu-fallback-smoke/native.log
             ${{ runner.temp }}/qemu-fallback-smoke/qemu.log
             ${{ runner.temp }}/qemu-fallback-rpc-smoke/native-rpc-*.log

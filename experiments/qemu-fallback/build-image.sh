@@ -40,12 +40,17 @@ with open(sys.argv[1], encoding="utf-8") as handle:
     lock = json.load(handle)
 if lock.get("schema_version") != 1 or lock.get("architecture") != "x86_64":
     raise SystemExit("unsupported QEMU source lock")
-for key in ("source_date_epoch", "kernel_sha256"):
+for key in ("source_date_epoch", "kernel_sha256", "fixture_alias_root"):
     print(lock[key])
 PY
 )
 SOURCE_DATE_EPOCH=${lock_values[0]}
 EXPECTED_KERNEL_SHA=${lock_values[1]}
+FIXTURE_ALIAS_ROOT=${lock_values[2]}
+if [[ "$FIXTURE_ALIAS_ROOT" != /* || "$FIXTURE_ALIAS_ROOT" == *".."* ]]; then
+  printf 'unsafe fixture alias root: %s\n' "$FIXTURE_ALIAS_ROOT" >&2
+  exit 1
+fi
 
 RAW_BUILD_DIR=$BUILD_DIR
 if [[ -L "$RAW_BUILD_DIR" || -L "$RAW_BUILD_DIR/rootfs" ]]; then
@@ -74,9 +79,9 @@ fi
 rm -rf "$BUILD_DIR/rootfs"
 mkdir -p "$BUILD_DIR/rootfs" "$OUTPUT_DIR"
 
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o "$GUEST_BINARY" ./cmd/shimmy-qemu-guest
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o "$EVALUATOR_BINARY" ./experiments/qemu-fallback/file-evaluator
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o "$RPC_EVALUATOR_BINARY" ./experiments/qemu-fallback/rpc-evaluator
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w -buildid=' -o "$GUEST_BINARY" ./cmd/shimmy-qemu-guest
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w -buildid=' -o "$EVALUATOR_BINARY" ./experiments/qemu-fallback/file-evaluator
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w -buildid=' -o "$RPC_EVALUATOR_BINARY" ./experiments/qemu-fallback/rpc-evaluator
 
 ROOT="$BUILD_DIR/rootfs"
 mkdir -p "$ROOT/bin" "$ROOT/dev" "$ROOT/proc" "$ROOT/sys" "$ROOT/run" "$ROOT/tmp" "$ROOT/usr/bin" "$ROOT/opt/evaluator"
@@ -85,7 +90,10 @@ ln -s busybox "$ROOT/bin/sh"
 install -m 0755 "$GUEST_BINARY" "$ROOT/usr/bin/shimmy-qemu-guest"
 install -m 0755 "$EVALUATOR_BINARY" "$ROOT/opt/evaluator/file-evaluator"
 install -m 0755 "$RPC_EVALUATOR_BINARY" "$ROOT/opt/evaluator/rpc-evaluator"
-
+ALIAS_DIR="$ROOT$FIXTURE_ALIAS_ROOT"
+mkdir -p "$ALIAS_DIR"
+ln -s /opt/evaluator/file-evaluator "$ALIAS_DIR/file-evaluator"
+ln -s /opt/evaluator/rpc-evaluator "$ALIAS_DIR/rpc-evaluator"
 cat >"$ROOT/init" <<'INIT'
 #!/bin/busybox sh
 set -eu

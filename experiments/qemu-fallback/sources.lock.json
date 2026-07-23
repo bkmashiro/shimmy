@@ -5,6 +5,7 @@
   "kernel_sha256": "09d55bc6cb91a2926e363516a3b249fdf8b3fc3d32c3811b84e6577e63644ef2",
   "rootfs_filesystem": "squashfs",
   "rootfs_format": "raw",
+  "fixture_alias_root": "/vol/bitbucket/ys25/shimmy/qemu-fallback/runtime",
   "guest_control_port": "org.shimmy.control",
   "network_default": "none",
   "required_inputs": [

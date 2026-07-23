@@ -19,7 +19,7 @@ require_file() {
   fi
 }
 
-for command_name in go mkfs.ext4 mkinitramfs python3 qemu-img sha256sum; do
+for command_name in dracut go mkfs.ext4 python3 qemu-img sha256sum; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     printf 'required command is missing: %s\n' "$command_name" >&2
     exit 1
@@ -145,6 +145,7 @@ rm -f "$RAW_ROOTFS" "$QCOW_ROOTFS"
 truncate -s "${ROOTFS_SIZE_MB}M" "$RAW_ROOTFS"
 E2FSPROGS_FAKE_TIME="$SOURCE_DATE_EPOCH" mkfs.ext4 -q -F \
   -U "$FILESYSTEM_UUID" \
+  -O ^has_journal,^orphan_file \
   -E "lazy_itable_init=0,lazy_journal_init=0,hash_seed=$FILESYSTEM_UUID" \
   -d "$ROOT" \
   "$RAW_ROOTFS"
@@ -152,8 +153,11 @@ qemu-img convert -f raw -O qcow2 \
   -o compat=1.1,cluster_size=65536,lazy_refcounts=off \
   "$RAW_ROOTFS" "$QCOW_ROOTFS"
 cp "$KERNEL_PATH" "$OUTPUT_DIR/vmlinuz"
-SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" mkinitramfs \
-  -o "$OUTPUT_DIR/initramfs.img" \
+SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" dracut \
+  --force \
+  --no-hostonly \
+  --reproducible \
+  "$OUTPUT_DIR/initramfs.img" \
   "$KERNEL_VERSION"
 touch -d "@$SOURCE_DATE_EPOCH" "$OUTPUT_DIR/vmlinuz" "$OUTPUT_DIR/initramfs.img" "$QCOW_ROOTFS"
 

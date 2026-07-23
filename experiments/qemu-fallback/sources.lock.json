@@ -10,8 +10,9 @@
   "network_default": "none",
   "required_inputs": [
     "linux kernel image",
-    "matching initrd",
+    "matching kernel modules",
     "busybox-static",
+    "dracut reproducible initramfs builder",
     "Go module at the checked-out Shimmy commit"
   ]
 }

@@ -16,8 +16,8 @@ This page is the short version of the current runtime/profile/env surface. Use i
 
 | Scenario | Use when | Required env | Optional env | Notes |
 |---|---|---|---|---|
-| Generic WASM | Evaluator is already a WASI module exposing Shimmy ABI. | `FUNCTION_INTERFACE=wasm`; `FUNCTION_COMMAND=/path/to/eval.wasm` or `FUNCTION_WASM_MODULE=/path/to/eval.wasm` | `FUNCTION_WASM_PROFILE=generic`; `FUNCTION_MAX_PROCS`; `FUNCTION_WORKER_SEND_TIMEOUT`; `FUNCTION_WASM_COMPILE_CACHE` | Runtime expects `alloc(len)` + `evaluate(ptr, len)` returning `[uint32 length][JSON]`. Source language is irrelevant. |
-| Python-reactor script | Plain Python / NumPy/SymPy-compatible evaluator script, fast in-process WASM path. | `FUNCTION_INTERFACE=wasm`; `FUNCTION_WASM_PROFILE=python-reactor`; `FUNCTION_WASM_MODULE=/path/to/python-reactor.wasm`; `FUNCTION_WASM_PYTHON_SCRIPT=/path/to/eval.py` | `FUNCTION_MAX_PROCS`; `FUNCTION_WORKER_SEND_TIMEOUT`; `FUNCTION_WASM_COMPILE_CACHE`; `FUNCTION_WASM_PYTHON_PRELOAD` | Preferred Python fast path. The current pin is release `v1.0.14` from `bkmashiro/webassembly-language-runtimes`; default evaluator preload requires its `py_prepare` export. |
+| Generic WASM | Evaluator is already a WASI module exposing Shimmy ABI. | `FUNCTION_INTERFACE=wasm`; `FUNCTION_COMMAND=/path/to/eval.wasm` or `FUNCTION_WASM_MODULE=/path/to/eval.wasm` | `FUNCTION_WASM_PROFILE=generic`; `FUNCTION_MAX_PROCS`; `FUNCTION_WORKER_SEND_TIMEOUT`; `FUNCTION_WASM_COMPILE_CACHE`; `FUNCTION_WASM_SNAPSHOT_MODE` | Runtime expects `alloc(len)` + `evaluate(ptr, len)` returning `[uint32 length][JSON]`. Source language is irrelevant. |
+| Python-reactor script | Plain Python / NumPy/SymPy-compatible evaluator script, fast in-process WASM path. | `FUNCTION_INTERFACE=wasm`; `FUNCTION_WASM_PROFILE=python-reactor`; `FUNCTION_WASM_MODULE=/path/to/python-reactor.wasm`; `FUNCTION_WASM_PYTHON_SCRIPT=/path/to/eval.py` | `FUNCTION_MAX_PROCS`; `FUNCTION_WORKER_SEND_TIMEOUT`; `FUNCTION_WASM_COMPILE_CACHE`; `FUNCTION_WASM_PYTHON_PRELOAD`; `FUNCTION_WASM_SNAPSHOT_MODE` | Preferred Python fast path. The current pin is release `v1.0.14` from `bkmashiro/webassembly-language-runtimes`; default evaluator preload requires its `py_prepare` export. |
 | Python-reactor Lambda Feedback package | LF package-style evaluator that can run with packages already in the reactor artifact plus bundled pure-Python deps. | `FUNCTION_INTERFACE=wasm`; `FUNCTION_WASM_PROFILE=python-reactor`; `FUNCTION_WASM_MODULE=/path/to/python-reactor.wasm`; `FUNCTION_LF_ROOT=/path/to/package`; `FUNCTION_LF_EVAL_ENTRYPOINT=module:function` | `FUNCTION_LF_CONFIG`; `FUNCTION_LF_PREVIEW_ENTRYPOINT`; `FUNCTION_LF_ADAPTER_ROOT`; `FUNCTION_LF_BUNDLER`; `FUNCTION_LF_INCLUDE_ROOTS`; `FUNCTION_LF_SYS_PATH`; `FUNCTION_LF_BUNDLE_OUT` | Shimmy runs the bundler once at startup, then executes the generated script through python-reactor. |
 | Pyodide compatibility | Heavy Python package stack, especially SciPy/Pandas or Emscripten/Pyodide-only packages. | `FUNCTION_INTERFACE=pyodide`; `FUNCTION_PYODIDE_RUNNER=/path/to/runner.js`; plus either `FUNCTION_PYODIDE_SCRIPT=/path/to/eval.py` or package-mode envs | `FUNCTION_PYODIDE_PACKAGES`; `FUNCTION_PYODIDE_ROOT`; `FUNCTION_PYODIDE_EVAL_ENTRYPOINT`; `FUNCTION_PYODIDE_PREVIEW_ENTRYPOINT`; `FUNCTION_PYODIDE_ADAPTER` | This is a Node/Pyodide subprocess lane, not the same in-process wazero pool as `wasm`. |
 | Legacy RPC/file | Existing non-WASM workers or fallback integrations. | `FUNCTION_INTERFACE=rpc` or `FUNCTION_INTERFACE=file`; `FUNCTION_COMMAND=...` | RPC transport/file-mode worker options | Keep for compatibility and comparison. |
@@ -52,6 +52,46 @@ The verification script downloads the pinned release into the artifact cache whe
 needed. Historical checked-in LFS fixtures are compatibility test inputs, not the
 deployment source of truth and need not be replaced for each release. For Lambda
 Feedback handoff smoke, use [lambda-feedback-handoff.md](lambda-feedback-handoff.md).
+
+## Prepared-memory COW (Linux, explicit opt-in)
+
+`FUNCTION_WASM_SNAPSHOT_MODE=cow` selects the Linux prepared-memory COW prototype.
+It is not the default and is not selected by the deprecated UFFD boolean.
+
+```bash
+FUNCTION_WASM_SNAPSHOT_MODE=cow
+```
+
+The implementation pins wazero `v1.11.0` and uses its experimental memory
+allocator API. A dispatcher publishes one sealed `memfd` image and maps a
+writable `MAP_PRIVATE` view into each eligible instance. Instances prepare
+independently; size and SHA-256 must match before an instance attaches. A
+mismatch, unsupported platform, or allocator failure falls back to the existing
+per-instance full-copy strategy with a warning. COW never silently attaches a
+different prepared state.
+
+For Python reactor, the image is captured after `_initialize`, `py_init`, trusted
+`py_prepare`/imports, and request-headroom reservation. Healthy runners restore
+the image after copying each response to a Go-owned value and return to the pool
+already clean. Timeout/cancellation closes and discards the affected wazero
+module; a replacement prepares independently and must pass the same image gate.
+
+Current eligibility and limits:
+
+- Linux only; non-Linux builds retain full-copy semantics.
+- Active COW mappings are fixed-size after `Take`; `memory.grow` fails closed.
+- The shared image is dispatcher-scoped, not a process-global artifact cache.
+- COW covers WASM linear memory only. It does not reset mutable globals/tables,
+  Host/WASI descriptors or offsets, Host RNG/clock state, Go buffers, or external
+  filesystem/network/provider effects. Those remain capability/lifecycle audit
+  obligations; request-scoped Host stderr is reset separately.
+- UFFD remains an independent dirty-page strategy/fallback. COW does not require
+  or install a UFFD handler; combining them would need separate evidence.
+- GitHub runner RSS/PSS, minor-fault, and reset-only benchmark artifacts are
+  mechanism diagnostics, not production or end-to-end speed claims.
+
+Do not promote COW to `auto`/default without a separate compatibility and
+production evidence decision.
 
 ## Examples
 

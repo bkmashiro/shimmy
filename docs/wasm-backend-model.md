@@ -52,6 +52,32 @@ FUNCTION_COMMAND=/path/to/python-reactor.wasm
 
 The repository now accepts `FUNCTION_INTERFACE=wasm` + `FUNCTION_WASM_PROFILE` for profile selection and keeps `FUNCTION_INTERFACE=reactor-python` as a compatibility alias.
 
+### Prepared-memory strategy boundary
+
+Snapshot strategy is orthogonal to runtime profile. The default remains full
+copy. On Linux, an operator may explicitly select
+`FUNCTION_WASM_SNAPSHOT_MODE=cow` for eligible generic or Python-reactor
+instances. This mode shares only a sealed linear-memory baseline through
+per-instance `MAP_PRIVATE` mappings; it does not clone wazero engine objects,
+Go state, WASI handles, globals/tables, or external effects.
+
+Python COW captures the evaluator-specific state after trusted `py_prepare` and
+headroom reservation. It is not a cold CPython image shared across unrelated
+evaluators. Each runner prepares independently and attaches only after size and
+SHA-256 equality; otherwise that runner keeps the existing full-copy path.
+After attachment, linear memory is fixed-size and `memory.grow` fails closed.
+
+COW and UFFD are separate opt-in strategies. COW uses the kernel's ordinary
+private file mapping and needs no user-space fault handler. UFFD remains useful
+for its current per-instance dirty-page restore path and as an independent
+comparison/fallback. Any future combined design requires its own evidence and
+must not replace COW correctness with fault-handler complexity.
+
+The implementation depends on wazero `v1.11.0`'s experimental allocator API, is
+Linux-only, and is not eligible for automatic/default promotion without a
+separate compatibility decision. See [deployment-recipes.md](deployment-recipes.md)
+for operator configuration and exclusions.
+
 ## 3. Build/deployment recipe
 
 Language-specific compilation belongs in deployment tooling and documentation. Shimmy's request dispatcher should not guess source language from imports or `requirements.txt` and should not grow `rust-wasm`, `go-wasm`, `python-wasm`, `js-wasm`, etc. as peer runtime modes.

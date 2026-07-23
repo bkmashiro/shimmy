@@ -114,9 +114,9 @@ Local macOS skips Linux-only runtime tests by build tag; this is expected and mu
 
 **Promise:** Work is durable and every Linux-only claim has an executable GitHub Actions gate.
 
-- [ ] Add this active roadmap and verify repository scope.
-- [ ] Add `.github/workflows/cow-memory.yml` with automatic lightweight Linux tests and manual heavy inputs; no Docker steps.
-- [ ] Add path filters for COW source/tests, config, supervisor/dispatcher/reactor wiring, and the workflow itself.
+- [x] Add this active roadmap and verify repository scope.
+- [x] Add `.github/workflows/cow-memory.yml` with automatic lightweight Linux tests and manual heavy inputs; no Docker steps.
+- [x] Add path filters for COW source/tests, config, supervisor/dispatcher/reactor wiring, and the workflow itself.
 
 **Gate:** YAML readback, `git diff --check`, signed push, workflow run visible for the target SHA.
 
@@ -132,11 +132,11 @@ Planned files:
 
 Slices:
 
-- [ ] RED: two private mappings share baseline but writes remain isolated.
-- [ ] RED: reset restores exact bytes and does not change base address or visible length.
-- [ ] RED: `Free` owns one unmap; strategy close cannot double-unmap.
-- [ ] RED: growth after image attachment is rejected/fails closed.
-- [ ] GREEN: implement stable allocator backing, sealed image, attach, reset, and cleanup.
+- [x] RED: two private mappings share baseline but writes remain isolated.
+- [x] RED: reset restores exact bytes and does not change base address or visible length.
+- [x] RED: `Free` owns one unmap; strategy close cannot double-unmap.
+- [x] RED: growth after image attachment is rejected/fails closed.
+- [x] GREEN: implement stable allocator backing, sealed image, attach, reset, and cleanup.
 
 **Do not:** use UFFD, process `fork`, cgo, a software load/store overlay, or global image cache.
 
@@ -155,12 +155,12 @@ Planned files:
 
 Slices:
 
-- [ ] RED: config accepts explicit `cow`, keeps it pool-safe, and never maps deprecated UFFD flags onto COW.
-- [ ] RED: custom allocator is passed only to the target module instantiation and exposes the concrete backing explicitly.
-- [ ] RED: two real fixed-memory WASM instances attach to one coordinator, isolate writes, and restore exact state.
-- [ ] RED: canonical mismatch produces an explicit fallback/error and never overwrites a differing prepared state.
-- [ ] RED: pointer/size drift or restore error marks a supervisor unhealthy and replacement logic remains intact.
-- [ ] GREEN: connect dispatcher-scoped image coordinator and `CowSnapshotStrategy` without changing default `memcpy` behavior.
+- [x] RED: config accepts explicit `cow`, keeps it pool-safe, and never maps deprecated UFFD flags onto COW.
+- [x] RED: custom allocator is passed only to the target module instantiation and exposes the concrete backing explicitly.
+- [x] RED: two real fixed-memory WASM instances attach to one coordinator, isolate writes, and restore exact state.
+- [x] RED: canonical mismatch produces an explicit fallback/error and never overwrites a differing prepared state.
+- [x] RED: pointer/size drift or restore error marks a supervisor unhealthy and replacement logic remains intact.
+- [x] GREEN: connect dispatcher-scoped image coordinator and `CowSnapshotStrategy` without changing default `memcpy` behavior.
 
 ### Track D — Python reactor prepared image
 
@@ -174,22 +174,22 @@ Planned files:
 
 Slices:
 
-- [ ] RED: allocator attaches at the existing post-`py_prepare`, post-headroom `Take` boundary.
-- [ ] RED: dispatcher runners share one coordinator but prepare independently before hash/size attachment.
-- [ ] RED: response is parsed into Go-owned data before post-request restore.
-- [ ] RED: post-request restore runs on normal and recoverable error paths before pool return; failure marks runner unhealthy.
-- [ ] RED: request-scoped Host stderr capture is reset/bounded and not confused with COW freshness.
-- [ ] GREEN: implement reactor wiring while preserving timeout/discard/replacement semantics.
-- [ ] Remote heavy evidence: run at least two real prepared runners against the pinned release artifact and record whether baselines are byte/hash-identical. Do not force attach if they differ.
+- [x] RED: allocator attaches at the existing post-`py_prepare`, post-headroom `Take` boundary.
+- [x] RED: dispatcher runners share one coordinator but prepare independently before hash/size attachment.
+- [x] RED: response is parsed into Go-owned data before post-request restore.
+- [x] RED: post-request restore runs on normal and recoverable error paths before pool return; failure marks runner unhealthy.
+- [x] RED: request-scoped Host stderr capture is reset/bounded and not confused with COW freshness.
+- [x] GREEN: implement reactor wiring while preserving timeout/discard/replacement semantics.
+- [x] Remote heavy evidence: run at least two real prepared runners against the pinned release artifact and record whether baselines are byte/hash-identical. Do not force attach if they differ.
 
 ### Track E — Metrics, documentation, and promotion boundary
 
 **Promise:** Performance and memory claims are reproducible and COW remains opt-in until justified.
 
-- [ ] Add structured Linux evidence for shared/private RSS/PSS and page faults across multiple dirty fractions.
-- [ ] Compare full-copy, UFFD where available, and COW without conflating restore-only and full-request latency.
-- [ ] Document operator config, Linux-only status, fallback, fixed-memory requirement, Host-state exclusions, and Python prepared-image boundary.
-- [ ] Keep COW explicit opt-in; record a separate future decision gate for any default/`auto` promotion.
+- [x] Add structured Linux evidence for shared/private RSS/PSS and page faults across multiple dirty fractions.
+- [x] Compare full-copy, UFFD where available, and COW without conflating restore-only and full-request latency.
+- [x] Document operator config, Linux-only status, fallback, fixed-memory requirement, Host-state exclusions, and Python prepared-image boundary.
+- [x] Keep COW explicit opt-in; record a separate future decision gate for any default/`auto` promotion.
 
 ## Per-slice checklist
 
@@ -206,11 +206,18 @@ Slices:
 
 ## Completion log
 
-- 2026-07-23: Discovery completed. Confirmed clean `feat/wasm-backend`, wazero 1.11 allocator hook, per-instance current snapshots, Python post-prepare `Take` boundary, pre-request-only reactor restore, allocator-owned `Free`, and eight existing GitHub workflows. No local Docker will be used.
+- 2026-07-23: Discovery completed. Confirmed clean `feat/wasm-backend`, wazero 1.11 allocator hook, per-instance current snapshots, Python post-prepare `Take` boundary, pre-request-only reactor restore, allocator-owned `Free`, and eight existing GitHub workflows. No local Docker was used.
+- 2026-07-23: Added the roadmap, bare-Linux COW workflow, and RED allocator contract. GitHub run `29969641876` failed on the planned missing COW symbols; this was the recorded remote RED state.
+- 2026-07-23: Implemented sealed `memfd` images, same-address `MAP_PRIVATE` attachment/reset, SHA-256 prepared-state gate, attach-time growth freeze, and allocator-owned idempotent unmap. Focused Linux tests passed; stale unrelated Linux routing expectations were corrected, and full run `29969879062` passed.
+- 2026-07-23: Connected dispatcher-scoped coordinators and wazero's experimental allocator to generic fixed-memory instances without changing the default strategy. Run `29970380214` passed two-instance attachment, repeated request/reset, growth rejection, and the full Linux suite.
+- 2026-07-23: Connected Python reactor at the existing post-`py_prepare`, post-headroom boundary; moved restore to post-response pool return; reset Host stderr; preserved timeout discard/replacement. The first heavy run `29970702260` correctly exposed a stale release artifact without `py_prepare`; CI was repinned to documented reactor `v1.0.14` SHA-256 `78dcbb6d673351c0d3b776c42d2fb93b6f638cdc714d58072dece4b115edaa72` instead of weakening the test.
+- 2026-07-23: Final Python run `29971630921` passed on commit `d9f0cab35138859beff22507f34cfd77b472c8ff`: two independently prepared 240,058,368-byte runners, zero fallback, six normal requests, one recoverable Python error, one timeout/discard/replacement, canonical hash after every pool return, empty Host stderr, and complete-request benchmark. The canonical hash matched within each dispatcher but differed across separate runs, so no cross-process/global cache claim is made.
+- 2026-07-23: Mechanism run `29971226763` passed: four private mappings of one 64 MiB memfd, 1/10/50% dirty cases, exact reset hashes, PSS/RSS/private-dirty/minor-fault JSON, reset-only COW/full-copy benchmark, and explicit `userfaultfd unavailable` evidence rather than fallback substitution. Results and limitations are recorded in `docs/cow-memory-image-evidence-2026-07-23.md`.
+- 2026-07-23: Local non-Docker gates repeatedly passed: `go test ./...`, `go vet ./...`, `go build ./...`, `git diff --check`, and Linux/amd64 test-binary cross-compilation. Operator boundaries are documented in `docs/deployment-recipes.md` and `docs/wasm-backend-model.md`.
 
 ## Current execution pointer
 
-**Track A:** commit this roadmap, then add the automatic/manual bare-Linux COW workflow and begin the standalone allocator RED tests.
+**Final review:** commit the evidence/operator docs, verify the signed remote SHA and all final gates, perform an independent fixed-SHA review, and address any validated finding before closing this roadmap.
 
 ## Short prompt to resume
 

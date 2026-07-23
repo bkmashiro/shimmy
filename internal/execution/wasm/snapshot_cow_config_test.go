@@ -4,7 +4,16 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
+
+func TestCowModeDoesNotChangeDefaultFullCopyStrategy(t *testing.T) {
+	cfg := Config{}
+	cfg.applyDefaults()
+
+	require.Empty(t, cfg.SnapshotMode, "omitted mode remains the zero-value config representation")
+	require.IsType(t, &FullMemcpyStrategy{}, selectSnapshotStrategy(cfg.SnapshotMode, nil, zap.NewNop()))
+}
 
 func TestCowSnapshotModeIsPoolSafeAndExplicit(t *testing.T) {
 	cfg := Config{SnapshotMode: "cow"}

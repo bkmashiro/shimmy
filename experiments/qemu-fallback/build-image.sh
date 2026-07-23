@@ -184,6 +184,8 @@ cp "$KERNEL_PATH" "$OUTPUT_DIR/vmlinuz"
 SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" dracut \
   --force \
   --no-hostonly \
+  --no-early-microcode \
+  --omit "systemd systemd-initrd multipath btrfs lvm mdraid dm crypt network-manager network legacy-network nfs iscsi cifs fcoe fcoe-uefi nbde resume plymouth" \
   --reproducible \
   "$OUTPUT_DIR/initramfs.img" \
   "$KERNEL_VERSION"

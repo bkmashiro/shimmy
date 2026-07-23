@@ -12,7 +12,7 @@
     "linux kernel image",
     "matching kernel modules",
     "busybox-static",
-    "dracut reproducible initramfs builder",
+    "dracut reproducible non-systemd initramfs builder",
     "squashfs-tools deterministic rootfs builder",
     "Go module at the checked-out Shimmy commit"
   ]

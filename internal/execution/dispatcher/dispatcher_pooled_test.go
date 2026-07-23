@@ -150,6 +150,7 @@ func TestPooledDispatcher_Send_ReleaseSupervisorWaitErrorOnDestroy(t *testing.T)
 	m, sv, _ := createPooledDispatcher(t)
 
 	var waited int
+	done := make(chan struct{})
 
 	release := func(context.Context) error {
 		waited++
@@ -158,6 +159,7 @@ func TestPooledDispatcher_Send_ReleaseSupervisorWaitErrorOnDestroy(t *testing.T)
 
 	wait := func() error {
 		waited++
+		close(done)
 		return nil
 	}
 
@@ -175,8 +177,11 @@ func TestPooledDispatcher_Send_ReleaseSupervisorWaitErrorOnDestroy(t *testing.T)
 	_, err := m.Send(context.Background(), "test", data)
 	assert.NoError(t, err)
 
-	// wait for the release to happen in a goroutine
-	<-time.After(1 * time.Millisecond)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for supervisor destructor")
+	}
 
 	assert.Equal(t, 2, waited)
 }
@@ -185,9 +190,11 @@ func TestPooledDispatcher_Send_ReleaseSupervisorWaitErrorShutdown(t *testing.T) 
 	m, sv, _ := createPooledDispatcher(t)
 
 	var waited int
+	done := make(chan struct{})
 
 	release := func(context.Context) error {
 		waited++
+		close(done)
 		return assert.AnError
 	}
 
@@ -210,8 +217,12 @@ func TestPooledDispatcher_Send_ReleaseSupervisorWaitErrorShutdown(t *testing.T) 
 	_, err := m.Send(context.Background(), "test", data)
 	assert.NoError(t, err)
 
-	// wait for the release to happen in a goroutine
-	<-time.After(1 * time.Millisecond)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for supervisor release")
+	}
+	assert.NoError(t, m.Shutdown(context.Background()))
 
 	assert.Equal(t, 1, waited)
 }

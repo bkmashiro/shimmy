@@ -13,7 +13,7 @@ func TestLoadRuntimeConfigUsesBoundedDefaultsAndTCGWithoutKVM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadRuntimeConfig: %v", err)
 	}
-	if got.VM.Accelerator != AcceleratorTCG || got.VM.MemoryMB != 512 || got.VM.VCPUs != 1 {
+	if got.VM.Accelerator != AcceleratorTCG || got.VM.MemoryMB != 512 || got.VM.VCPUs != 1 || got.VM.RootFSFormat != "qcow2" {
 		t.Fatalf("vm defaults = %#v", got.VM)
 	}
 	if got.VM.Network != NetworkNone || got.MaxFrameBytes != 4<<20 {

@@ -15,21 +15,21 @@ func TestLoadImageManifestResolvesAndVerifiesArtifacts(t *testing.T) {
 	root := t.TempDir()
 	kernel := writeArtifact(t, root, "vmlinuz", []byte("kernel"))
 	initrd := writeArtifact(t, root, "initramfs.gz", []byte("initrd"))
-	rootfs := writeArtifact(t, root, "evaluator.qcow2", []byte("rootfs"))
+	rootfs := writeArtifact(t, root, "evaluator.squashfs", []byte("rootfs"))
 	manifestPath := writeManifest(t, root, imageManifestFixture{
 		SchemaVersion:    1,
 		Architecture:     "x86_64",
 		SourceLockSHA256: digestFixture([]byte("source-lock")),
 		Kernel:           artifactFixture{Path: filepath.Base(kernel), SHA256: digestFixture([]byte("kernel"))},
 		Initrd:           artifactFixture{Path: filepath.Base(initrd), SHA256: digestFixture([]byte("initrd"))},
-		RootFS:           artifactFixture{Path: filepath.Base(rootfs), SHA256: digestFixture([]byte("rootfs")), Format: "qcow2"},
+		RootFS:           artifactFixture{Path: filepath.Base(rootfs), SHA256: digestFixture([]byte("rootfs")), Format: "raw"},
 	})
 
 	got, err := LoadImageManifest(manifestPath, rootfs)
 	if err != nil {
 		t.Fatalf("LoadImageManifest: %v", err)
 	}
-	if got.Kernel != kernel || got.Initrd != initrd || got.RootFS != rootfs || got.RootFSFormat != "qcow2" {
+	if got.Kernel != kernel || got.Initrd != initrd || got.RootFS != rootfs || got.RootFSFormat != "raw" {
 		t.Fatalf("resolved image = %#v", got)
 	}
 }
@@ -80,7 +80,7 @@ func TestLoadImageManifestRejectsUnsupportedSchemaArchitectureAndFormat(t *testi
 	for name, mutate := range map[string]func(*imageManifestFixture){
 		"schema":       func(m *imageManifestFixture) { m.SchemaVersion = 2 },
 		"architecture": func(m *imageManifestFixture) { m.Architecture = "aarch64" },
-		"format":       func(m *imageManifestFixture) { m.RootFS.Format = "raw" },
+		"format":       func(m *imageManifestFixture) { m.RootFS.Format = "vmdk" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()

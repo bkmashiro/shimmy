@@ -35,6 +35,7 @@ type VMConfig struct {
 	Kernel        string
 	Initrd        string
 	RootFS        string
+	RootFSFormat  string
 	ControlSocket string
 	Accelerator   Accelerator
 	MemoryMB      int
@@ -61,7 +62,7 @@ func BuildQEMUCommand(config VMConfig) (*exec.Cmd, error) {
 		"-kernel", config.Kernel,
 		"-initrd", config.Initrd,
 		"-append", "root=/dev/vda ro rootfstype=squashfs init=/init panic=-1 reboot=t",
-		"-drive", "file=" + config.RootFS + ",format=qcow2,if=virtio,readonly=on",
+		"-drive", "file=" + config.RootFS + ",format=" + config.RootFSFormat + ",if=virtio,readonly=on",
 		"-device", "virtio-serial-pci",
 		"-chardev", "socket,id=shimmy,path=" + config.ControlSocket + ",server=on,wait=off",
 		"-device", "virtserialport,chardev=shimmy,name=org.shimmy.control",
@@ -105,6 +106,11 @@ func validateVMConfig(config VMConfig) error {
 	case NetworkNone, NetworkUser:
 	default:
 		return fmt.Errorf("%w: unsupported network profile %q", ErrInvalidVMConfig, config.Network)
+	}
+	switch config.RootFSFormat {
+	case "qcow2", "raw":
+	default:
+		return fmt.Errorf("%w: unsupported rootfs format %q", ErrInvalidVMConfig, config.RootFSFormat)
 	}
 	return nil
 }

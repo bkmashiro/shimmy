@@ -17,7 +17,7 @@ go build -trimpath -o "$BIN_DIR/file-evaluator" ./experiments/qemu-fallback/file
 sudo mkdir -p "$EVALUATOR_DIR"
 sudo install -m 0755 "$BIN_DIR/file-evaluator" "$EVALUATOR_PATH"
 
-for path in "$ARTIFACT_DIR/manifest.json" "$ARTIFACT_DIR/vmlinuz" "$ARTIFACT_DIR/initramfs.img" "$ARTIFACT_DIR/evaluator.qcow2"; do
+for path in "$ARTIFACT_DIR/manifest.json" "$ARTIFACT_DIR/vmlinuz" "$ARTIFACT_DIR/initramfs.img" "$ARTIFACT_DIR/evaluator.squashfs"; do
   if [[ ! -f "$path" ]]; then
     printf 'missing QEMU smoke artifact: %s\n' "$path" >&2
     exit 1
@@ -52,7 +52,7 @@ env "${common_env[@]}" \
   FUNCTION_QEMU_ENABLED=true \
   FUNCTION_QEMU_RUNNER="$BIN_DIR/shimmy-qemu-runner" \
   FUNCTION_QEMU_BINARY="$QEMU_BINARY" \
-  FUNCTION_QEMU_ROOTFS="$ARTIFACT_DIR/evaluator.qcow2" \
+  FUNCTION_QEMU_ROOTFS="$ARTIFACT_DIR/evaluator.squashfs" \
   FUNCTION_QEMU_IMAGE_MANIFEST="$ARTIFACT_DIR/manifest.json" \
   FUNCTION_QEMU_ACCELERATOR=tcg \
   FUNCTION_QEMU_MEMORY_MB=512 \

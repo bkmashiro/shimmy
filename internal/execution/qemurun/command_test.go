@@ -12,6 +12,7 @@ func validVMConfig() VMConfig {
 		Kernel:        "/opt/shimmy qemu/vmlinuz",
 		Initrd:        "/opt/shimmy qemu/initramfs.gz",
 		RootFS:        "/opt/shimmy qemu/rootfs.qcow2",
+		RootFSFormat:  "qcow2",
 		ControlSocket: "/tmp/shimmy qemu/control.sock",
 		Accelerator:   AcceleratorTCG,
 		MemoryMB:      512,
@@ -65,13 +66,19 @@ func TestBuildQEMUCommandUsesPrivateVirtioSerialAndReadOnlyRoot(t *testing.T) {
 }
 
 func TestBuildQEMUCommandBootsReadOnlyGuestRoot(t *testing.T) {
-	cmd, err := BuildQEMUCommand(validVMConfig())
+	config := validVMConfig()
+	config.RootFSFormat = "raw"
+	cmd, err := BuildQEMUCommand(config)
 	if err != nil {
 		t.Fatalf("BuildQEMUCommand: %v", err)
 	}
 	const want = "root=/dev/vda ro rootfstype=squashfs init=/init panic=-1 reboot=t"
 	if !adjacentArgs(cmd.Args, "-append", want) {
 		t.Fatalf("kernel append args absent: %#v", cmd.Args)
+	}
+	const drive = "file=/opt/shimmy qemu/rootfs.qcow2,format=raw,if=virtio,readonly=on"
+	if !adjacentArgs(cmd.Args, "-drive", drive) {
+		t.Fatalf("raw drive args absent: %#v", cmd.Args)
 	}
 }
 
@@ -89,18 +96,20 @@ func TestBuildQEMUCommandSupportsUserNetworkProfile(t *testing.T) {
 
 func TestBuildQEMUCommandRejectsIncompleteOrUnboundedConfig(t *testing.T) {
 	cases := map[string]func(*VMConfig){
-		"missing binary":   func(c *VMConfig) { c.Binary = "" },
-		"missing kernel":   func(c *VMConfig) { c.Kernel = "" },
-		"missing initrd":   func(c *VMConfig) { c.Initrd = "" },
-		"missing rootfs":   func(c *VMConfig) { c.RootFS = "" },
-		"missing socket":   func(c *VMConfig) { c.ControlSocket = "" },
-		"zero memory":      func(c *VMConfig) { c.MemoryMB = 0 },
-		"excessive memory": func(c *VMConfig) { c.MemoryMB = MaxMemoryMB + 1 },
-		"zero vcpus":       func(c *VMConfig) { c.VCPUs = 0 },
-		"excessive vcpus":  func(c *VMConfig) { c.VCPUs = MaxVCPUs + 1 },
-		"unknown accel":    func(c *VMConfig) { c.Accelerator = "magic" },
-		"auto unresolved":  func(c *VMConfig) { c.Accelerator = AcceleratorAuto },
-		"unknown network":  func(c *VMConfig) { c.Network = "bridge-everything" },
+		"missing binary":        func(c *VMConfig) { c.Binary = "" },
+		"missing kernel":        func(c *VMConfig) { c.Kernel = "" },
+		"missing initrd":        func(c *VMConfig) { c.Initrd = "" },
+		"missing rootfs":        func(c *VMConfig) { c.RootFS = "" },
+		"missing rootfs format": func(c *VMConfig) { c.RootFSFormat = "" },
+		"unknown rootfs format": func(c *VMConfig) { c.RootFSFormat = "vmdk" },
+		"missing socket":        func(c *VMConfig) { c.ControlSocket = "" },
+		"zero memory":           func(c *VMConfig) { c.MemoryMB = 0 },
+		"excessive memory":      func(c *VMConfig) { c.MemoryMB = MaxMemoryMB + 1 },
+		"zero vcpus":            func(c *VMConfig) { c.VCPUs = 0 },
+		"excessive vcpus":       func(c *VMConfig) { c.VCPUs = MaxVCPUs + 1 },
+		"unknown accel":         func(c *VMConfig) { c.Accelerator = "magic" },
+		"auto unresolved":       func(c *VMConfig) { c.Accelerator = AcceleratorAuto },
+		"unknown network":       func(c *VMConfig) { c.Network = "bridge-everything" },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

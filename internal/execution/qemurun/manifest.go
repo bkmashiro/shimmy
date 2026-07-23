@@ -54,7 +54,9 @@ func LoadImageManifest(manifestPath, configuredRootFS string) (ResolvedImage, er
 	if manifest.Architecture != "x86_64" {
 		return ResolvedImage{}, fmt.Errorf("%w: unsupported architecture %q", ErrInvalidImageManifest, manifest.Architecture)
 	}
-	if manifest.RootFS.Format != "qcow2" {
+	switch manifest.RootFS.Format {
+	case "qcow2", "raw":
+	default:
 		return ResolvedImage{}, fmt.Errorf("%w: unsupported rootfs format %q", ErrInvalidImageManifest, manifest.RootFS.Format)
 	}
 	if manifest.SourceLockSHA256 != "" {

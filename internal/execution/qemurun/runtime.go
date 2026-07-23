@@ -76,14 +76,15 @@ func LoadRuntimeConfig(getenv func(string) string, kvmAvailable bool) (RuntimeCo
 
 	return RuntimeConfig{
 		VM: VMConfig{
-			Binary:      binary,
-			Kernel:      image.Kernel,
-			Initrd:      image.Initrd,
-			RootFS:      image.RootFS,
-			Accelerator: accelerator,
-			MemoryMB:    memory,
-			VCPUs:       vcpus,
-			Network:     network,
+			Binary:       binary,
+			Kernel:       image.Kernel,
+			Initrd:       image.Initrd,
+			RootFS:       image.RootFS,
+			RootFSFormat: image.RootFSFormat,
+			Accelerator:  accelerator,
+			MemoryMB:     memory,
+			VCPUs:        vcpus,
+			Network:      network,
 		},
 		MaxFrameBytes:   frameBytes,
 		BootTimeout:     bootTimeout,

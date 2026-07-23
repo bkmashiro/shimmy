@@ -19,7 +19,7 @@ require_file() {
   fi
 }
 
-for command_name in dracut go mksquashfs python3 qemu-img sha256sum; do
+for command_name in dracut go mksquashfs python3 sha256sum; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     printf 'required command is missing: %s\n' "$command_name" >&2
     exit 1
@@ -137,10 +137,9 @@ for current, directories, files in os.walk(root, topdown=False):
     os.utime(current, (epoch, epoch), follow_symlinks=False)
 PY
 
-RAW_ROOTFS="$BUILD_DIR/rootfs.squashfs"
-QCOW_ROOTFS="$OUTPUT_DIR/evaluator.qcow2"
-rm -f "$RAW_ROOTFS" "$QCOW_ROOTFS"
-mksquashfs "$ROOT" "$RAW_ROOTFS" \
+FINAL_ROOTFS="$OUTPUT_DIR/evaluator.squashfs"
+rm -f "$FINAL_ROOTFS"
+mksquashfs "$ROOT" "$FINAL_ROOTFS" \
   -noappend \
   -all-root \
   -all-time "$SOURCE_DATE_EPOCH" \
@@ -148,9 +147,6 @@ mksquashfs "$ROOT" "$RAW_ROOTFS" \
   -no-xattrs \
   -no-progress \
   -comp gzip
-qemu-img convert -f raw -O qcow2 \
-  -o compat=1.1,cluster_size=65536,lazy_refcounts=off \
-  "$RAW_ROOTFS" "$QCOW_ROOTFS"
 cp "$KERNEL_PATH" "$OUTPUT_DIR/vmlinuz"
 SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" dracut \
   --force \
@@ -158,11 +154,11 @@ SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" dracut \
   --reproducible \
   "$OUTPUT_DIR/initramfs.img" \
   "$KERNEL_VERSION"
-touch -d "@$SOURCE_DATE_EPOCH" "$OUTPUT_DIR/vmlinuz" "$OUTPUT_DIR/initramfs.img" "$QCOW_ROOTFS"
+touch -d "@$SOURCE_DATE_EPOCH" "$OUTPUT_DIR/vmlinuz" "$OUTPUT_DIR/initramfs.img" "$FINAL_ROOTFS"
 
 kernel_sha=$(sha256sum "$OUTPUT_DIR/vmlinuz" | cut -d' ' -f1)
 initrd_sha=$(sha256sum "$OUTPUT_DIR/initramfs.img" | cut -d' ' -f1)
-rootfs_sha=$(sha256sum "$QCOW_ROOTFS" | cut -d' ' -f1)
+rootfs_sha=$(sha256sum "$FINAL_ROOTFS" | cut -d' ' -f1)
 source_lock_sha=$(sha256sum "$LOCK_FILE" | cut -d' ' -f1)
 cat >"$OUTPUT_DIR/manifest.json" <<MANIFEST
 {
@@ -171,9 +167,9 @@ cat >"$OUTPUT_DIR/manifest.json" <<MANIFEST
   "source_lock_sha256": "$source_lock_sha",
   "kernel": {"path": "vmlinuz", "sha256": "$kernel_sha"},
   "initrd": {"path": "initramfs.img", "sha256": "$initrd_sha"},
-  "rootfs": {"path": "evaluator.qcow2", "sha256": "$rootfs_sha", "format": "qcow2"}
+  "rootfs": {"path": "evaluator.squashfs", "sha256": "$rootfs_sha", "format": "raw"}
 }
 MANIFEST
 
 printf 'QEMU fixture image written to %s\n' "$OUTPUT_DIR"
-sha256sum "$OUTPUT_DIR/manifest.json" "$OUTPUT_DIR/vmlinuz" "$OUTPUT_DIR/initramfs.img" "$QCOW_ROOTFS"
+sha256sum "$OUTPUT_DIR/vmlinuz" "$OUTPUT_DIR/initramfs.img" "$FINAL_ROOTFS"

@@ -91,7 +91,8 @@ With QEMU enabled, all of the following remain semantically unchanged from the u
 - `FUNCTION_WORKER_SEND_TIMEOUT` and stop timeout;
 - `FUNCTION_MAX_PROCS` worker concurrency;
 - `file` transient lifecycle;
-- `rpc` persistent lifecycle;
+- `rpc` persistent lifecycle outside Lambda; the owner-approved Lambda
+  isolation profile may intentionally narrow RPC to one runner/VM per request;
 - RPC transport choice and endpoint semantics;
 - `eval`, `preview`, `healthcheck` and result/error envelopes;
 - evaluator stdout/stderr and exit behavior, subject only to the transport's existing treatment.
@@ -147,9 +148,12 @@ If both `FUNCTION_DBI_SECURITY_ENABLED=true` and `FUNCTION_QEMU_ENABLED=true` ar
 - preserve argument boundaries without a shell;
 - remain a no-op when disabled.
 
-## 5. Lifecycle follows the existing interface
+## 5. Lifecycle follows the existing interface unless isolation is selected
 
-QEMU must not impose an independent lifecycle policy.
+QEMU preserves the existing lifecycle by default outside Lambda. The
+owner-approved Lambda isolation profile is an explicit exception: QEMU RPC
+defaults to lazy one-shot VM ownership so mutable guest state never crosses
+invocations.
 
 ### `file`
 
@@ -167,7 +171,7 @@ This naturally gives one VM per file request because that is already the file-wo
 
 ### `rpc`
 
-Current RPC semantics are persistent: the supervisor starts one worker and reuses it. The QEMU runner therefore:
+With reset policy `off`, current RPC semantics are persistent: the supervisor starts one worker and reuses it. The QEMU runner therefore:
 
 1. boots one guest when the RPC worker starts;
 2. starts the original RPC evaluator inside the guest;
@@ -175,7 +179,11 @@ Current RPC semantics are persistent: the supervisor starts one worker and reuse
 4. preserves multiple requests and evaluator state exactly as the native RPC path does;
 5. destroys the VM when the worker stops, is cancelled or times out.
 
-Do not force one VM per RPC request. That would change observable lifecycle semantics and would not be transparent.
+With reset policy `lazy`, the supervisor deliberately treats RPC as
+invocation-scoped without changing the RPC transport contract. It does not boot
+at Shimmy init, stops and waits for the runner after every successful or failed
+request, and boots the next clean VM only when another request arrives. Lambda
+defaults to this policy; non-Lambda deployments default to `off`.
 
 ## 6. Transparent transport bridge
 
@@ -363,7 +371,8 @@ All are required:
 - enabled mode preserves `file` and `rpc` interface selection;
 - stdio, IPC, TCP, HTTP and WS RPC transports retain equivalent behavior;
 - original command/cwd/args/effective worker environment execute inside the guest without evaluator source changes;
-- file remains transient and RPC remains persistent;
+- file remains transient; RPC remains persistent outside Lambda and becomes
+  invocation-scoped under the owner-approved Lambda lazy-reset profile;
 - Python and Lean are parity fixtures, not allowlisted runtimes;
 - QEMU runs the original evaluator without a DBI dependency or nested DBI layer;
 - evaluator result/error/exit/timeout behavior remains equivalent at Shimmy's public boundary;
@@ -382,7 +391,9 @@ Use when the wrapper requires evaluator source changes, changes interface/lifecy
 
 ### Natural stop
 
-After verdict and evidence, stop. No automatic request replay, VM snapshots, migration, distributed scheduling or unrelated runtime work without a new owner decision.
+The owner decision on 2026-07-24 opened bounded one-slot Lambda request
+isolation and snapshot/reset investigation. Automatic request replay,
+distributed scheduling and unrelated runtime work remain out of scope.
 
 ---
 
@@ -558,3 +569,31 @@ Commit: `ci(qemu): prove transparent fallback parity`.
 5. Run full Go/race/build/workflow/docs/evidence gates.
 6. Signed small commits, push, verify remote signatures and clean worktrees.
 7. Stop unless a new owner decision opens optimization or deployment work.
+
+## Task 10: Lambda one-slot request isolation (owner-approved)
+
+**Decision:** one QEMU slot per Lambda execution environment; default reset
+timing is lazy clean-on-borrow. Never replay a request after ambiguous Guest
+execution.
+
+**Implemented slice:**
+
+1. `WorkerLifecycleInvocation` decouples worker reuse from the selected RPC
+   transport.
+2. Lambda QEMU defaults `FUNCTION_QEMU_RESET_POLICY` to `lazy`; non-Lambda
+   defaults to `off`.
+3. Lazy RPC does not preboot during Init, synchronously stops/waits before
+   `Send` returns after both success and failure, and boots only when the next
+   request actually arrives. The supervisor holds the slot until process exit.
+4. The dedicated dispatcher releases failed workers before returning the error.
+5. On Linux, QEMU receives `Pdeathsig=SIGKILL` so a force-killed runner cannot
+   leave its independently grouped VM orphaned.
+
+**Remaining slices:**
+
+1. Add a nonce-aware quiescent Guest checkpoint protocol and QMP control.
+2. Qualify fresh-QEMU immutable snapshot restore before exposing it as a reset
+   strategy.
+3. Treat same-process `loadvm` as a separately qualified weaker-assurance mode.
+4. Add a custom Lambda Runtime API loop only if explicit eager reset is enabled;
+   default lazy does not require post-response work.

@@ -39,7 +39,8 @@ type workerRef struct {
 }
 
 type WorkerSupervisor struct {
-	persistent bool
+	persistent          bool
+	releaseBeforeReturn bool
 
 	sendLock sync.Mutex
 
@@ -117,16 +118,31 @@ func New(params Params) (Supervisor, error) {
 		}, nil
 	}
 
-	// the worker is persistent if the IO interface is RPC
+	// RPC historically owns one persistent worker, while file IO creates one
+	// worker per message. Isolation wrappers may explicitly narrow RPC to an
+	// invocation-scoped lifecycle without changing its transport.
 	persistent := config.IO.Interface == RpcIO
+	switch config.WorkerLifecycle {
+	case WorkerLifecycleAutomatic:
+	case WorkerLifecyclePersistent:
+		if config.IO.Interface != RpcIO {
+			return nil, fmt.Errorf("persistent worker lifecycle requires rpc interface")
+		}
+		persistent = true
+	case WorkerLifecycleInvocation:
+		persistent = false
+	default:
+		return nil, fmt.Errorf("unsupported worker lifecycle %q", config.WorkerLifecycle)
+	}
 
 	return &WorkerSupervisor{
-		createWorker: createAdapter,
-		persistent:   persistent,
-		startParams:  config.StartParams,
-		stopParams:   config.StopParams,
-		sendParams:   config.SendParams,
-		log:          params.Log.Named("supervisor"),
+		createWorker:        createAdapter,
+		persistent:          persistent,
+		releaseBeforeReturn: config.WorkerLifecycle == WorkerLifecycleInvocation,
+		startParams:         config.StartParams,
+		stopParams:          config.StopParams,
+		sendParams:          config.SendParams,
+		log:                 params.Log.Named("supervisor"),
 	}, nil
 }
 
@@ -165,6 +181,12 @@ func (s *WorkerSupervisor) Send(
 	resData, err := worker.Send(ctx, method, data, s.sendParams.Timeout)
 
 	release, releaseErr := s.releaseWorker()
+	if s.releaseBeforeReturn && releaseErr == nil {
+		if release != nil {
+			releaseErr = release(context.Background())
+		}
+		release = noopReleaseFunc
+	}
 	if releaseErr != nil {
 		// make release() return the release error
 		release = func(context.Context) error {
@@ -257,31 +279,31 @@ func (s *WorkerSupervisor) terminateWorker() (ReleaseFunc, error) {
 
 	// keep a reference to the worker context cancel function
 	cancel := s.workerRef.cancel
+	if wait == nil {
+		cancel()
+		return noopReleaseFunc, nil
+	}
 
-	return func(ctx context.Context) error {
+	return func(context.Context) error {
 		done := make(chan struct{})
 		defer close(done)
 
 		go func() {
-			// cancel the worker context if either the wait function
-			// returns, or the stop timeout is reached. this way we
-			// give the worker a chance to stop gracefully, while
-			// ensuring it is terminated eventually.
+			// Cancel the worker context if either wait returns or the stop
+			// timeout is reached. The wait itself deliberately ignores the
+			// request context: invocation isolation must prove the old process
+			// exited before another worker can start.
 			defer cancel()
 
 			select {
 			case <-done:
-				// worker has stopped or context is done
 				return
 			case <-time.After(s.stopParams.Timeout):
-				// worker stop timeout reached
 				return
 			}
 		}()
 
-		// wait for the worker to stop, or until the context is done
-		// either way, the wait function will return eventually.
-		return wait(ctx)
+		return wait(context.Background())
 	}, nil
 }
 

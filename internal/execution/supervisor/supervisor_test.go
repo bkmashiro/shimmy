@@ -3,6 +3,7 @@ package supervisor_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -47,6 +48,24 @@ func TestSupervisor_Start_Transient_DoesNotAcquireWorker(t *testing.T) {
 	}
 
 	s, err := createSupervisorWithFactory(supervisor.FileIO, mockFactory)
+	assert.NoError(t, err)
+
+	err = s.Start(context.Background())
+	assert.NoError(t, err)
+	assert.False(t, called)
+}
+
+func TestSupervisor_Start_RPCInvocationLifecycleDoesNotAcquireWorker(t *testing.T) {
+	var called bool
+	mockFactory := func(supervisor.AdapterWorkerFactoryFn, supervisor.IOConfig, *zap.Logger) (supervisor.Adapter, error) {
+		called = true
+		return nil, nil
+	}
+
+	s, err := createSupervisorWithConfig(supervisor.Config{
+		IO:              supervisor.IOConfig{Interface: supervisor.RpcIO},
+		WorkerLifecycle: supervisor.WorkerLifecycleInvocation,
+	}, mockFactory)
 	assert.NoError(t, err)
 
 	err = s.Start(context.Background())
@@ -220,6 +239,95 @@ func TestSupervisor_Send_Transient_DoesNotReuseWorker(t *testing.T) {
 	a.AssertNumberOfCalls(t, "Stop", 2)
 }
 
+func TestSupervisor_Send_RPCInvocationLifecycleDoesNotReuseWorker(t *testing.T) {
+	s, a, err := createSupervisorWithAdapterConfig(t, supervisor.Config{
+		IO:              supervisor.IOConfig{Interface: supervisor.RpcIO},
+		WorkerLifecycle: supervisor.WorkerLifecycleInvocation,
+	})
+	assert.NoError(t, err)
+
+	data := map[string]any{"data": "data"}
+	waited := 0
+	a.EXPECT().Start(mock.Anything, mock.Anything).Return(nil)
+	a.EXPECT().Stop().Return(supervisor.ReleaseFunc(func(context.Context) error {
+		waited++
+		return nil
+	}), nil)
+	a.EXPECT().Send(mock.Anything, "test", data, mock.Anything).Return(nil, nil)
+
+	for index := range 2 {
+		res, sendErr := s.Send(context.Background(), "test", data)
+		assert.NoError(t, sendErr)
+		assert.Equal(t, index+1, waited, "worker exit must be awaited before Send returns")
+		assert.NoError(t, res.Release(context.Background()))
+	}
+
+	a.AssertNumberOfCalls(t, "Start", 2)
+	a.AssertNumberOfCalls(t, "Stop", 2)
+}
+
+func TestSupervisor_Send_RPCInvocationLifecycleStopsAfterSendFailure(t *testing.T) {
+	s, a, err := createSupervisorWithAdapterConfig(t, supervisor.Config{
+		IO:              supervisor.IOConfig{Interface: supervisor.RpcIO},
+		WorkerLifecycle: supervisor.WorkerLifecycleInvocation,
+	})
+	assert.NoError(t, err)
+
+	data := map[string]any{"data": "data"}
+	waited := false
+	a.EXPECT().Start(mock.Anything, mock.Anything).Return(nil)
+	a.EXPECT().Stop().Return(supervisor.ReleaseFunc(func(context.Context) error {
+		waited = true
+		return nil
+	}), nil)
+	a.EXPECT().Send(mock.Anything, "test", data, mock.Anything).Return(nil, assert.AnError)
+
+	res, sendErr := s.Send(context.Background(), "test", data)
+	assert.ErrorIs(t, sendErr, assert.AnError)
+	assert.NotNil(t, res)
+	assert.True(t, waited, "failed worker exit must be awaited before Send returns")
+	assert.NoError(t, res.Release(context.Background()))
+	a.AssertNumberOfCalls(t, "Stop", 1)
+}
+
+func TestSupervisor_Send_RPCInvocationLifecycleHoldsSlotUntilWorkerExit(t *testing.T) {
+	s, a, err := createSupervisorWithAdapterConfig(t, supervisor.Config{
+		IO:              supervisor.IOConfig{Interface: supervisor.RpcIO},
+		WorkerLifecycle: supervisor.WorkerLifecycleInvocation,
+		StopParams:      supervisor.StopConfig{Timeout: time.Second},
+	})
+	assert.NoError(t, err)
+
+	waitStarted := make(chan struct{})
+	allowExit := make(chan struct{})
+	a.EXPECT().Start(mock.Anything, mock.Anything).Return(nil).Once()
+	a.EXPECT().Send(mock.Anything, "test", mock.Anything, mock.Anything).Return(nil, nil).Once()
+	a.EXPECT().Stop().Return(supervisor.ReleaseFunc(func(context.Context) error {
+		close(waitStarted)
+		<-allowExit
+		return nil
+	}), nil).Once()
+
+	returned := make(chan struct{})
+	go func() {
+		_, _ = s.Send(context.Background(), "test", map[string]any{})
+		close(returned)
+	}()
+
+	<-waitStarted
+	select {
+	case <-returned:
+		t.Fatal("Send returned before the old worker exited")
+	default:
+	}
+	close(allowExit)
+	select {
+	case <-returned:
+	case <-time.After(time.Second):
+		t.Fatal("Send did not return after the old worker exited")
+	}
+}
+
 func TestSupervisor_Send_SendsData(t *testing.T) {
 	s, a, err := createSupervisor(t, supervisor.RpcIO)
 	assert.NoError(t, err)
@@ -301,14 +409,33 @@ func createSupervisor(t *testing.T, mode supervisor.IOInterface) (
 	return s, adapter, nil
 }
 
+func createSupervisorWithAdapterConfig(
+	t *testing.T,
+	config supervisor.Config,
+) (supervisor.Supervisor, *supervisor.MockAdapter, error) {
+	adapter := supervisor.NewMockAdapter(t)
+	factory := func(supervisor.AdapterWorkerFactoryFn, supervisor.IOConfig, *zap.Logger) (supervisor.Adapter, error) {
+		return adapter, nil
+	}
+	s, err := createSupervisorWithConfig(config, factory)
+	return s, adapter, err
+}
+
 func createSupervisorWithFactory(
 	mode supervisor.IOInterface,
 	factory supervisor.AdapterFactoryFn,
 ) (supervisor.Supervisor, error) {
+	return createSupervisorWithConfig(supervisor.Config{
+		IO: supervisor.IOConfig{Interface: mode},
+	}, factory)
+}
+
+func createSupervisorWithConfig(
+	config supervisor.Config,
+	factory supervisor.AdapterFactoryFn,
+) (supervisor.Supervisor, error) {
 	return supervisor.New(supervisor.Params{
-		Config: supervisor.Config{
-			IO: supervisor.IOConfig{Interface: mode},
-		},
+		Config:         config,
 		Context:        context.Background(),
 		AdapterFactory: factory,
 		Log:            zap.NewNop(),

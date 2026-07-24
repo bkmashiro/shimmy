@@ -82,6 +82,64 @@ func TestApplyQEMUFallbackConfigPreservesEveryRPCTransportConfig(t *testing.T) {
 	}
 }
 
+func TestApplyQEMUFallbackConfigLambdaDefaultsToLazyInvocationLifecycle(t *testing.T) {
+	setValidQEMUEnvironment(t)
+	t.Setenv("AWS_LAMBDA_RUNTIME_API", "127.0.0.1:9001")
+	t.Setenv("FUNCTION_QEMU_RESET_POLICY", "")
+
+	got, err := applyQEMUFallbackConfig(representativeRPCConfig(supervisor.StdioTransport))
+	require.NoError(t, err)
+	assert.Equal(t, supervisor.WorkerLifecycleInvocation, got.WorkerLifecycle)
+}
+
+func TestApplyQEMUFallbackConfigNonLambdaKeepsPersistentRPCDefault(t *testing.T) {
+	setValidQEMUEnvironment(t)
+	t.Setenv("AWS_LAMBDA_RUNTIME_API", "")
+	t.Setenv("FUNCTION_QEMU_RESET_POLICY", "")
+
+	got, err := applyQEMUFallbackConfig(representativeRPCConfig(supervisor.StdioTransport))
+	require.NoError(t, err)
+	assert.Equal(t, supervisor.WorkerLifecycleAutomatic, got.WorkerLifecycle)
+}
+
+func TestApplyQEMUFallbackConfigExplicitLazyUsesInvocationLifecycleOutsideLambda(t *testing.T) {
+	setValidQEMUEnvironment(t)
+	t.Setenv("AWS_LAMBDA_RUNTIME_API", "")
+	t.Setenv("FUNCTION_QEMU_RESET_POLICY", "lazy")
+
+	got, err := applyQEMUFallbackConfig(representativeRPCConfig(supervisor.StdioTransport))
+	require.NoError(t, err)
+	assert.Equal(t, supervisor.WorkerLifecycleInvocation, got.WorkerLifecycle)
+}
+
+func TestApplyQEMUFallbackConfigExplicitOffPreservesPersistentLambdaRPC(t *testing.T) {
+	setValidQEMUEnvironment(t)
+	t.Setenv("AWS_LAMBDA_RUNTIME_API", "127.0.0.1:9001")
+	t.Setenv("FUNCTION_QEMU_RESET_POLICY", "off")
+
+	got, err := applyQEMUFallbackConfig(representativeRPCConfig(supervisor.StdioTransport))
+	require.NoError(t, err)
+	assert.Equal(t, supervisor.WorkerLifecycleAutomatic, got.WorkerLifecycle)
+}
+
+func TestApplyQEMUFallbackConfigRejectsEagerWithoutPostResponseRuntimeLoop(t *testing.T) {
+	setValidQEMUEnvironment(t)
+	t.Setenv("FUNCTION_QEMU_RESET_POLICY", "eager")
+
+	_, err := applyQEMUFallbackConfig(representativeRPCConfig(supervisor.StdioTransport))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "post-response Lambda runtime loop")
+}
+
+func TestApplyQEMUFallbackConfigRejectsUnsupportedResetPolicy(t *testing.T) {
+	setValidQEMUEnvironment(t)
+	t.Setenv("FUNCTION_QEMU_RESET_POLICY", "adaptive")
+
+	_, err := applyQEMUFallbackConfig(representativeRPCConfig(supervisor.StdioTransport))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "FUNCTION_QEMU_RESET_POLICY")
+}
+
 func TestApplyExecutionWrappersRejectsQEMUAndDBITogether(t *testing.T) {
 	setValidQEMUEnvironment(t)
 	t.Setenv("FUNCTION_DBI_SECURITY_ENABLED", "true")

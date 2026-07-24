@@ -1,4 +1,4 @@
-//go:build !windows && !linux
+//go:build linux
 
 package qemurun
 
@@ -8,7 +8,10 @@ import (
 )
 
 func initVMCommand(command *exec.Cmd) {
-	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	command.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid:   true,
+		Pdeathsig: syscall.SIGKILL,
+	}
 }
 
 func terminateVMProcess(command *exec.Cmd, force bool) error {

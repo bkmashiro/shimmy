@@ -21,6 +21,18 @@ type SendConfig struct {
 	Timeout time.Duration
 }
 
+// WorkerLifecycle controls whether a communication adapter owns one worker
+// across messages or creates a fresh worker for each message. Automatic keeps
+// the historical behavior: RPC workers persist, while file workers are
+// invocation-scoped.
+type WorkerLifecycle string
+
+const (
+	WorkerLifecycleAutomatic  WorkerLifecycle = ""
+	WorkerLifecyclePersistent WorkerLifecycle = "persistent"
+	WorkerLifecycleInvocation WorkerLifecycle = "invocation"
+)
+
 // IOInterface describes the interface used to communicate with the worker.
 type IOConfig struct {
 	// Interface describes the communication between the supervisor
@@ -57,4 +69,9 @@ type Config struct {
 	// SendParams are the parameters to pass to the worker when
 	// sending a message.
 	SendParams SendConfig `conf:"send"`
+
+	// WorkerLifecycle optionally overrides the lifecycle inferred from IO.
+	// Isolation wrappers can narrow RPC to one worker per invocation without
+	// changing the transport seen by the evaluator.
+	WorkerLifecycle WorkerLifecycle `conf:"worker_lifecycle"`
 }

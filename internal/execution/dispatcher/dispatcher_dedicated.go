@@ -67,20 +67,30 @@ func (m *DedicatedDispatcher) Send(
 	method string,
 	data map[string]any,
 ) (map[string]any, error) {
-	res, err := m.supervisor.Send(ctx, method, data)
-	if err != nil {
-		m.log.Error("error sending message", zap.Error(err))
-		return nil, fmt.Errorf("error sending data: %w", err)
+	res, sendErr := m.supervisor.Send(ctx, method, data)
+	releaseErr := releaseResult(ctx, res)
+	if sendErr != nil {
+		m.log.Error("error sending message", zap.Error(sendErr))
+		if releaseErr != nil {
+			m.log.Error("error releasing failed worker", zap.Error(releaseErr))
+			return nil, fmt.Errorf("error sending data: %w (worker release failed: %v)", sendErr, releaseErr)
+		}
+		return nil, fmt.Errorf("error sending data: %w", sendErr)
 	}
 
-	// TODO: ignore release error?
-	// TODO: move into background goroutine?
-	if err := res.Release(ctx); err != nil {
-		m.log.Error("error releasing worker", zap.Error(err))
-		return nil, fmt.Errorf("error releasing worker: %w", err)
+	if releaseErr != nil {
+		m.log.Error("error releasing worker", zap.Error(releaseErr))
+		return nil, fmt.Errorf("error releasing worker: %w", releaseErr)
 	}
 
 	return res.Data, nil
+}
+
+func releaseResult(ctx context.Context, result *supervisor.Result) error {
+	if result == nil || result.Release == nil {
+		return nil
+	}
+	return result.Release(ctx)
 }
 
 // Shutdown stops the dispatcher and waits for all workers to finish.

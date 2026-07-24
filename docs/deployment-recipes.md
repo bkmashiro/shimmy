@@ -21,7 +21,7 @@ This page is the short version of the current runtime/profile/env surface. Use i
 | Python-reactor Lambda Feedback package | LF package-style evaluator that can run with packages already in the reactor artifact plus bundled pure-Python deps. | `FUNCTION_INTERFACE=wasm`; `FUNCTION_WASM_PROFILE=python-reactor`; `FUNCTION_WASM_MODULE=/path/to/python-reactor.wasm`; `FUNCTION_LF_ROOT=/path/to/package`; `FUNCTION_LF_EVAL_ENTRYPOINT=module:function` | `FUNCTION_LF_CONFIG`; `FUNCTION_LF_PREVIEW_ENTRYPOINT`; `FUNCTION_LF_ADAPTER_ROOT`; `FUNCTION_LF_BUNDLER`; `FUNCTION_LF_INCLUDE_ROOTS`; `FUNCTION_LF_SYS_PATH`; `FUNCTION_LF_BUNDLE_OUT` | Shimmy runs the bundler once at startup, then executes the generated script through python-reactor. |
 | Pyodide compatibility | Heavy Python package stack, especially SciPy/Pandas or Emscripten/Pyodide-only packages. | `FUNCTION_INTERFACE=pyodide`; `FUNCTION_PYODIDE_RUNNER=/path/to/runner.js`; plus either `FUNCTION_PYODIDE_SCRIPT=/path/to/eval.py` or package-mode envs | `FUNCTION_PYODIDE_PACKAGES`; `FUNCTION_PYODIDE_ROOT`; `FUNCTION_PYODIDE_EVAL_ENTRYPOINT`; `FUNCTION_PYODIDE_PREVIEW_ENTRYPOINT`; `FUNCTION_PYODIDE_ADAPTER` | This is a Node/Pyodide subprocess lane, not the same in-process wazero pool as `wasm`. |
 | Legacy RPC/file | Existing non-WASM workers or fallback integrations. | `FUNCTION_INTERFACE=rpc` or `FUNCTION_INTERFACE=file`; `FUNCTION_COMMAND=...` | RPC transport/file-mode worker options | Keep for compatibility and comparison. |
-| Full Linux via QEMU | An existing `file` or `rpc` worker needs a sealed full-Linux compatibility environment. | Existing interface/command config; `FUNCTION_QEMU_ENABLED=true`; `FUNCTION_QEMU_BINARY`; `FUNCTION_QEMU_ROOTFS`; `FUNCTION_QEMU_IMAGE_MANIFEST` | `FUNCTION_QEMU_RUNNER`; `FUNCTION_QEMU_ACCELERATOR`; bounded memory/vCPU/boot settings; `FUNCTION_QEMU_NETWORK_PROFILE` | Transparent wrapper only: do not use `FUNCTION_INTERFACE=qemu`. QEMU and DBI are mutually exclusive. |
+| Full Linux via QEMU | An existing `file` or `rpc` worker needs a sealed full-Linux compatibility environment. | Existing interface/command config; `FUNCTION_QEMU_ENABLED=true`; `FUNCTION_QEMU_BINARY`; `FUNCTION_QEMU_ROOTFS`; `FUNCTION_QEMU_IMAGE_MANIFEST` | `FUNCTION_QEMU_RUNNER`; `FUNCTION_QEMU_ACCELERATOR`; bounded memory/vCPU/boot settings; `FUNCTION_QEMU_NETWORK_PROFILE`; `FUNCTION_QEMU_RESET_POLICY=lazy\|off` | Transparent wrapper only: do not use `FUNCTION_INTERFACE=qemu`. Lambda defaults to lazy one-shot VM ownership; non-Lambda RPC remains persistent. QEMU and DBI are mutually exclusive. |
 
 ## Verification status
 
@@ -124,8 +124,16 @@ Deployment requirements and boundaries:
   referenced artifact SHA-256 before starting QEMU.
 - The original command, arguments, working directory and required dependencies
   must exist at the configured paths inside the guest image.
-- `file` retains a fresh worker/VM per request. `rpc` retains one persistent
-  worker/VM and tunnels stdio, IPC, TCP, HTTP or WebSocket as raw streams.
+- `file` retains a fresh worker/VM per request. Non-Lambda `rpc` retains one
+  persistent worker/VM and tunnels stdio, IPC, TCP, HTTP or WebSocket as raw
+  streams.
+- In AWS Lambda (`AWS_LAMBDA_RUNTIME_API` present), QEMU defaults to
+  `FUNCTION_QEMU_RESET_POLICY=lazy`. RPC does not boot during Shimmy init;
+  each evaluation boots one VM on demand and synchronously stops and waits for
+  that runner after success or failure. A later invocation boots the next clean
+  VM, so an environment reclaimed while idle performs no wasted reset work.
+  `off` restores the historical persistent RPC lifecycle. `eager`, VM snapshot
+  restore and same-process `loadvm` are not yet enabled or qualified.
 - `FUNCTION_QEMU_NETWORK_PROFILE=none` is the default tested profile. It does
   not expose Host files, credentials, SSH agents or Host networking.
 - Enabling QEMU and DynamoRIO together fails during configuration. Shimmy never

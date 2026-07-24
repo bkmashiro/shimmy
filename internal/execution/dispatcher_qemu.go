@@ -39,8 +39,10 @@ func applyExecutionWrappers(cfg supervisor.Config) (supervisor.Config, error) {
 }
 
 // applyQEMUFallbackConfig transparently replaces the native process command
-// with shimmy-qemu-runner while preserving file/RPC interface and lifecycle
-// configuration. Adapter-specific EVAL_* env/argv are added later as before.
+// with shimmy-qemu-runner while preserving the file/RPC application interface.
+// Lambda workers default to lazy clean-on-borrow: a contaminated runner is
+// terminated after the request and the next request creates a clean VM.
+// Adapter-specific EVAL_* env/argv are added later as before.
 func applyQEMUFallbackConfig(cfg supervisor.Config) (supervisor.Config, error) {
 	enabled, err := optionalBoolEnvironment("qemu", "FUNCTION_QEMU_ENABLED")
 	if err != nil {
@@ -75,6 +77,30 @@ func applyQEMUFallbackConfig(cfg supervisor.Config) (supervisor.Config, error) {
 		if closeErr := file.Close(); closeErr != nil {
 			return supervisor.Config{}, fmt.Errorf("qemu: close %s %q: %w", name, path, closeErr)
 		}
+	}
+
+	resetPolicy := strings.ToLower(strings.TrimSpace(os.Getenv("FUNCTION_QEMU_RESET_POLICY")))
+	if resetPolicy == "" {
+		if strings.TrimSpace(os.Getenv("AWS_LAMBDA_RUNTIME_API")) != "" {
+			resetPolicy = "lazy"
+		} else {
+			resetPolicy = "off"
+		}
+	}
+	switch resetPolicy {
+	case "off":
+	case "lazy":
+		cfg.WorkerLifecycle = supervisor.WorkerLifecycleInvocation
+	case "eager":
+		return supervisor.Config{}, fmt.Errorf(
+			"qemu: FUNCTION_QEMU_RESET_POLICY %q requires a post-response Lambda runtime loop, which is not enabled",
+			resetPolicy,
+		)
+	default:
+		return supervisor.Config{}, fmt.Errorf(
+			"qemu: invalid FUNCTION_QEMU_RESET_POLICY %q; supported values are off, lazy",
+			resetPolicy,
+		)
 	}
 
 	args := make([]string, 0, len(cfg.StartParams.Args)+2)

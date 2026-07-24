@@ -58,20 +58,20 @@ case "$RPC_TRANSPORT" in
   stdio)
     ;;
   ipc)
-    native_transport_env+=(FUNCTION_RPC_IPC_ENDPOINT="$BIN_DIR/native-eval.sock")
-    qemu_transport_env+=(FUNCTION_RPC_IPC_ENDPOINT="$BIN_DIR/qemu-eval.sock")
+    native_transport_env+=(FUNCTION_RPC_TRANSPORT_IPC_ENDPOINT="$BIN_DIR/native-eval.sock")
+    qemu_transport_env+=(FUNCTION_RPC_TRANSPORT_IPC_ENDPOINT="$BIN_DIR/qemu-eval.sock")
     ;;
   tcp)
-    native_transport_env+=(FUNCTION_RPC_TCP_ADDRESS="127.0.0.1:${NATIVE_RPC_PORT}")
-    qemu_transport_env+=(FUNCTION_RPC_TCP_ADDRESS="127.0.0.1:${QEMU_RPC_PORT}")
+    native_transport_env+=(FUNCTION_RPC_TRANSPORT_TCP_ADDRESS="127.0.0.1:${NATIVE_RPC_PORT}")
+    qemu_transport_env+=(FUNCTION_RPC_TRANSPORT_TCP_ADDRESS="127.0.0.1:${QEMU_RPC_PORT}")
     ;;
   http)
-    native_transport_env+=(FUNCTION_RPC_HTTP_URL="http://127.0.0.1:${NATIVE_RPC_PORT}/rpc")
-    qemu_transport_env+=(FUNCTION_RPC_HTTP_URL="http://127.0.0.1:${QEMU_RPC_PORT}/rpc")
+    native_transport_env+=(FUNCTION_RPC_TRANSPORT_HTTP_URL="http://127.0.0.1:${NATIVE_RPC_PORT}/rpc")
+    qemu_transport_env+=(FUNCTION_RPC_TRANSPORT_HTTP_URL="http://127.0.0.1:${QEMU_RPC_PORT}/rpc")
     ;;
   ws)
-    native_transport_env+=(FUNCTION_RPC_WS_URL="ws://127.0.0.1:${NATIVE_RPC_PORT}/ws")
-    qemu_transport_env+=(FUNCTION_RPC_WS_URL="ws://127.0.0.1:${QEMU_RPC_PORT}/ws")
+    native_transport_env+=(FUNCTION_RPC_TRANSPORT_WS_URL="ws://127.0.0.1:${NATIVE_RPC_PORT}/ws")
+    qemu_transport_env+=(FUNCTION_RPC_TRANSPORT_WS_URL="ws://127.0.0.1:${QEMU_RPC_PORT}/ws")
     ;;
   *)
     printf 'unsupported RPC smoke transport: %s\n' "$RPC_TRANSPORT" >&2

@@ -109,6 +109,24 @@ func assertEvalCall(t *testing.T, client *rpc.Client) {
 	}
 }
 
+func TestEvaluateHealthReportsProcessAndBoot(t *testing.T) {
+	response := evaluateRequest(rpcRequest{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage("9"),
+		Method:  "healthcheck",
+	})
+	if response.Error != nil {
+		t.Fatalf("healthcheck error = %#v", response.Error)
+	}
+	health, ok := response.Result.(evaluatorHealth)
+	if !ok {
+		t.Fatalf("healthcheck result = %#v", response.Result)
+	}
+	if health.Status != "ok" || health.PID <= 0 || health.BootID == "" {
+		t.Fatalf("healthcheck = %#v", health)
+	}
+}
+
 func TestServeOneRejectsUnknownMethodWithJSONRPCError(t *testing.T) {
 	request := []byte(`{"jsonrpc":"2.0","id":8,"method":"unknown","params":[]}`)
 	var input bytes.Buffer

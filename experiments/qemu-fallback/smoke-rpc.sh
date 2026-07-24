@@ -6,6 +6,7 @@ REPO_ROOT=$(cd -- "$SCRIPT_DIR/../.." && pwd)
 ARTIFACT_DIR=${ARTIFACT_DIR:-"$REPO_ROOT/artifacts/qemu-fallback"}
 BIN_DIR=${BIN_DIR:-"$REPO_ROOT/.cache/qemu-fallback-rpc-smoke"}
 RPC_TRANSPORT=${RPC_TRANSPORT:-stdio}
+QEMU_RESET_POLICY=${QEMU_RESET_POLICY:-off}
 NATIVE_PORT=${NATIVE_PORT:-18082}
 QEMU_PORT=${QEMU_PORT:-18083}
 NATIVE_RPC_PORT=${NATIVE_RPC_PORT:-19082}
@@ -30,8 +31,16 @@ for path in "$ARTIFACT_DIR/manifest.json" "$ARTIFACT_DIR/evaluator.squashfs"; do
 done
 QEMU_BINARY=$(command -v qemu-system-x86_64)
 
-native_log="$BIN_DIR/native-rpc-${RPC_TRANSPORT}.log"
-qemu_log="$BIN_DIR/qemu-rpc-${RPC_TRANSPORT}.log"
+case "$QEMU_RESET_POLICY" in
+  off|lazy) ;;
+  *)
+    printf 'unsupported QEMU reset policy for RPC smoke: %s\n' "$QEMU_RESET_POLICY" >&2
+    exit 1
+    ;;
+esac
+
+native_log="$BIN_DIR/native-rpc-${RPC_TRANSPORT}-${QEMU_RESET_POLICY}.log"
+qemu_log="$BIN_DIR/qemu-rpc-${RPC_TRANSPORT}-${QEMU_RESET_POLICY}.log"
 native_pid=""
 qemu_pid=""
 cleanup() {
@@ -83,6 +92,7 @@ env "${common_env[@]}" "${native_transport_env[@]}" "$BIN_DIR/shimmy" serve --po
 native_pid=$!
 env "${common_env[@]}" "${qemu_transport_env[@]}" \
   FUNCTION_QEMU_ENABLED=true \
+  FUNCTION_QEMU_RESET_POLICY="$QEMU_RESET_POLICY" \
   FUNCTION_QEMU_RUNNER="$BIN_DIR/shimmy-qemu-runner" \
   FUNCTION_QEMU_BINARY="$QEMU_BINARY" \
   FUNCTION_QEMU_ROOTFS="$ARTIFACT_DIR/evaluator.squashfs" \
@@ -120,7 +130,7 @@ post_eval() {
   local label=$2
   local sequence=$3
   local server_log=$4
-  local response_file="$BIN_DIR/${label}-${RPC_TRANSPORT}-${sequence}.json"
+  local response_file="$BIN_DIR/${label}-${RPC_TRANSPORT}-${QEMU_RESET_POLICY}-${sequence}.json"
   local status
   status=$(curl --max-time 150 -sS -o "$response_file" -w '%{http_code}' -X POST "http://127.0.0.1:${port}/" \
     -H 'Content-Type: application/json' \
@@ -130,6 +140,23 @@ post_eval() {
     printf '%s RPC evaluation %s returned HTTP %s\n' "$label" "$sequence" "$status" >&2
     cat "$response_file" >&2
     cat "$server_log" >&2
+    return 1
+  fi
+  cat "$response_file"
+}
+
+post_guest_health() {
+  local sequence=$1
+  local response_file="$BIN_DIR/qemu-${RPC_TRANSPORT}-${QEMU_RESET_POLICY}-health-${sequence}.json"
+  local status
+  status=$(curl --max-time 150 -sS -o "$response_file" -w '%{http_code}' -X POST "http://127.0.0.1:${QEMU_PORT}/" \
+    -H 'Content-Type: application/json' \
+    -H 'Command: healthcheck' \
+    -d '{}')
+  if [[ "$status" != 200 ]]; then
+    printf 'qemu RPC healthcheck %s returned HTTP %s\n' "$sequence" "$status" >&2
+    cat "$response_file" >&2
+    cat "$qemu_log" >&2
     return 1
   fi
   cat "$response_file"
@@ -155,3 +182,26 @@ assert qemu["result"]["echo"]["params"]["sequence"] == sequence, qemu
 print(json.dumps({"status": "pass", "transport": transport, "sequence": sequence, "response": qemu}, sort_keys=True))
 PY
 done
+
+if [[ "$QEMU_RESET_POLICY" == lazy ]]; then
+  identity_one=$(post_guest_health 1)
+  identity_two=$(post_guest_health 2)
+  IDENTITY_ONE="$identity_one" IDENTITY_TWO="$identity_two" python3 - <<'PY'
+import json
+import os
+
+first = json.loads(os.environ["IDENTITY_ONE"])
+second = json.loads(os.environ["IDENTITY_TWO"])
+assert first["command"] == second["command"] == "healthcheck", {"first": first, "second": second}
+first_boot = first["result"]["boot_id"]
+second_boot = second["result"]["boot_id"]
+assert first_boot != "unavailable" and second_boot != "unavailable", {"first": first, "second": second}
+assert first_boot != second_boot, {"first": first, "second": second}
+print(json.dumps({
+    "status": "pass",
+    "reset_policy": "lazy",
+    "first_boot_id": first_boot,
+    "second_boot_id": second_boot,
+}, sort_keys=True))
+PY
+fi

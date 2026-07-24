@@ -43,6 +43,12 @@ type evaluatorResult struct {
 	Echo      any  `json:"echo"`
 }
 
+type evaluatorHealth struct {
+	Status string `json:"status"`
+	PID    int    `json:"pid"`
+	BootID string `json:"boot_id"`
+}
+
 func serveOne(input *bufio.Reader, output io.Writer) error {
 	payload, err := readLSPFrame(input)
 	if err != nil {
@@ -63,16 +69,34 @@ func evaluateRequest(request rpcRequest) rpcResponse {
 	response := rpcResponse{JSONRPC: "2.0", ID: request.ID}
 	if request.JSONRPC != "2.0" || len(request.ID) == 0 {
 		response.Error = &rpcError{Code: -32600, Message: "invalid request"}
-	} else if request.Method != "eval" {
-		response.Error = &rpcError{Code: -32601, Message: "method not found"}
-	} else {
+		return response
+	}
+
+	switch request.Method {
+	case "eval":
 		echo := json.RawMessage(`{}`)
 		if len(request.Params) > 0 && len(request.Params[0]) > 0 {
 			echo = request.Params[0]
 		}
 		response.Result = evaluatorResult{IsCorrect: true, Echo: echo}
+	case "healthcheck":
+		response.Result = evaluatorHealth{Status: "ok", PID: os.Getpid(), BootID: currentBootID()}
+	default:
+		response.Error = &rpcError{Code: -32601, Message: "method not found"}
 	}
 	return response
+}
+
+func currentBootID() string {
+	data, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	if err != nil {
+		return "unavailable"
+	}
+	bootID := strings.TrimSpace(string(data))
+	if bootID == "" {
+		return "unavailable"
+	}
+	return bootID
 }
 
 func writeRPCError(output io.Writer, id json.RawMessage, code int, message string) error {

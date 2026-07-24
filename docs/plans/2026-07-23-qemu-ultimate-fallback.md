@@ -588,6 +588,11 @@ execution.
 4. The dedicated dispatcher releases failed workers before returning the error.
 5. On Linux, QEMU receives `Pdeathsig=SIGKILL` so a force-killed runner cannot
    leave its independently grouped VM orphaned.
+6. GitHub Actions run `30133144075` passed on x86_64 TCG. The lazy stdio smoke
+   observed distinct Guest boot IDs
+   `1c711cd9-00ae-413b-b75e-306aa96968f8` and
+   `00ba30e7-539f-49ee-b6f2-9de70ea8c63e`; the check run reported no
+   annotations after moving official actions to their Node 24 majors.
 
 **Remaining slices:**
 

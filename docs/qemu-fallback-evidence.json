@@ -1,19 +1,30 @@
 {
   "schema": "shimmy.qemu_fallback.evidence.v1",
-  "as_of": "2026-07-23",
+  "as_of": "2026-07-25",
   "verdict": "PARTIAL",
-  "implementation_commit": "82e2370f9df667b105deb207ba5333ff26994c53",
+  "implementation_commit": "9cf041ace1abe98cb35affc2f4a15ec0f9e86984",
   "github_actions": {
     "status": "PASS",
-    "run_id": 30042170032,
-    "url": "https://github.com/bkmashiro/shimmy-wasm-go/actions/runs/30042170032",
-    "head_sha": "82e2370f9df667b105deb207ba5333ff26994c53",
+    "run_id": 30133144075,
+    "url": "https://github.com/bkmashiro/shimmy-wasm-go/actions/runs/30133144075",
+    "head_sha": "9cf041ace1abe98cb35affc2f4a15ec0f9e86984",
     "scope": [
       "two clean builds produced byte-identical kernel, initramfs, SquashFS rootfs, and manifest artifacts",
       "native versus QEMU file public-HTTP response parity under x86_64 TCG",
       "persistent RPC parity for stdio, IPC, TCP, HTTP, and WebSocket",
+      "lazy stdio RPC request isolation with distinct Guest boot IDs across consecutive clean-on-borrow requests",
       "artifact upload for independent digest verification"
     ]
+  },
+  "lazy_request_isolation": {
+    "status": "PASS",
+    "reset_policy": "lazy",
+    "restore_mechanism": "fresh_boot",
+    "transport": "stdio",
+    "accelerator": "tcg",
+    "first_boot_id": "1c711cd9-00ae-413b-b75e-306aa96968f8",
+    "second_boot_id": "00ba30e7-539f-49ee-b6f2-9de70ea8c63e",
+    "claim_boundary": "This proves synchronous one-slot teardown and fresh-boot replacement on GitHub-hosted Linux TCG. It is not AWS Lambda qualification and does not prove snapshot restore or same-process loadvm isolation."
   },
   "doc_tcg": {
     "status": "PASS",
@@ -52,5 +63,5 @@
     "status": "NOT_RUN",
     "reason": "Real AWS writes and paid qualification require separate operator approval."
   },
-  "qualification_boundary": "The wrapper, image reproducibility, hosted-TCG functional parity, and DoC TCG file parity are verified. Production Lambda qualification and DoC KVM performance evidence remain open."
+  "qualification_boundary": "The wrapper, image reproducibility, hosted-TCG functional parity, hosted-TCG lazy fresh-boot request isolation, and DoC TCG file parity are verified. Snapshot/loadvm isolation, production Lambda qualification, and DoC KVM performance evidence remain open."
 }

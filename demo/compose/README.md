@@ -2,6 +2,11 @@
 
 This is an experimental handoff stack for four bounded execution lanes. It is deliberately separate from the larger Lambda Feedback production images and does not contain Mathematica/Wolfram.
 
+> The `python-reactor` lane retains a frozen historical artifact only for
+> reproducibility. Do not use or publish that lane as a current deployment until
+> a clean replacement passes the documented handoff. The generic and Pyodide
+> lanes remain active demos.
+
 | Service | Demonstrates | Image architecture |
 |---|---|---|
 | `generic` | Generic WASI evaluator, real HTTP path, and two-request snapshot reset | `linux/amd64`, `linux/arm64` |
@@ -43,7 +48,7 @@ Default host ports are `18081` through `18084`, bound to `127.0.0.1` only; overr
 
 ## Pinned inputs
 
-- Python reactor: `bkmashiro/webassembly-language-runtimes@v1.0.14`, SHA-256 `78dcbb6d673351c0d3b776c42d2fb93b6f638cdc714d58072dece4b115edaa72`.
+- Python reactor (frozen historical demo input): `bkmashiro/webassembly-language-runtimes@v1.0.14`, SHA-256 `78dcbb6d673351c0d3b776c42d2fb93b6f638cdc714d58072dece4b115edaa72`.
 - Pyodide: npm lockfile under `examples/eval-pyodide/` (`0.28.x`).
 - Lean evaluator: `lambda-feedback/compareLeanTest@cb99cfc95748772d4ea67d63f3875c2d574660fc` with the checked-in Shimmy file-protocol adapter.
 - DynamoRIO: `11.91.20545`, tar SHA-256 `db8b9f3d0dc14a469da1dc791e120a6cc6d968d2b18facb7bcaa471f4bde22da`, a minimal runtime tree, and a bounded evidence client. This lane is not a complete production sandbox.

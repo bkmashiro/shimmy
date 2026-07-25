@@ -79,29 +79,33 @@ GLOBAL OPTIONS:
    --worker-stop-timeout value  the duration to wait for a worker process to stop. (default: 5s) [$FUNCTION_WORKER_STOP_TIMEOUT]
 ```
 
-### Opt-in runtime paths
+### Runtime support tiers
 
-The original `rpc` and `file` paths remain the defaults. Maintainers select the
-new paths with environment variables; no source change or language-specific
-branch in the HTTP handler is required:
+Shimmy's product surface is organized by support role. This does not silently
+change the historical `rpc` default; deployments select a runtime explicitly.
 
-| Path | Selection | Deployment prerequisites |
+| Tier | Paths | Selection |
 |---|---|---|
-| Python reactor | `FUNCTION_INTERFACE=wasm`, `FUNCTION_WASM_PROFILE=python-reactor` | Pinned `python-reactor.wasm` plus an evaluator script or Lambda Feedback package config |
-| Pyodide | `FUNCTION_INTERFACE=pyodide` | Node.js, the provided runner, its npm dependencies, and a script/package config |
-| Native + DynamoRIO | `FUNCTION_INTERFACE=file` or `rpc`, plus `FUNCTION_DBI_SECURITY_ENABLED=true` | DynamoRIO, a policy client, and (when used) a readable policy config |
-| Full Linux via QEMU | `FUNCTION_INTERFACE=file` or `rpc`, plus `FUNCTION_QEMU_ENABLED=true` | `shimmy-qemu-runner`, `qemu-system-x86_64`, and a digest-locked kernel/initramfs/read-only rootfs manifest |
+| Primary | Generic WASM; Python reactor profile | `FUNCTION_INTERFACE=wasm`, with `FUNCTION_WASM_PROFILE=generic` or `python-reactor` |
+| Migration | `file`; `rpc`; Pyodide | `FUNCTION_INTERFACE=file`, `rpc`, or `pyodide` |
+| Fallback | Native + DynamoRIO; full Linux via QEMU | Keep `file`/`rpc` and enable exactly one explicit wrapper |
+| Optional memory strategy | COW; UFFD; soft-dirty; mprotect | Explicit WASM snapshot configuration; full-copy remains default |
 
-The QEMU path is implemented as a transparent terminal compatibility wrapper, not a new evaluator interface. It preserves the selected `file`/`rpc` interface, RPC transport, command, arguments and working directory; it never retries a failed native or DBI request. Outside Lambda, RPC keeps its historical persistent lifecycle. In Lambda, QEMU RPC defaults to `FUNCTION_QEMU_RESET_POLICY=lazy`: each completed or failed request terminates its runner/VM, and the next request creates a clean VM on demand. Set the policy to `off` only to opt back into persistent RPC state. QEMU and DynamoRIO are mutually exclusive and fail closed when selected together. The reproducible image build and hosted x86_64 TCG file/RPC parity are verified, and an Imperial DoC TCG file profile has response parity. Real AWS Lambda TCG qualification and snapshot restore have not run, and DoC KVM profiling is blocked because the experiment account cannot access `/dev/kvm`; the current verdict is therefore **PARTIAL**, not production-qualified. See the [QEMU implementation plan](docs/plans/2026-07-23-qemu-ultimate-fallback.md) and [machine-readable evidence ledger](docs/qemu-fallback-evidence.json).
+The Python-reactor interface remains a primary architecture path, but its legacy
+artifact pin is frozen historical evidence while a clean replacement is pending.
+Do not use that pin as a source for new deployments.
 
-Environment variables select and configure an already deployed runtime. They do
-not download external runtimes or policy clients automatically. See
-[deployment recipes](docs/deployment-recipes.md),
-[Lambda Feedback handoff](docs/lambda-feedback-handoff.md), and
-[the DBI native fallback](docs/dbi-native-fallback.md) for exact variables,
-artifacts, lifecycle guarantees, and smoke commands. For a self-contained
-four-lane demonstration without the larger production images, use the
-[compact Docker Compose stack](demo/compose/README.md).
+Shimmy never scans evaluator imports, `requirements.txt`, or source extensions to
+choose a backend. Environment variables configure an already deployed runtime;
+they do not download runtime images, Node/Pyodide, DBI clients, or QEMU artifacts.
+QEMU and DynamoRIO are mutually exclusive terminal wrappers, not evaluator
+interfaces, and Shimmy never retries a failed native/DBI request under QEMU.
+
+See [the backend model](docs/wasm-backend-model.md) for the canonical support
+classification, [deployment recipes](docs/deployment-recipes.md) for exact
+variables and artifact status, and [QEMU evidence](docs/qemu-fallback-evidence.json)
+for its current **PARTIAL** qualification. For a compact four-lane demonstration,
+use the [Docker Compose stack](demo/compose/README.md).
 
 ## Evaluation Runtime Interface
 

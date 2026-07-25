@@ -4,31 +4,30 @@ Shimmy's Python story is a runtime capability matrix, not three equally recommen
 
 | Route | Directory | Runtime | Use when | Trade-off |
 |---|---|---|---|---|
-| Plain Python | `examples/eval-python/` | `reactor-python` | Standard-library / pure-Python evaluators; fastest Python path with clean per-request state. | Linux-only in this branch; package support limited by CPython-WASI. |
-| NumPy | `examples/eval-numpy/` | `reactor-python` | Array/vector comparison and the main "warm CPython + snapshot/restore" demo. | Requires a `python-reactor.wasm` built with compatible packages. |
+| Plain Python | `examples/eval-python/` | `reactor-python` | Primary Python architecture for standard-library / pure-Python evaluators after a clean artifact is accepted. | Artifact replacement pending; the old pin is frozen. |
+| NumPy | `examples/eval-numpy/` | `reactor-python` | Target path for warm CPython plus snapshot/restore after replacement acceptance. | Requires an accepted reactor artifact with compatible packages. |
 | SciPy / heavy Python | `examples/eval-scipy/` | `pyodide` via `examples/eval-pyodide/runner.js` | SciPy/Pandas/scikit-learn style dependencies and broad package compatibility. | Slowest/heaviest path; different isolation/performance model. |
 | Lambda Feedback package | `examples/lambda-feedback-fixtures/` + `examples/lambda-feedback-adapter/` | `pyodide` package mode or `reactor-python` package mode | Real package-style evaluators that import `lf_toolkit` and use `evaluation_function/...` modules. | Pyodide is the broad compatibility path; reactor runs a generated wrapper produced by `tools/lf-bundle-python` at startup. |
 | Legacy resident Python | `examples/eval-python/` | `python-wasm` | Compatibility or comparison only. | Interpreter stays alive across requests; namespace cleanup cannot reset the full CPython heap, so state can leak. |
 
-One command:
+Active local compatibility smoke:
 
 ```bash
-scripts/demo-python-examples.sh
+(cd examples/eval-pyodide && npm ci)
+scripts/demo-python-examples.sh pyodide-only
 
-# Real Lambda Feedback package fixtures + adapter/Pyodide package mode.
-scripts/demo-lambda-feedback-fixtures.sh all
-
-# Reactor fast-path bundle matrix (downloads/verifies v1.0.14 artifact, Docker/Linux).
-scripts/demo-reactor-lambda-feedback-bundles.sh docker
+# Real Lambda Feedback package fixtures through Pyodide package mode.
+scripts/demo-lambda-feedback-fixtures.sh pyodide-boilerplate
+scripts/demo-lambda-feedback-fixtures.sh pyodide-compare-boolean
 ```
 
 Notes:
 
-- `reactor-python` is the recommended Python backend for speed plus snapshot/restore isolation when the evaluator is a single script or a Lambda Feedback package configured with `FUNCTION_LF_ROOT` + `FUNCTION_LF_EVAL_ENTRYPOINT`.
+- `reactor-python` remains the primary Python interface design for speed plus snapshot/restore isolation, but its old artifact pin is frozen. Do not run its demo/download scripts as current acceptance evidence until a clean replacement passes the handoff.
 - Pyodide package mode is the default compatibility path for real Lambda Feedback package evaluators (`evaluation_function/...`, `lf_toolkit`, entrypoint modules), especially when they need SciPy or other heavy packages.
-- The verified `python-reactor.wasm` v1.0.14 artifact includes NumPy/SymPy and exports `py_prepare`, the generic `evaluate` ABI, and the legacy `py_exec`/`resp_buf`/`resp_len` compatibility ABI; extra pure-Python deps such as `mpmath` can be bundled with `FUNCTION_LF_INCLUDE_ROOTS` or supplied as ZIP/directory payloads with `FUNCTION_LF_SYS_PATH`, and small WASI gaps can be handled with narrow polyfills.
+- A replacement reactor artifact must provide immutable provenance, SHA-256, required exports and package/API manifests, no-polyfill evidence, and real script/package/state-reset/error/timeout results before the pin or automatic CI changes.
 - `scipy` is intentionally out of reactor scope; use Pyodide for SciPy-heavy evaluators.
 - `python-wasm` is the old resident backend and should be treated as legacy/deprecated for isolation-sensitive evaluation.
-- `reactor-python` and `python-wasm` are Linux-only in this branch; on macOS the script validates evaluator files directly when possible, then skips backend-specific parts.
+- `reactor-python` and `python-wasm` are Linux-only in this branch; `python-wasm` is a retirement candidate after replacement evidence lands.
 - Pyodide is the compatibility fallback for heavy scientific Python because current CPython-WASI cannot load SciPy's compiled extension stack.
 - Runtime selection is explicit (`FUNCTION_INTERFACE` and related env vars); Shimmy does not automatically choose a backend from imports or `requirements.txt`.

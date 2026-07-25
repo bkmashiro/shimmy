@@ -96,7 +96,7 @@ FUNCTION_LF_CONFIG=/var/task/shimmy-lf.json \
   "root": "/var/task",
   "eval": "evaluation_function.evaluation:evaluation_function",
   "preview": "evaluation_function.preview:preview_function",
-  "include_roots": ["/opt/lf-puredeps", "/opt/shimmy/polyfills/reactor"],
+  "include_roots": ["/opt/lf-puredeps"],
   "sys_path": ["/opt/lf-puredeps.zip"]
 }
 ```
@@ -124,7 +124,6 @@ python3 tools/lf-bundle-python/lf_bundle_python.py \
   --root examples/lambda-feedback-fixtures/compare-boolean \
   --adapter-root examples/lambda-feedback-adapter \
   --include-root /tmp/lf-puredeps \
-  --include-root tools/lf-bundle-python/polyfills/reactor \
   --eval-entrypoint evaluation_function.evaluation:evaluation_function \
   --preview-entrypoint evaluation_function.preview:preview_function \
   --out /tmp/compare-boolean.bundle.py
@@ -150,7 +149,7 @@ Build-time bytecode generation for ZIP payloads is preferred when practical.
 
 The same knobs are available through Shimmy's startup integration:
 
-- `FUNCTION_LF_INCLUDE_ROOTS=/opt/lf-puredeps,/opt/shimmy/polyfills/reactor`
+- `FUNCTION_LF_INCLUDE_ROOTS=/opt/lf-puredeps`
 - `FUNCTION_LF_SYS_PATH=/opt/lf-puredeps.zip`
 - `FUNCTION_LF_BUNDLE_OUT=/tmp/evaluator.wrapper.py`
 - `FUNCTION_LF_BUNDLE_PYTHON=python3`
@@ -158,8 +157,12 @@ The same knobs are available through Shimmy's startup integration:
 It does **not** compile native extension packages. Those must already be available
 in the target backend:
 
-- reactor-python: built into the reactor artifact / WASI VFS, e.g. NumPy in the current `v1.0.14` pin
+- reactor-python: built into an accepted reactor artifact / WASI VFS; the old `v1.0.14` pin is frozen historical evidence, not a new deployment source
 - Pyodide: loaded through `FUNCTION_PYODIDE_PACKAGES`
+
+The checked-in reactor polyfill directory is frozen compatibility material. It is
+not part of the replacement artifact contract and should not appear in new
+deployment examples.
 
 `scipy` is intentionally out of reactor scope; use Pyodide for scipy-heavy evaluators.
 

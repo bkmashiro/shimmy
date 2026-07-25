@@ -12,11 +12,15 @@ Show three things, in order:
 3. **Python has two explicit routes:** `reactor-python` for lightweight/fast cases
    and Pyodide for heavy scientific packages such as SciPy.
 
+The reactor interface remains the primary Python target, but its old artifact is
+frozen. The live commands below demonstrate generic WASM and Pyodide only until a
+clean replacement passes handoff.
+
 The shortest successful demo is just:
 
 ```bash
 scripts/demo-wasm.sh
-scripts/demo-python-examples.sh
+scripts/demo-python-examples.sh pyodide-only
 scripts/demo-lambda-feedback-fixtures.sh all
 ```
 
@@ -27,7 +31,7 @@ Run these once from the repository root:
 ```bash
 go test ./...
 scripts/demo-wasm.sh
-scripts/demo-python-examples.sh
+scripts/demo-python-examples.sh pyodide-only
 scripts/demo-lambda-feedback-fixtures.sh all
 ```
 
@@ -35,9 +39,7 @@ Expected status on macOS:
 
 - `go test ./...` passes.
 - `scripts/demo-wasm.sh` passes.
-- `scripts/demo-python-examples.sh` passes, but may skip the NumPy direct fallback
-  if host Python does not have NumPy installed. That is fine on macOS; the real
-  `reactor-python` backend is Linux-only in this branch.
+- `scripts/demo-python-examples.sh pyodide-only` passes the SciPy/Pyodide HTTP path.
 - `scripts/demo-lambda-feedback-fixtures.sh all` passes Pyodide fixtures; the
   local `compare-boolean` fixture may skip if host Python does not have SymPy.
 
@@ -139,26 +141,22 @@ explaining the architecture.
 
 ## 10-minute extended demo
 
-### 4. Run the Python route matrix
+### 4. Run the active Python compatibility route
 
 Command:
 
 ```bash
-scripts/demo-python-examples.sh
+scripts/demo-python-examples.sh pyodide-only
 ```
 
 What to say before running it:
 
 > Python is not one route. Lightweight Python and NumPy-compatible cases target
-> `reactor-python`; heavy scientific packages that need the Pyodide ecosystem use
-> the explicit Pyodide fallback. We do not guess from imports at runtime.
+> the reactor interface after its clean artifact replacement; heavy scientific
+> packages use the explicit Pyodide compatibility path today. We do not guess
+> from imports at runtime.
 
-Expected macOS notes:
-
-- Plain Python is validated directly on host Python because `reactor-python` is
-  Linux-only in this branch.
-- NumPy may skip if host NumPy is not installed.
-- SciPy should run through Pyodide and return `is_correct: true`.
+SciPy should run through Pyodide and return `is_correct: true`.
 
 Call out the SciPy/Pyodide result:
 
@@ -173,8 +171,8 @@ Call out the SciPy/Pyodide result:
 Suggested explanation:
 
 > This is the compatibility story: if a real evaluator needs SciPy or other heavy
-> packages, we route it to Pyodide. If it is plain Python or a CPython-WASI-ready
-> package subset, we can use `reactor-python` for the faster isolated path.
+> packages, we route it to Pyodide. Plain Python and a CPython-WASI-ready package
+> subset target the faster reactor path once its replacement artifact is accepted.
 
 ### 5. Run realistic Lambda Feedback fixtures
 
@@ -198,10 +196,10 @@ Suggested explanation:
 > These are package-style Lambda Feedback fixtures rather than toy single-file
 > evaluators. Shimmy can adapt that package layout into the same runtime contract.
 
-## Lambda Feedback package-mode configuration
+## Target Lambda Feedback reactor configuration
 
-For the common `python-reactor` Lambda Feedback layout, the minimal deployment
-configuration uses the WASM backend plus an explicit profile:
+After a replacement artifact passes handoff, the common `python-reactor` Lambda
+Feedback layout uses the WASM backend plus an explicit profile:
 
 ```bash
 FUNCTION_INTERFACE=wasm
@@ -236,7 +234,7 @@ Example `shimmy-lf.json`:
   "root": "/var/task",
   "eval": "evaluation_function.evaluation:evaluation_function",
   "preview": "evaluation_function.preview:preview_function",
-  "include_roots": ["/opt/lf-puredeps", "/opt/shimmy/polyfills/reactor"],
+  "include_roots": ["/opt/lf-puredeps"],
   "sys_path": ["/opt/lf-puredeps.zip"]
 }
 ```
@@ -291,6 +289,7 @@ scripts/demo-wasm.sh
   explicit via `FUNCTION_INTERFACE`.
 - Do not present the macOS Python direct fallback as a real `reactor-python` run.
   The actual `reactor-python` backend is Linux-only in this branch.
+- Do not present the frozen reactor pin as a current deployment or demo artifact.
 - Do not claim zpoline/soft-dirty as the Lambda path. Current probe results favor
   `userfaultfd` write-protect support over soft-dirty/zpoline assumptions.
 
@@ -305,7 +304,7 @@ Shimmy-WASM keeps evaluators warm without leaking guest state.
 - Snapshot/restore resets guest memory after every request
 - Explicit runtime routes:
   - wasm: native WASI modules
-  - reactor-python: fast Python/NumPy-compatible path on Linux
+  - reactor-python: primary Python/NumPy-compatible target after clean artifact handoff
   - pyodide: compatibility path for SciPy/heavy Python packages
 - Lambda Feedback package mode can be configured with one root or one JSON file
 ```

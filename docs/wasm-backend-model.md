@@ -10,18 +10,31 @@ The important rule is: **do not create one `FUNCTION_INTERFACE` value per source
 
 For copy-pasteable launch configurations, see [deployment-recipes.md](deployment-recipes.md).
 
+## Product support tiers
+
+| Tier | Paths | Positioning |
+|---|---|---|
+| Primary | Generic WASM; Python reactor profile | Main in-process execution model. The Python-reactor interface remains primary, but its legacy artifact pin is frozen pending a clean replacement handoff. |
+| Migration | `file`; `rpc`; Pyodide | Compatibility paths for existing workers and heavy Python packages while evaluators move toward the primary model. |
+| Fallback | DynamoRIO wrapper; QEMU wrapper | Explicit terminal fallbacks around `file`/`rpc`; neither is a new evaluator interface. |
+| Optional strategy | COW; UFFD; soft-dirty; mprotect | Operator-selected memory experiments. Full-copy remains the default and none is selected from evaluator source. |
+
+These tiers describe product direction; they do not silently change the historical
+`rpc` configuration default. Runtime selection is always explicit. Shimmy does not
+inspect imports, requirements files, or source extensions to choose a path.
+
 ## 1. Runtime interface
 
 `FUNCTION_INTERFACE` should describe the execution and communication boundary, not the language used to author the evaluator.
 
 | Interface | Meaning | Current status |
 |---|---|---|
-| `rpc` | Existing persistent subprocess with JSON-RPC transport. | Baseline / compatibility path. |
-| `file` | Existing subprocess-per-request file protocol. | Baseline / compatibility path. |
-| `wasm` | In-process wazero WASM/WASI module instance pool. | Generic WASM ABI path works when a built `.wasm` module is provided. |
-| `pyodide` | Node/Pyodide subprocess compatibility lane for heavy Python packages. | Works for compatibility demos; not the same isolation/performance model as `wasm`. |
+| `rpc` | Existing persistent subprocess with JSON-RPC transport. | Migration / compatibility path. |
+| `file` | Existing subprocess-per-request file protocol. | Migration / compatibility path. |
+| `wasm` | In-process wazero WASM/WASI module instance pool. | Primary execution interface when a built `.wasm` module is provided. |
+| `pyodide` | Node/Pyodide subprocess compatibility lane for heavy Python packages. | Migration path; not the same isolation/performance model as `wasm`. |
 | `reactor-python` | CPython-WASI reactor path with snapshot/restore semantics. | Compatibility alias for `FUNCTION_WASM_PROFILE=python-reactor` under `FUNCTION_INTERFACE=wasm`; kept for migration compatibility. |
-| `python-wasm` | Older resident Python/WASM path. | Legacy/comparison only; state can leak across requests. |
+| `python-wasm` | Older resident Python/WASM path. | Legacy/comparison only; state can leak across requests and the path is a retirement candidate after replacement evidence lands. |
 
 ## 2. WASM profile
 
@@ -47,7 +60,7 @@ FUNCTION_COMMAND=/path/to/python-reactor.wasm
 | Profile | What Shimmy receives | Runtime expectation |
 |---|---|---|
 | `generic` | A pre-built `.wasm` module. | Exposes the Shimmy `alloc` / `evaluate` ABI directly. Source language is irrelevant at runtime. |
-| `python-reactor` | A CPython-WASI reactor module plus evaluator script/package config. | Host initializes Python, prepares the selected evaluator, snapshots post-import memory, and restores after requests. Current `v1.0.14` exports `py_prepare` plus the host-facing `alloc` / `evaluate` ABI and legacy `py_exec` exports. |
+| `python-reactor` | A CPython-WASI reactor module plus evaluator script/package config. | Host initializes Python, prepares the selected evaluator, snapshots post-import memory, and restores after requests. A replacement artifact must expose `py_prepare` plus the host-facing `alloc` / `evaluate` ABI and pass the handoff gates; the legacy pin is frozen historical evidence. |
 | `js-javy` / future JS profile | A WASI module produced by a JS compiler/bundler. | Needs a clear ABI adapter; current JS demo still uses an RPC/subprocess-style route. |
 
 The repository now accepts `FUNCTION_INTERFACE=wasm` + `FUNCTION_WASM_PROFILE` for profile selection and keeps `FUNCTION_INTERFACE=reactor-python` as a compatibility alias.
@@ -99,9 +112,10 @@ The generic WASM backend already demonstrates the runtime side: if you provide a
 
 What is not yet complete/polished:
 
+- clean Python-reactor artifact handoff and repinning without legacy host polyfills;
 - Lambda/AWS smoke deployment guidance for the recommended recipes;
 - JS/Javy integration with the generic in-process ABI instead of the current RPC/subprocess-style demo;
-- more regression coverage for the legacy `py_exec` fallback path.
+- retirement of the older resident `python-wasm` path after replacement evidence is accepted.
 
 ## Recommended documentation language
 

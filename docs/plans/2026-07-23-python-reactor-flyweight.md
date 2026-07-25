@@ -1,6 +1,6 @@
-# Python Reactor Flyweight
+# Python Reactor Flyweight (historical)
 
-**Status:** implemented and verified
+**Status:** implemented, verified, and archived
 
 **Evidence host baseline:** `8df3a0529aef468628d97380ef4270a5f75c86d5`
 

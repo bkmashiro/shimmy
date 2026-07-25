@@ -1,6 +1,8 @@
-# Wazero COW Prepared Memory Autonomous Roadmap
+# Wazero COW Prepared Memory Roadmap (historical)
 
-> **For Hermes:** This is the active long-running execution source of truth. Read it fully, trust live Git state over this prose, update it after every verified slice, and do not stop after one successful slice.
+**Status:** completed and archived on 2026-07-23. This file records the design,
+execution queue, and evidence that produced the opt-in COW path; it is not an
+active execution source of truth. The current workflow is manual evidence only.
 
 **Goal:** Add an explicit Linux-only copy-on-write prepared-memory strategy for eligible wazero module instances, prove cross-instance isolation and exact reset on bare GitHub Actions Linux, then integrate it with generic WASM and evaluator-preloaded Python reactor pools without weakening existing fail-closed semantics.
 
@@ -114,8 +116,8 @@ Local macOS skips Linux-only runtime tests by build tag; this is expected and mu
 
 **Promise:** Work is durable and every Linux-only claim has an executable GitHub Actions gate.
 
-- [x] Add this active roadmap and verify repository scope.
-- [x] Add `.github/workflows/cow-memory.yml` with automatic lightweight Linux tests and manual heavy inputs; no Docker steps.
+- [x] Add the execution roadmap and verify repository scope.
+- [x] Add the original `.github/workflows/cow-memory.yml` Linux correctness and manual heavy lanes; after roadmap closure the workflow was consolidated to manual evidence only.
 - [x] Add path filters for COW source/tests, config, supervisor/dispatcher/reactor wiring, and the workflow itself.
 
 **Gate:** YAML readback, `git diff --check`, signed push, workflow run visible for the target SHA.
@@ -218,12 +220,8 @@ Slices:
 - 2026-07-23: An extra local `go test -race ./internal/execution/...` gate exposed two pre-existing pooled-dispatcher tests that read asynchronous counters after a 1 ms sleep. Commit `56ee46d` replaced the sleeps with completion-channel synchronization; dispatcher `-race -count=20`, full execution race, and ordinary repository gates all passed. Production dispatcher code was unchanged.
 - 2026-07-23: A stale-SHA review still found one applicable P3 coverage gap: omitted snapshot mode selected full-copy but lacked an explicit regression test. Commit `953a4c2` now pins the zero-value config representation and `FullMemcpyStrategy` selection. The same review's request to make the 240 MiB Python proof mandatory/periodic is retained as a promotion policy gate, not a blocker for this explicitly opt-in prototype; the heavy workflow remains manual and its final run is recorded above.
 
-## Current execution pointer
+## Closure
 
-**Final review:** commit the evidence/operator docs, verify the signed remote SHA and all final gates, perform an independent fixed-SHA review, and address any validated finding before closing this roadmap.
-
-## Short prompt to resume
-
-```text
-Read docs/plans/2026-07-23-wazero-cow-prepared-memory-roadmap.md fully, then execute it in /Users/yuzhe/projects/shimmy-wasm. Do not stop after one slice: update the roadmap, run gates, make signed commits, push, and continue until all executable work is done or a proven blocker remains. Put Linux/kernel/Python-reactor tests in GitHub Actions and never run local Docker.
-```
+All executable tracks above were completed and the evidence is retained in the
+completion log. Future COW work requires a new scoped roadmap; do not resume this
+historical queue or infer default/automatic promotion from it.

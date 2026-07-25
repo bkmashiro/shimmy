@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lambda-feedback/shimmy/internal/protocol"
 )
 
 func TestHeaderPrefixReadWriteCloser_WriteAndRead(t *testing.T) {
@@ -46,6 +48,47 @@ func TestHeaderPrefixReadWriteCloser_ReadIncompleteHeader(t *testing.T) {
 	readBuffer := make([]byte, len(data))
 	_, err := rwc.Read(readBuffer)
 	assert.Error(t, err)
+}
+
+func TestHeaderPrefixPipe_RejectsNegativeContentLengthWithoutPanicking(t *testing.T) {
+	buf := newRwc()
+	pipe := &headerPrefixPipe{stdio: buf}
+	buf.(*rwc).Buffer.WriteString("Content-Length: -1\r\n\r\n")
+
+	var err error
+	assert.NotPanics(t, func() {
+		_, err = pipe.Read(make([]byte, 1))
+	})
+	assert.Error(t, err)
+}
+
+func TestHeaderPrefixPipe_RejectsOversizedReadFrame(t *testing.T) {
+	buf := newRwc()
+	pipe := &headerPrefixPipe{stdio: buf}
+	buf.(*rwc).Buffer.WriteString(fmt.Sprintf(
+		"Content-Length: %d\r\n\r\n",
+		protocol.DefaultMaxMessageBytes+1,
+	))
+
+	_, err := pipe.Read(make([]byte, 1))
+	assert.ErrorIs(t, err, protocol.ErrMessageTooLarge)
+}
+
+func TestHeaderPrefixPipe_RejectsOversizedWriteFrame(t *testing.T) {
+	pipe := &headerPrefixPipe{stdio: newRwc()}
+
+	n, err := pipe.Write(make([]byte, protocol.DefaultMaxMessageBytes+1))
+	assert.Zero(t, n)
+	assert.ErrorIs(t, err, protocol.ErrMessageTooLarge)
+}
+
+func TestHeaderPrefixPipe_RejectsOversizedHeader(t *testing.T) {
+	buf := newRwc()
+	pipe := &headerPrefixPipe{stdio: buf}
+	buf.(*rwc).Buffer.WriteString(strings.Repeat("x", protocol.MaxFrameHeaderBytes+1) + "\n")
+
+	_, err := pipe.Read(make([]byte, 1))
+	assert.ErrorContains(t, err, "frame header exceeds")
 }
 
 func TestHeaderPrefixReadWriteCloser_Close(t *testing.T) {

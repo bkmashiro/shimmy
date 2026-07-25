@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/lambda-feedback/shimmy/internal/protocol"
 )
 
 func TestLoadRuntimeConfigUsesBoundedDefaultsAndTCGWithoutKVM(t *testing.T) {
@@ -16,7 +18,7 @@ func TestLoadRuntimeConfigUsesBoundedDefaultsAndTCGWithoutKVM(t *testing.T) {
 	if got.VM.Accelerator != AcceleratorTCG || got.VM.MemoryMB != 512 || got.VM.VCPUs != 1 || got.VM.RootFSFormat != "qcow2" {
 		t.Fatalf("vm defaults = %#v", got.VM)
 	}
-	if got.VM.Network != NetworkNone || got.MaxFrameBytes != 4<<20 {
+	if got.VM.Network != NetworkNone || got.MaxFrameBytes != protocol.DefaultMaxMessageBytes {
 		t.Fatalf("runtime defaults = %#v", got)
 	}
 	if got.BootTimeout != 60*time.Second || got.ShutdownTimeout != 10*time.Second {

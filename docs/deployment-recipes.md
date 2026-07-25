@@ -10,6 +10,9 @@ This page is the short version of the current runtime/profile/env surface. Use i
 - Use `FUNCTION_WASM_PROFILE` only when a WASM module needs profile-specific setup.
 - Select the runtime explicitly. Shimmy never scans imports, `requirements.txt`,
   or source file extensions to choose a backend.
+- HTTP request bodies, stdio JSON-RPC frames, and Pyodide frames share a 4 MiB
+  default limit. QEMU keeps its existing explicit `FUNCTION_QEMU_MAX_FRAME_BYTES`
+  override, but its default comes from the same contract.
 - Use fixed artifact versions and SHA256 checks for large runtime images.
 - Keep `FUNCTION_INTERFACE=reactor-python` only as a compatibility alias; new deployments should use `wasm` + `FUNCTION_WASM_PROFILE=python-reactor`.
 - Environment variables select a path after its runtime artifacts are deployed. They do not install Node/Pyodide, DynamoRIO clients, or the reactor artifact automatically.

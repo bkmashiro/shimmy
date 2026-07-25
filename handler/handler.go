@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"io"
 	"net/http"
 
 	"go.uber.org/fx"
@@ -46,10 +45,10 @@ func (h *CommandHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := io.ReadAll(r.Body)
+	body, err := readRequestBody(w, r)
 	if err != nil {
 		log.Debug("failed to read body", zap.Error(err))
-		http.Error(w, "failed to read body", http.StatusBadRequest)
+		writeRequestBodyError(w, err)
 		return
 	}
 

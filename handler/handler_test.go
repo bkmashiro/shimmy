@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"github.com/lambda-feedback/shimmy/config"
+	"github.com/lambda-feedback/shimmy/internal/protocol"
 	"github.com/lambda-feedback/shimmy/runtime"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -98,5 +99,28 @@ func TestServeHTTP_Unauthorized(t *testing.T) {
 	assert.Contains(t, string(body), "unauthorized")
 
 	// Ensure handler was not called
+	mockHandler.AssertNotCalled(t, "Handle", mock.Anything, mock.Anything)
+}
+
+func TestServeHTTP_RejectsOversizedBody(t *testing.T) {
+	mockHandler := new(MockHandler)
+	mockHandler.On("Handle", mock.Anything, mock.Anything).
+		Return(runtime.Response{StatusCode: http.StatusOK}).Maybe()
+	handler := &CommandHandler{
+		handler: mockHandler,
+		log:     zap.NewNop(),
+		config:  config.Config{},
+	}
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/test",
+		bytes.NewReader(bytes.Repeat([]byte("x"), protocol.DefaultMaxMessageBytes+1)),
+	)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusRequestEntityTooLarge, w.Result().StatusCode)
+	assert.Contains(t, w.Body.String(), "request body too large")
 	mockHandler.AssertNotCalled(t, "Handle", mock.Anything, mock.Anything)
 }

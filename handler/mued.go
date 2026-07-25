@@ -2,7 +2,6 @@ package handler
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 
 	"go.uber.org/fx"
@@ -57,9 +56,9 @@ func (h *MuEdHandler) ServeEvaluate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := io.ReadAll(r.Body)
+	body, err := readRequestBody(w, r)
 	if err != nil {
-		http.Error(w, "failed to read body", http.StatusBadRequest)
+		writeRequestBodyError(w, err)
 		return
 	}
 

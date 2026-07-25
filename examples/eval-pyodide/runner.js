@@ -35,6 +35,11 @@
 const { loadPyodide } = require("pyodide");
 const fs = require("fs");
 const path = require("path");
+const {
+  DEFAULT_MAX_FRAME_BYTES,
+  FramedReader,
+  encodeFrame,
+} = require("./framed-stdio");
 
 const VFS_ROOT = "/__evaluator_root__";
 const ADAPTER_VFS_ROOT = "/__lf_adapter_root__";
@@ -125,9 +130,9 @@ const pyodidePackages = parsePackages(process.env.FUNCTION_PYODIDE_PACKAGES, def
  * Write a JSON-RPC response to stdout, framed with Content-Length.
  */
 function writeMessage(obj) {
-  const body = JSON.stringify(obj);
-  const header = `Content-Length: ${Buffer.byteLength(body, "utf8")}\r\n\r\n`;
-  process.stdout.write(header + body);
+  process.stdout.write(
+    encodeFrame(JSON.stringify(obj), DEFAULT_MAX_FRAME_BYTES)
+  );
 }
 
 /**
@@ -154,101 +159,6 @@ function makeError(id, code, message, data) {
 // There may be stray output before the first Content-Length line (e.g. model
 // loading logs), which we skip.
 // ---------------------------------------------------------------------------
-
-class FramedReader {
-  constructor(stream) {
-    this._stream = stream;
-    this._buf = Buffer.alloc(0);
-    this._resolvers = [];
-    this._closed = false;
-
-    stream.on("data", (chunk) => {
-      this._buf = Buffer.concat([this._buf, chunk]);
-      this._flush();
-    });
-    stream.on("end", () => {
-      this._closed = true;
-      for (const { reject } of this._resolvers) {
-        reject(new Error("stdin closed"));
-      }
-      this._resolvers = [];
-    });
-    stream.on("error", (err) => {
-      this._closed = true;
-      for (const { reject } of this._resolvers) {
-        reject(err);
-      }
-      this._resolvers = [];
-    });
-  }
-
-  /** Return a promise that resolves with the next complete framed message. */
-  read() {
-    return new Promise((resolve, reject) => {
-      this._resolvers.push({ resolve, reject });
-      this._flush();
-    });
-  }
-
-  _flush() {
-    while (this._resolvers.length > 0) {
-      const msg = this._tryParse();
-      if (msg === null) break;
-      const { resolve } = this._resolvers.shift();
-      resolve(msg);
-    }
-  }
-
-  /**
-   * Try to extract one framed message from _buf.
-   * Returns the message Buffer, or null if not enough data yet.
-   */
-  _tryParse() {
-    let buf = this._buf;
-
-    // Scan for "Content-Length:" line, skipping any stray output lines.
-    let contentLength = -1;
-    let searchPos = 0;
-
-    while (true) {
-      const nlIdx = buf.indexOf("\n", searchPos);
-      if (nlIdx === -1) return null;
-
-      const line = buf.slice(searchPos, nlIdx).toString("utf8").trimEnd();
-      searchPos = nlIdx + 1;
-
-      if (line.startsWith("Content-Length:")) {
-        const parts = line.split(":", 2);
-        contentLength = parseInt(parts[1].trim(), 10);
-        if (isNaN(contentLength) || contentLength < 0) {
-          contentLength = -1;
-          continue;
-        }
-        break;
-      }
-      // Any other line: stray output, skip it.
-    }
-
-    if (contentLength < 0) return null;
-
-    // Drain remaining header lines until blank separator (\r\n or \n).
-    while (true) {
-      const nlIdx = buf.indexOf("\n", searchPos);
-      if (nlIdx === -1) return null;
-
-      const line = buf.slice(searchPos, nlIdx).toString("utf8").trimEnd();
-      searchPos = nlIdx + 1;
-
-      if (line === "") break;
-    }
-
-    if (buf.length - searchPos < contentLength) return null;
-
-    const body = buf.slice(searchPos, searchPos + contentLength);
-    this._buf = buf.slice(searchPos + contentLength);
-    return body;
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Python bootstrap helpers
@@ -438,7 +348,9 @@ async function main() {
   }
 
   process.stdin.resume();
-  const reader = new FramedReader(process.stdin);
+  const reader = new FramedReader(process.stdin, {
+    maxFrameBytes: DEFAULT_MAX_FRAME_BYTES,
+  });
 
   while (true) {
     let msgBuf;

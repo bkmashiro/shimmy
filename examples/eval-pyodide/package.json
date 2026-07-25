@@ -5,6 +5,7 @@
   "description": "Pyodide/Node.js runner for Shimmy SciPy evaluation examples",
   "type": "commonjs",
   "scripts": {
+    "test": "node --test framed-stdio.test.js",
     "smoke": "node runner.js ../eval-scipy/eval.py"
   },
   "dependencies": {

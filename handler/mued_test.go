@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/lambda-feedback/shimmy/config"
+	"github.com/lambda-feedback/shimmy/internal/protocol"
 	"github.com/lambda-feedback/shimmy/runtime"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -208,6 +209,24 @@ func TestMuEdServeEvaluate_InvalidJSON(t *testing.T) {
 	newMuEdHandler(mockHandler, nil, "").ServeEvaluate(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+	mockHandler.AssertNotCalled(t, "Handle", mock.Anything, mock.Anything)
+}
+
+func TestMuEdServeEvaluate_RejectsOversizedBody(t *testing.T) {
+	mockHandler := new(MockHandler)
+	mockHandler.On("Handle", mock.Anything, mock.Anything).
+		Return(runtime.Response{StatusCode: http.StatusOK}).Maybe()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/evaluate",
+		bytes.NewReader(bytes.Repeat([]byte("x"), protocol.DefaultMaxMessageBytes+1)),
+	)
+	w := httptest.NewRecorder()
+
+	newMuEdHandler(mockHandler, nil, "").ServeEvaluate(w, req)
+
+	assert.Equal(t, http.StatusRequestEntityTooLarge, w.Result().StatusCode)
+	assert.Contains(t, w.Body.String(), "request body too large")
 	mockHandler.AssertNotCalled(t, "Handle", mock.Anything, mock.Anything)
 }
 

@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lambda-feedback/shimmy/internal/protocol"
 )
 
 const (
@@ -44,7 +46,13 @@ func LoadRuntimeConfig(getenv func(string) string, kvmAvailable bool) (RuntimeCo
 	if err != nil {
 		return RuntimeConfig{}, err
 	}
-	frameBytes, err := intSetting(getenv, "FUNCTION_QEMU_MAX_FRAME_BYTES", 4<<20, minFrameBytes, maxFrameBytes)
+	frameBytes, err := intSetting(
+		getenv,
+		"FUNCTION_QEMU_MAX_FRAME_BYTES",
+		protocol.DefaultMaxMessageBytes,
+		minFrameBytes,
+		maxFrameBytes,
+	)
 	if err != nil {
 		return RuntimeConfig{}, err
 	}

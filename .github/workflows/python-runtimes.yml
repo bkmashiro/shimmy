@@ -63,9 +63,13 @@ jobs:
           cache: npm
           cache-dependency-path: examples/eval-pyodide/package-lock.json
 
-      - name: Install Pyodide
+      - name: Install Pyodide runner dependencies
         working-directory: examples/eval-pyodide
-        run: npm ci --silent
+        run: npm ci
+
+      - name: Test framed stdio bounds
+        working-directory: examples/eval-pyodide
+        run: npm test
 
       - name: Run Pyodide script-mode HTTP smoke
         run: scripts/demo-python-examples.sh pyodide-only

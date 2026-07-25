@@ -14,7 +14,6 @@ import (
 
 	"github.com/lambda-feedback/shimmy/internal/execution"
 	"github.com/lambda-feedback/shimmy/internal/execution/supervisor"
-	"github.com/lambda-feedback/shimmy/internal/execution/wasm"
 )
 
 // writeTempScript creates a temporary Python script file with the given
@@ -173,49 +172,10 @@ func TestNewDispatcher_PyodidePackageModeAcceptsEnvironmentConfig(t *testing.T) 
 	require.NotNil(t, d)
 }
 
-// ---------------------------------------------------------------------------
-// ScriptFileNeedsHeavyRuntime routing decisions
-// ---------------------------------------------------------------------------
-
-func TestScriptRouting_PureNumpy(t *testing.T) {
-	script := writeTempScript(t, "import numpy as np\n\ndef evaluation_function(r, a, p):\n    return r == a\n")
-	heavy, err := wasm.ScriptFileNeedsHeavyRuntime(script)
-	require.NoError(t, err)
-	assert.False(t, heavy, "pure numpy script should NOT route to Pyodide")
-}
-
-func TestScriptRouting_ScipyDetected(t *testing.T) {
-	script := writeTempScript(t, "import numpy as np\nimport scipy.stats as stats\n\ndef evaluation_function(r, a, p):\n    return True\n")
-	heavy, err := wasm.ScriptFileNeedsHeavyRuntime(script)
-	require.NoError(t, err)
-	assert.True(t, heavy, "script with scipy import should route to Pyodide")
-}
-
-func TestScriptRouting_CommentedScipyIgnored(t *testing.T) {
-	script := writeTempScript(t, "# import scipy\nimport numpy as np\n\ndef evaluation_function(r, a, p):\n    return r == a\n")
-	heavy, err := wasm.ScriptFileNeedsHeavyRuntime(script)
-	require.NoError(t, err)
-	assert.False(t, heavy, "commented-out scipy import should NOT trigger Pyodide routing")
-}
-
-func TestScriptRouting_PandasDetected(t *testing.T) {
-	script := writeTempScript(t, "import pandas as pd\n\ndef evaluation_function(r, a, p):\n    return True\n")
-	heavy, err := wasm.ScriptFileNeedsHeavyRuntime(script)
-	require.NoError(t, err)
-	assert.True(t, heavy, "script with pandas import should route to Pyodide")
-}
-
-func TestScriptRouting_FileNotFound(t *testing.T) {
-	nonExistent := filepath.Join(t.TempDir(), "does_not_exist.py")
-	heavy, err := wasm.ScriptFileNeedsHeavyRuntime(nonExistent)
-	assert.Error(t, err, "non-existent file should return an error")
-	assert.False(t, heavy, "file-not-found should return false so dispatcher falls back to reactor")
-}
-
-// TestNewDispatcher_ReactorPython_NoHeavyDeps_EmptyModulePath verifies that
-// when there are no heavy deps the dispatcher takes the reactor-python code
-// path and fails with a ModulePath error (not a node/pyodide error).
-func TestNewDispatcher_ReactorPython_NoHeavyDeps_EmptyModulePath(t *testing.T) {
+// TestNewDispatcher_ReactorPython_ExplicitInterface_EmptyModulePath verifies
+// that an explicitly selected reactor-python interface takes the reactor path
+// and fails with a ModulePath error (not a node/pyodide error).
+func TestNewDispatcher_ReactorPython_ExplicitInterface_EmptyModulePath(t *testing.T) {
 	script := writeTempScript(t, "import numpy as np\n\ndef evaluation_function(r, a, p):\n    return r == a\n")
 
 	t.Setenv("FUNCTION_WASM_PYTHON_SCRIPT", script)

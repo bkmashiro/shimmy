@@ -10,7 +10,6 @@ on:
       - "examples/eval-pyodide/**"
       - "scripts/demo-python-examples.sh"
       - "internal/execution/wasm/python*.go"
-      - "internal/execution/wasm/import_scan*.go"
       - "internal/execution/dispatcher*.go"
       - ".github/workflows/python-wasm.yml"
   pull_request:
@@ -21,7 +20,6 @@ on:
       - "examples/eval-pyodide/**"
       - "scripts/demo-python-examples.sh"
       - "internal/execution/wasm/python*.go"
-      - "internal/execution/wasm/import_scan*.go"
       - "internal/execution/dispatcher*.go"
       - ".github/workflows/python-wasm.yml"
   workflow_dispatch:

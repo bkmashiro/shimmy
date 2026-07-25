@@ -8,6 +8,8 @@ This page is the short version of the current runtime/profile/env surface. Use i
 
 - Use `FUNCTION_INTERFACE=wasm` for in-process wazero execution.
 - Use `FUNCTION_WASM_PROFILE` only when a WASM module needs profile-specific setup.
+- Select the runtime explicitly. Shimmy never scans imports, `requirements.txt`,
+  or source file extensions to choose a backend.
 - Use fixed artifact versions and SHA256 checks for large runtime images.
 - Keep `FUNCTION_INTERFACE=reactor-python` only as a compatibility alias; new deployments should use `wasm` + `FUNCTION_WASM_PROFILE=python-reactor`.
 - Environment variables select a path after its runtime artifacts are deployed. They do not install Node/Pyodide, DynamoRIO clients, or the reactor artifact automatically.

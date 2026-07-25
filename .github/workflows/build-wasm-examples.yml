@@ -8,7 +8,7 @@ jobs:
     name: Build eval-rust (wasm32-wasip1)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust + wasm32-wasip1 target
         uses: dtolnay/rust-toolchain@stable
@@ -16,7 +16,7 @@ jobs:
           targets: wasm32-wasip1
 
       - name: Cache Cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -33,7 +33,7 @@ jobs:
         run: cp target/wasm32-wasip1/release/eval_rust.wasm eval.wasm
 
       - name: Upload eval.wasm
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: eval-rust.wasm
           path: examples/eval-rust/eval.wasm
@@ -45,11 +45,11 @@ jobs:
       WASI_SDK_VERSION: "25"
       WASI_SDK_PATH: /opt/wasi-sdk
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Cache WASI-SDK
         id: cache-wasi
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: /opt/wasi-sdk
           key: wasi-sdk-${{ env.WASI_SDK_VERSION }}-linux
@@ -71,13 +71,13 @@ jobs:
         run: make WASI_SDK=${{ env.WASI_SDK_PATH }}
 
       - name: Upload eval-c.wasm
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: eval-c.wasm
           path: examples/eval-c/eval.wasm
 
       - name: Upload eval-cpp.wasm
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: eval-cpp.wasm
           path: examples/eval-cpp/eval.wasm
@@ -86,9 +86,9 @@ jobs:
     name: Build adversarial WASM modules (wasm32-wasip1)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: ./go.mod
 
@@ -141,73 +141,73 @@ jobs:
         run: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o eval.wasm .
 
       - name: Upload adversarial-mem-bomb.wasm
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: adversarial-mem-bomb.wasm
           path: examples/adversarial/mem-bomb/eval.wasm
 
       - name: Upload adversarial-cpu-bomb.wasm
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: adversarial-cpu-bomb.wasm
           path: examples/adversarial/cpu-bomb/eval.wasm
 
       - name: Upload adversarial-stack-bomb.wasm
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: adversarial-stack-bomb.wasm
           path: examples/adversarial/stack-bomb/eval.wasm
 
       - name: Upload adversarial-fs-read-environ.wasm
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: adversarial-fs-read-environ.wasm
           path: examples/adversarial/fs-read-environ/eval.wasm
 
       - name: Upload adversarial-fs-read-etc.wasm
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: adversarial-fs-read-etc.wasm
           path: examples/adversarial/fs-read-etc/eval.wasm
 
       - name: Upload adversarial-fs-write-tmp.wasm
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: adversarial-fs-write-tmp.wasm
           path: examples/adversarial/fs-write-tmp/eval.wasm
 
       - name: Upload adversarial-net-tcp.wasm
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: adversarial-net-tcp.wasm
           path: examples/adversarial/net-tcp/eval.wasm
 
       - name: Upload adversarial-env-read.wasm
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: adversarial-env-read.wasm
           path: examples/adversarial/env-read/eval.wasm
 
       - name: Upload adversarial-fork-exec.wasm
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: adversarial-fork-exec.wasm
           path: examples/adversarial/fork-exec/eval.wasm
 
       - name: Upload adversarial-large-output.wasm
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: adversarial-large-output.wasm
           path: examples/adversarial/large-output/eval.wasm
 
       - name: Upload adversarial-memory-grow.wasm
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: adversarial-memory-grow.wasm
           path: examples/adversarial/memory-grow/eval.wasm
 
       - name: Upload adversarial-concurrent-isolation.wasm
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: adversarial-concurrent-isolation.wasm
           path: examples/adversarial/concurrent-isolation/eval.wasm
@@ -218,9 +218,9 @@ jobs:
     env:
       JAVY_VERSION: "8.1.1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: ./go.mod
 
@@ -238,7 +238,7 @@ jobs:
         run: ./build-runner.sh
 
       - name: Upload eval-js-runner.wasm
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: eval-js-runner.wasm
           path: examples/eval-js/runner.wasm
@@ -248,9 +248,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build-rust, build-c-cpp, build-adversarial, build-js]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: ./go.mod
 
@@ -258,97 +258,97 @@ jobs:
         run: go install github.com/tetratelabs/wazero/cmd/wazero@latest
 
       - name: Download eval-rust.wasm
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: eval-rust.wasm
           path: examples/eval-rust
 
       - name: Download eval-c.wasm
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: eval-c.wasm
           path: examples/eval-c
 
       - name: Download eval-cpp.wasm
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: eval-cpp.wasm
           path: examples/eval-cpp
 
       - name: Download adversarial-mem-bomb.wasm
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: adversarial-mem-bomb.wasm
           path: examples/adversarial/mem-bomb
 
       - name: Download adversarial-cpu-bomb.wasm
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: adversarial-cpu-bomb.wasm
           path: examples/adversarial/cpu-bomb
 
       - name: Download adversarial-stack-bomb.wasm
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: adversarial-stack-bomb.wasm
           path: examples/adversarial/stack-bomb
 
       - name: Download adversarial-fs-read-environ.wasm
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: adversarial-fs-read-environ.wasm
           path: examples/adversarial/fs-read-environ
 
       - name: Download adversarial-fs-read-etc.wasm
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: adversarial-fs-read-etc.wasm
           path: examples/adversarial/fs-read-etc
 
       - name: Download adversarial-fs-write-tmp.wasm
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: adversarial-fs-write-tmp.wasm
           path: examples/adversarial/fs-write-tmp
 
       - name: Download adversarial-net-tcp.wasm
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: adversarial-net-tcp.wasm
           path: examples/adversarial/net-tcp
 
       - name: Download adversarial-env-read.wasm
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: adversarial-env-read.wasm
           path: examples/adversarial/env-read
 
       - name: Download adversarial-fork-exec.wasm
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: adversarial-fork-exec.wasm
           path: examples/adversarial/fork-exec
 
       - name: Download adversarial-large-output.wasm
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: adversarial-large-output.wasm
           path: examples/adversarial/large-output
 
       - name: Download adversarial-memory-grow.wasm
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: adversarial-memory-grow.wasm
           path: examples/adversarial/memory-grow
 
       - name: Download adversarial-concurrent-isolation.wasm
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: adversarial-concurrent-isolation.wasm
           path: examples/adversarial/concurrent-isolation
 
       - name: Download eval-js-runner.wasm
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: eval-js-runner.wasm
           path: examples/eval-js

@@ -74,6 +74,9 @@ jobs:
       - name: Install Dependencies
         run: go mod download
 
+      - name: Validate GitHub Actions workflows
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+
       - name: Run core gates
         run: |
           go test ./... -count=1
@@ -155,7 +158,7 @@ jobs:
       id-token: write
     steps:
       - name: Repository Dispatch
-        uses: peter-evans/repository-dispatch@v3
+        uses: peter-evans/repository-dispatch@v4
         with:
           token: ${{ secrets.EVALUATION_FUNCTION_BASE_BUILD_TRIGGER_TOKEN }}
           repository: ${{ github.repository_owner }}/evaluation-function-base

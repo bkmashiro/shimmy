@@ -22,9 +22,9 @@ jobs:
         shell: bash -o pipefail {0}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -109,7 +109,7 @@ jobs:
             ./internal/execution/wasm/ | tee bench-isolate.txt
 
       - name: Upload benchmark evidence
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: snapshot-bench-${{ github.sha }}

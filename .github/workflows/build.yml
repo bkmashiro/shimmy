@@ -75,7 +75,7 @@ jobs:
         run: go mod download
 
       - name: Validate GitHub Actions workflows
-        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.11
 
       - name: Run core gates
         run: |

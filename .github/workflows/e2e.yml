@@ -93,14 +93,7 @@ jobs:
               -H 'Content-Type: application/json' \
               -d '{"response":"hello","answer":"hello"}')
             echo "Response ${request}: $RESP"
-            echo "$RESP" | python3 -c "
-            import sys, json
-            d = json.load(sys.stdin)
-            result = d.get('result', d)
-            assert result.get('is_correct') is True, result
-            assert result.get('guest_invocation_count') == 1, result
-            assert result.get('snapshot_isolation_ok') is True, result
-            "
+            RESP="$RESP" python3 -c 'import json, os; result=json.loads(os.environ["RESP"]); result=result.get("result", result); assert result.get("is_correct") is True, result; assert result.get("guest_invocation_count") == 1, result; assert result.get("snapshot_isolation_ok") is True, result'
           done
           echo "PASS: both requests observed the post-startup baseline"
 

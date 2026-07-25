@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tetratelabs/wazero"
+	"golang.org/x/sys/unix"
 )
 
 // ---------------------------------------------------------------------------
@@ -78,22 +79,18 @@ func TestUffdStrategy_EndToEnd(t *testing.T) {
 	// --- 2. mmap 4-page region ---
 	pageSize := syscall.Getpagesize()
 	numPages := 4
-	regionSize := uintptr(pageSize * numPages)
+	regionSize := pageSize * numPages
 
-	addr, _, merr := syscall.RawSyscall6(
-		syscall.SYS_MMAP,
+	region, err := unix.Mmap(
+		-1,
 		0,
 		regionSize,
-		syscall.PROT_READ|syscall.PROT_WRITE,
-		syscall.MAP_ANON|syscall.MAP_PRIVATE,
-		^uintptr(0),
-		0,
+		unix.PROT_READ|unix.PROT_WRITE,
+		unix.MAP_ANON|unix.MAP_PRIVATE,
 	)
-	require.Zero(t, merr, "mmap failed: %v", merr)
-	defer syscall.RawSyscall(syscall.SYS_MUNMAP, addr, regionSize, 0) //nolint:errcheck
-
-	// Cast to a Go slice for convenient access.
-	region := unsafe.Slice((*byte)(unsafe.Pointer(addr)), int(regionSize))
+	require.NoError(t, err, "mmap failed")
+	defer func() { require.NoError(t, unix.Munmap(region)) }()
+	addr := uintptr(unsafe.Pointer(&region[0]))
 
 	// --- 3. Fill region with known pattern and take snapshot ---
 	for i := range region {

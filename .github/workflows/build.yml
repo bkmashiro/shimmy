@@ -6,6 +6,9 @@ on:
       - "README.md"
     branches:
       - main
+      - feat/wasm-backend
+    tags:
+      - "v*"
   pull_request:
   workflow_dispatch:
 
@@ -28,12 +31,12 @@ jobs:
           - { runner: ubuntu-latest, os: windows, arch: amd64, env: CGO_ENABLED=0 }
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: ./go.mod
 
@@ -49,37 +52,33 @@ jobs:
             make build
 
       - name: Upload binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: shimmy-${{ matrix.os }}-${{ matrix.arch }}
           path: ./bin/${{ env.BINARY_NAME }}
 
-  # TODO: Test on windows
   test:
-    name: Test
+    name: Test / Vet / Build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: ./go.mod
 
       - name: Install Dependencies
         run: go mod download
 
-      - name: Run Tests
-        run: go test -json ./...
-
-#      - name: Upload test results
-#        uses: actions/upload-artifact@v4
-#        with:
-#          name: Go-results
-#          path: TestResults.json
+      - name: Run core gates
+        run: |
+          go test ./... -count=1
+          go vet ./...
+          go build ./...
 
   build_docker:
     name: Build Docker Image
@@ -94,19 +93,20 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Set up QEMU
-        if: github.ref_name == github.event.repository.default_branch
-        uses: docker/setup-qemu-action@v3
+        if: github.event_name == 'push' && (github.ref_name == github.event.repository.default_branch || github.ref_type == 'tag')
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx (QEMU)
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Login to Github Packages
-        uses: docker/login-action@v3
+        if: github.event_name == 'push' && (github.ref_name == github.event.repository.default_branch || github.ref_type == 'tag')
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -114,7 +114,7 @@ jobs:
 
       - name: Extract metadata for Docker
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           tags: |
             type=schedule
@@ -127,10 +127,10 @@ jobs:
             ghcr.io/${{ github.repository }}
 
       - name: Build and push
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@v7
         with:
           context: .
-          push: ${{ !(github.event_name == 'push' && github.ref_name != github.event.repository.default_branch) }}
+          push: ${{ github.event_name == 'push' && (github.ref_name == github.event.repository.default_branch || github.ref_type == 'tag') }}
           platforms: ${{ (github.ref_type == 'tag' || github.ref_name == github.event.repository.default_branch) && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           provenance: false
           tags: ${{ steps.meta.outputs.tags }}

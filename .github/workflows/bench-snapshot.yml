@@ -11,15 +11,6 @@ on:
         options:
           - large
           - full
-  push:
-    branches:
-      - feat/wasm-backend
-    paths:
-      - "internal/execution/wasm/snapshot_large_bench*_test.go"
-      - "internal/execution/wasm/snapshot_uffd_linux.go"
-      - "internal/execution/wasm/snapshot_uffd_metrics_linux_test.go"
-      - ".github/workflows/bench-snapshot.yml"
-
 jobs:
   bench:
     name: Benchmark (bare Linux)

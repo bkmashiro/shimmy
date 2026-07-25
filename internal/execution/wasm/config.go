@@ -125,10 +125,20 @@ func (c *Config) validatePythonPreloadMode() error {
 	}
 }
 
-// validateSnapshotMode checks that the configured snapshot mode is compatible
-// with the pool size. Modes that use process-wide state (soft-dirty, mprotect)
-// are only safe with a single instance.
+// validateSnapshotMode checks that the configured snapshot mode is known and
+// compatible with the pool size. Modes that use process-wide state
+// (soft-dirty, mprotect) are only safe with a single instance.
 func (c *Config) validateSnapshotMode(poolSize int) error {
+	switch c.SnapshotMode {
+	case "", "memcpy", "soft-dirty", "mprotect", "uffd", "cow":
+		// Known mode. Empty retains the full-memcpy baseline.
+	default:
+		return fmt.Errorf(
+			"snapshot mode %q is invalid; use \"memcpy\", \"soft-dirty\", \"mprotect\", \"uffd\", or \"cow\"",
+			c.SnapshotMode,
+		)
+	}
+
 	if poolSize <= 1 {
 		return nil
 	}

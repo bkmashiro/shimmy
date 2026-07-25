@@ -8,8 +8,13 @@ import (
 )
 
 // selectSnapshotStrategy returns FullMemcpyStrategy on non-Linux platforms
-// where userfaultfd, soft-dirty, and mprotect strategies are not available.
-func selectSnapshotStrategy(_ string, _ api.Memory, _ *zap.Logger) SnapshotStrategy {
+// where userfaultfd, soft-dirty, mprotect, and COW strategies are unavailable.
+func selectSnapshotStrategy(mode string, _ api.Memory, log *zap.Logger) SnapshotStrategy {
+	if mode == "" || mode == "memcpy" {
+		logSnapshotSelection(log, mode, "memcpy", "")
+	} else {
+		logSnapshotSelection(log, mode, "memcpy", "snapshot strategy is unavailable on non-Linux")
+	}
 	return NewFullMemcpyStrategy()
 }
 

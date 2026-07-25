@@ -44,47 +44,53 @@ func selectSnapshotStrategy(mode string, mem api.Memory, log *zap.Logger) Snapsh
 	case "soft-dirty":
 		sd, err := NewSoftDirtyStrategy(mem)
 		if err != nil {
-			log.Warn("soft-dirty unavailable, falling back to full memcpy",
-				zap.Error(err))
+			logSnapshotSelection(log, mode, "memcpy", err.Error())
 			return NewFullMemcpyStrategy()
 		}
-		log.Info("using soft-dirty page tracking strategy",
-			zap.Uint32("mem_size", mem.Size()))
+		logSnapshotSelection(log, mode, "soft-dirty", "")
 		return sd
 
 	case "mprotect":
 		if !mprotectOptedIn() {
-			log.Warn("mprotect snapshot strategy is experimental and requires explicit opt-in; falling back to full memcpy",
-				zap.String("opt_in_env", mprotectOptInEnv),
-				zap.String("reason", "installs a process-wide SIGSEGV handler that intercepts ALL segfaults in the Go process"))
+			logSnapshotSelection(
+				log,
+				mode,
+				"memcpy",
+				"experimental mprotect requires "+mprotectOptInEnv+"=true",
+			)
 			return NewFullMemcpyStrategy()
 		}
 		mp, err := NewMprotectStrategy(mem)
 		if err != nil {
-			log.Warn("mprotect unavailable, falling back to full memcpy",
-				zap.Error(err))
+			logSnapshotSelection(log, mode, "memcpy", err.Error())
 			return NewFullMemcpyStrategy()
 		}
+		logSnapshotSelection(log, mode, "mprotect", "")
 		log.Warn("using EXPERIMENTAL mprotect dirty-page tracking strategy — process-wide SIGSEGV handler installed",
 			zap.Uint32("mem_size", mem.Size()))
 		return mp
 
 	case "uffd":
 		if mem == nil {
+			logSnapshotSelection(log, mode, "memcpy", "WASM memory is unavailable")
 			return NewFullMemcpyStrategy()
 		}
 		us, err := NewUffdStrategy(mem)
 		if err != nil {
-			log.Warn("uffd unavailable, falling back to full memcpy",
-				zap.Error(err))
+			logSnapshotSelection(log, mode, "memcpy", err.Error())
 			return NewFullMemcpyStrategy()
 		}
-		log.Info("using uffd dirty-page tracking strategy",
-			zap.Uint32("mem_size", mem.Size()))
+		logSnapshotSelection(log, mode, "uffd", "")
 		return us
 
 	default:
-		// "memcpy" or empty — always-available baseline.
+		if mode == "cow" {
+			logSnapshotSelection(log, mode, "memcpy", "COW runtime support is unavailable")
+			return NewFullMemcpyStrategy()
+		}
+		// "memcpy" or empty — always-available baseline. Invalid modes are
+		// rejected by Config.validateSnapshotMode before strategy selection.
+		logSnapshotSelection(log, mode, "memcpy", "")
 		return NewFullMemcpyStrategy()
 	}
 }

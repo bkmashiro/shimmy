@@ -501,10 +501,9 @@ func (s *cowRuntimeSupport) instantiateContext(ctx context.Context) context.Cont
 func (s *cowRuntimeSupport) snapshotStrategy(mem api.Memory, log *zap.Logger) SnapshotStrategy {
 	backing, err := s.allocator.backingFor(mem)
 	if err != nil {
-		if log != nil {
-			log.Warn("COW allocator backing unavailable; falling back to full memcpy", zap.Error(err))
-		}
+		logSnapshotSelection(log, "cow", "memcpy", err.Error())
 		return NewFullMemcpyStrategy()
 	}
+	logSnapshotSelection(log, "cow", "cow", "")
 	return newCowSnapshotStrategy(backing, s.coordinator, log)
 }

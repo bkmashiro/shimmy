@@ -228,14 +228,14 @@ main() {
   fi
 
   case "${mode}" in
-    all|reactor-only) ;;
+    all|reactor-only|pyodide-only) ;;
     -h|--help)
-      echo "usage: $0 [all|reactor-only]" >&2
+      echo "usage: $0 [all|reactor-only|pyodide-only]" >&2
       echo "set SHIMMY_DEMO_REACTOR_DOCKER=1 on macOS to run reactor-python examples in Docker" >&2
       exit 0
       ;;
     *)
-      echo "usage: $0 [all|reactor-only]" >&2
+      echo "usage: $0 [all|reactor-only|pyodide-only]" >&2
       exit 1
       ;;
   esac
@@ -248,6 +248,13 @@ main() {
     run_numpy_reactor
     echo
     echo "✅ Reactor-python example demos completed. Logs: ${LOG_DIR}"
+    return 0
+  fi
+
+  if [[ "${mode}" == "pyodide-only" ]]; then
+    run_scipy_pyodide
+    echo
+    echo "✅ Pyodide example demo completed. Logs: ${LOG_DIR}"
     return 0
   fi
 

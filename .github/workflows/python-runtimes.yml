@@ -1,0 +1,83 @@
+name: Python Runtime Routes
+
+on:
+  push:
+    branches:
+      - main
+      - feat/wasm-backend
+    paths:
+      - "examples/eval-scipy/**"
+      - "examples/eval-pyodide/**"
+      - "examples/lambda-feedback-adapter/**"
+      - "examples/lambda-feedback-fixtures/**"
+      - "scripts/demo-python-examples.sh"
+      - "scripts/smoke-pyodide-package-http.sh"
+      - "internal/execution/dispatcher*.go"
+      - "internal/execution/supervisor/adapter_rpc*.go"
+      - "internal/execution/worker/**"
+      - "handler/**"
+      - "runtime/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/python-runtimes.yml"
+  pull_request:
+    paths:
+      - "examples/eval-scipy/**"
+      - "examples/eval-pyodide/**"
+      - "examples/lambda-feedback-adapter/**"
+      - "examples/lambda-feedback-fixtures/**"
+      - "scripts/demo-python-examples.sh"
+      - "scripts/smoke-pyodide-package-http.sh"
+      - "internal/execution/dispatcher*.go"
+      - "internal/execution/supervisor/adapter_rpc*.go"
+      - "internal/execution/worker/**"
+      - "handler/**"
+      - "runtime/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/python-runtimes.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pyodide-compatibility:
+    name: Pyodide script/package compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: ./go.mod
+          cache: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: examples/eval-pyodide/package-lock.json
+
+      - name: Install Pyodide
+        working-directory: examples/eval-pyodide
+        run: npm ci --silent
+
+      - name: Run Pyodide script-mode HTTP smoke
+        run: scripts/demo-python-examples.sh pyodide-only
+
+      - name: Run Pyodide package-mode HTTP smoke
+        run: scripts/smoke-pyodide-package-http.sh
+
+      - name: Upload Pyodide logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pyodide-runtime-logs-${{ github.sha }}
+          path: .demo-logs/*.log
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,10 +1,10 @@
-name: Lambda Feedback Reactor Bundle Matrix (manual)
+name: Frozen Legacy Reactor Bundle Matrix (manual)
 
 on:
   workflow_dispatch:
     inputs:
       reactor_version:
-        description: "python-reactor.wasm release version"
+        description: "Frozen legacy artifact version; non-authoritative until reactor handoff"
         required: true
         default: "v1.0.11"
       mode:
@@ -18,7 +18,7 @@ on:
 
 jobs:
   lambda-feedback-reactor:
-    name: Lambda Feedback reactor bundle matrix
+    name: Frozen legacy reactor evidence (non-authoritative)
     runs-on: ubuntu-latest
     timeout-minutes: 30
 

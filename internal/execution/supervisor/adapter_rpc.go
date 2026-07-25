@@ -93,6 +93,8 @@ type rpcAdapter struct {
 	log    *zap.Logger
 }
 
+const rpcStartupRollbackTimeout = 5 * time.Second
+
 func newRpcAdapter(
 	workerFactory AdapterWorkerFactoryFn,
 	config RpcConfig,
@@ -127,27 +129,62 @@ func (a *rpcAdapter) Start(
 	if a.config.Transport == StdioTransport {
 		stdio, err := a.worker.DuplexPipe()
 		if err != nil {
+			a.worker = nil
 			return fmt.Errorf("error creating duplex pipe: %w", err)
 		}
 
 		// wrap the pipe in a header stream
 		a.stdioPipe = &headerPrefixPipe{stdio: stdio}
-
-		// TODO: close pipe?
 	}
 
 	// for rpc, we can already start the worker, as we do not need to pass
 	// any additional, message-specific data to the worker via arguments
 	if err := worker.Start(ctx); err != nil {
+		a.closeRPCResources()
+		a.worker = nil
 		return fmt.Errorf("error starting worker: %w", err)
 	}
 
 	// dial the rpc client
-	return a.dialRpcWithRetry(
+	if err := a.dialRpcWithRetry(
 		ctx,
 		100*time.Millisecond, // initial delay
 		10*time.Second,       // max delay
-	)
+	); err != nil {
+		a.rollbackStartedWorker()
+		return err
+	}
+
+	return nil
+}
+
+func (a *rpcAdapter) closeRPCResources() {
+	if a.rpcClient != nil {
+		a.rpcClient.Close()
+		a.rpcClient = nil
+	}
+	if a.stdioPipe != nil {
+		if err := a.stdioPipe.Close(); err != nil {
+			a.log.Warn("failed to close rpc stdio pipe", zap.Error(err))
+		}
+		a.stdioPipe = nil
+	}
+}
+
+func (a *rpcAdapter) rollbackStartedWorker() {
+	a.closeRPCResources()
+	if a.worker == nil {
+		return
+	}
+
+	startedWorker := a.worker
+	a.worker = nil
+	if err := startedWorker.Stop(); err != nil {
+		a.log.Warn("failed to stop worker after rpc startup failure", zap.Error(err))
+	}
+	if _, err := startedWorker.WaitFor(context.Background(), rpcStartupRollbackTimeout); err != nil {
+		a.log.Warn("failed to reap worker after rpc startup failure", zap.Error(err))
+	}
 }
 
 func (a *rpcAdapter) Send(
@@ -191,10 +228,12 @@ func (a *rpcAdapter) dialRpcWithRetry(
 ) error {
 	var err error
 	for i := 0; ; i++ {
-		if client, err := a.dialRpc(ctx, a.config); err == nil {
+		client, dialErr := a.dialRpc(ctx, a.config)
+		if dialErr == nil {
 			a.rpcClient = client
 			return nil
 		}
+		err = dialErr
 
 		// Calculate the backoff delay with a cap at maxDelay
 		backoffDelay := baseDelay * time.Duration(math.Pow(2, float64(i)))

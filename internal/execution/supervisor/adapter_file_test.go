@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -75,6 +76,8 @@ func TestFileAdapter_Send(t *testing.T) {
 	assert.ErrorIs(t, err, os.ErrNotExist)
 	_, err = os.Stat(responseFileName)
 	assert.ErrorIs(t, err, os.ErrNotExist)
+	_, err = os.Stat(filepath.Dir(requestFileName))
+	assert.ErrorIs(t, err, os.ErrNotExist)
 }
 
 func TestFileAdapter_Send_ReturnsStartError(t *testing.T) {
@@ -124,12 +127,14 @@ func TestFileAdapter_Send_ReturnsInvalidDataError(t *testing.T) {
 
 	ctx := context.Background()
 	data := map[string]any{"foo": make(chan int)}
+	entriesBefore := fileAdapterWorkingDirectoryEntries(t)
 
 	res, err := a.Send(ctx, "test", data, 0)
 	assert.Error(t, err)
 	assert.Nil(t, res)
 
 	w.AssertNotCalled(t, "Start")
+	assert.Equal(t, entriesBefore, fileAdapterWorkingDirectoryEntries(t))
 }
 
 func createFileAdapter(t *testing.T) (*fileAdapter, *worker.MockWorker) {
@@ -145,4 +150,20 @@ func createFileAdapter(t *testing.T) (*fileAdapter, *worker.MockWorker) {
 	}
 
 	return adapter, w
+}
+
+func fileAdapterWorkingDirectoryEntries(t *testing.T) []string {
+	t.Helper()
+
+	entries, err := os.ReadDir(filepath.Join(os.TempDir(), "shimmy"))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	assert.NoError(t, err)
+
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	return names
 }

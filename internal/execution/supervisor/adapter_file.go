@@ -87,6 +87,11 @@ func (a *fileAdapter) Send(
 	if err != nil {
 		return nil, fmt.Errorf("error creating temp dir: %w", err)
 	}
+	defer func() {
+		if err := os.RemoveAll(tmpPath); err != nil {
+			a.log.Error("failed to remove request working dir", zap.Error(err))
+		}
+	}()
 
 	// create temp files for request and response data
 	reqFile, err := os.CreateTemp(tmpPath, "request-data-*")

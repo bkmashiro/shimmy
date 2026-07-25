@@ -37,6 +37,50 @@ type fileAdapter struct {
 
 var _ Adapter = (*fileAdapter)(nil)
 
+const (
+	maxFileAdapterStdoutBytes        = 64 << 10
+	fileAdapterStdoutTruncatedMarker = "[... stdout truncated ...]\n"
+)
+
+type boundedLogBuffer struct {
+	limit     int
+	truncated bool
+	buffer    bytes.Buffer
+}
+
+func (b *boundedLogBuffer) Write(value []byte) (int, error) {
+	originalLength := len(value)
+	if b.limit <= 0 {
+		b.truncated = b.truncated || originalLength > 0
+		return originalLength, nil
+	}
+	if originalLength >= b.limit {
+		b.truncated = b.truncated || b.buffer.Len() > 0 || originalLength > b.limit
+		b.buffer.Reset()
+		_, _ = b.buffer.Write(value[originalLength-b.limit:])
+		return originalLength, nil
+	}
+	if overflow := b.buffer.Len() + originalLength - b.limit; overflow > 0 {
+		b.truncated = true
+		current := append([]byte(nil), b.buffer.Bytes()[overflow:]...)
+		b.buffer.Reset()
+		_, _ = b.buffer.Write(current)
+	}
+	_, _ = b.buffer.Write(value)
+	return originalLength, nil
+}
+
+func (b *boundedLogBuffer) Len() int {
+	return b.buffer.Len()
+}
+
+func (b *boundedLogBuffer) String() string {
+	if b.truncated {
+		return fileAdapterStdoutTruncatedMarker + b.buffer.String()
+	}
+	return b.buffer.String()
+}
+
 func newFileAdapter(
 	workerFactory AdapterWorkerFactoryFn,
 	log *zap.Logger,
@@ -173,8 +217,9 @@ func (a *fileAdapter) Send(
 	go func() {
 		defer stdoutWg.Done()
 
-		// capture stdout
-		var buf bytes.Buffer
+		// Drain stdout completely so the worker cannot block, but retain only a
+		// bounded diagnostic tail in Host memory.
+		buf := boundedLogBuffer{limit: maxFileAdapterStdoutBytes}
 		_, err := io.Copy(&buf, pipe)
 		if err != nil && err != io.EOF {
 			a.log.Warn("failed to read from stdout",

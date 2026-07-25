@@ -24,6 +24,20 @@ func TestFileAdapter_Start_DoesNotStartWorker(t *testing.T) {
 	w.AssertNotCalled(t, "Start")
 }
 
+func TestBoundedLogBuffer_KeepsTailAndMarksTruncation(t *testing.T) {
+	buffer := boundedLogBuffer{limit: 8}
+
+	n, err := buffer.Write([]byte("12345"))
+	assert.NoError(t, err)
+	assert.Equal(t, 5, n)
+	n, err = buffer.Write([]byte("67890"))
+	assert.NoError(t, err)
+	assert.Equal(t, 5, n)
+
+	assert.Equal(t, 8, buffer.Len())
+	assert.Equal(t, fileAdapterStdoutTruncatedMarker+"34567890", buffer.String())
+}
+
 func TestFileAdapter_Stop_DoesNotStopWorker(t *testing.T) {
 	a, w := createFileAdapter(t)
 

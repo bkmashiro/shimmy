@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   compose-lanes:
-    name: Generic / reactor consumer / Pyodide / DBI
+    name: Generic / Agent Python fresh / Pyodide / DBI
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:

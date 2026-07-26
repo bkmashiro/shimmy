@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/gorilla/websocket"
 )
@@ -39,9 +40,14 @@ type rpcError struct {
 }
 
 type evaluatorResult struct {
-	IsCorrect bool `json:"is_correct"`
-	Echo      any  `json:"echo"`
+	IsCorrect            bool   `json:"is_correct"`
+	Echo                 any    `json:"echo"`
+	PID                  int    `json:"pid,omitempty"`
+	BootID               string `json:"boot_id,omitempty"`
+	GuestInvocationCount uint64 `json:"guest_invocation_count,omitempty"`
 }
+
+var evalInvocationCount atomic.Uint64
 
 type evaluatorHealth struct {
 	Status string `json:"status"`
@@ -78,7 +84,13 @@ func evaluateRequest(request rpcRequest) rpcResponse {
 		if len(request.Params) > 0 && len(request.Params[0]) > 0 {
 			echo = request.Params[0]
 		}
-		response.Result = evaluatorResult{IsCorrect: true, Echo: echo}
+		result := evaluatorResult{IsCorrect: true, Echo: echo}
+		if os.Getenv("SHIMMY_RPC_FIXTURE_LIFECYCLE_EVIDENCE") == "true" {
+			result.PID = os.Getpid()
+			result.BootID = currentBootID()
+			result.GuestInvocationCount = evalInvocationCount.Add(1)
+		}
+		response.Result = result
 	case "healthcheck":
 		response.Result = evaluatorHealth{Status: "ok", PID: os.Getpid(), BootID: currentBootID()}
 	default:

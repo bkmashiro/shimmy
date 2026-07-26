@@ -9,8 +9,10 @@ on:
       - .github/workflows/bench-runtime-lanes.yml
       - demo/compose/**
       - experiments/qemu-fallback/**
+      - internal/execution/supervisor/**
       - scripts/benchmark-runtime-lanes.py
       - scripts/tests/test_benchmark_runtime_lanes.py
+      - scripts/tests/test_benchmark_qemu_rpc_hot_reset.py
       - build/python-reactor/**
 
 permissions:
@@ -114,7 +116,8 @@ jobs:
       - name: Validate benchmark contract and runner
         run: |
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest \
-            scripts.tests.test_benchmark_runtime_lanes -v
+            scripts.tests.test_benchmark_runtime_lanes \
+            scripts.tests.test_benchmark_qemu_rpc_hot_reset -v
           bash -n experiments/qemu-fallback/benchmark-ci-file.sh
 
       - name: Record runner environment
@@ -148,7 +151,8 @@ jobs:
             --artifact-dir "${{ github.workspace }}/artifacts/qemu-fallback" \
             --bin-dir "${{ runner.temp }}/qemu-runtime-lane-bench" \
             --output "${{ github.workspace }}/artifacts/runtime-lane-bench/qemu-rpc-prewarm.json" \
-            --repeated-count 3
+            --repeated-count 3 \
+            --eager-interarrival-seconds 30
 
       - name: Upload QEMU evidence
         if: always()

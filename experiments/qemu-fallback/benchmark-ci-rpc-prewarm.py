@@ -140,6 +140,39 @@ def measure_requests(port: int, repeated_count: int, timeout: float) -> Dict[str
     return {"first_ns": first_ns, "repeated_ns": repeated_ns, "responses": responses}
 
 
+def measure_eager_requests(
+    port: int,
+    repeated_count: int,
+    timeout: float,
+    interarrival_seconds: float,
+    *,
+    sleeper=time.sleep,
+    evaluate=timed_eval,
+) -> Dict[str, Any]:
+    interval_ns = int(interarrival_seconds * 1_000_000_000)
+    sleeper(interarrival_seconds)
+    first_ns, first_response = evaluate(port, 0, timeout)
+
+    # No delay here: this sample exposes the remaining stop/refill/boot wait.
+    immediate_ns, immediate_response = evaluate(port, 1, timeout)
+
+    later_ns: List[int] = []
+    responses = [first_response, immediate_response]
+    for sequence in range(2, repeated_count + 2):
+        sleeper(interarrival_seconds)
+        elapsed, response = evaluate(port, sequence, timeout)
+        later_ns.append(elapsed)
+        responses.append(response)
+    return {
+        "startup_interarrival_ns": interval_ns,
+        "first_ready_ns": first_ns,
+        "immediate_next_ns": immediate_ns,
+        "later_interarrival_ns": interval_ns,
+        "later_ready_ns": later_ns,
+        "responses": responses,
+    }
+
+
 def guest_boot_id(port: int, timeout: float) -> str:
     response = http_json(port, "healthcheck", {}, timeout)
     if response.get("command") != "healthcheck":
@@ -230,9 +263,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--native-port", type=int, default=18480)
     parser.add_argument("--persistent-port", type=int, default=18481)
     parser.add_argument("--lazy-port", type=int, default=18482)
+    parser.add_argument("--eager-port", type=int, default=18483)
+    parser.add_argument("--eager-interarrival-seconds", type=float, default=30.0)
     args = parser.parse_args(argv)
     if args.repeated_count < 1 or args.repeated_count > 10:
         parser.error("--repeated-count must be in [1,10]")
+    if args.eager_interarrival_seconds <= 0 or args.eager_interarrival_seconds > 120:
+        parser.error("--eager-interarrival-seconds must be in (0,120]")
     return args
 
 
@@ -329,10 +366,52 @@ def main(argv: Sequence[str] | None = None) -> int:
             active_qemu.stop()
             active_qemu = None
 
+        eager_base_env = dict(base_env)
+        eager_base_env["SHIMMY_RPC_FIXTURE_LIFECYCLE_EVIDENCE"] = "true"
+        active_qemu = ManagedServer(
+            "qemu-rpc-eager",
+            [str(shimmy), "serve", "--port", str(args.eager_port)],
+            qemu_environment(
+                eager_base_env,
+                policy="eager",
+                runner=qemu_runner,
+                qemu_binary=qemu_binary,
+                artifact_dir=artifact_dir,
+            ),
+            args.eager_port,
+            bin_dir / "qemu-rpc-eager.log",
+        )
+        servers.append(active_qemu)
+        eager_liveness_ns = active_qemu.start(180)
+        eager_measurement = measure_eager_requests(
+            args.eager_port,
+            args.repeated_count,
+            180,
+            args.eager_interarrival_seconds,
+        )
+        eager_measurement["liveness_ns"] = eager_liveness_ns
+        print(
+            json.dumps(
+                {
+                    "policy": "eager",
+                    "http_liveness_ns": eager_liveness_ns,
+                    "startup_interarrival_ns": eager_measurement["startup_interarrival_ns"],
+                    "first_ready_ns": eager_measurement["first_ready_ns"],
+                    "immediate_next_ns": eager_measurement["immediate_next_ns"],
+                    "later_ready_ns": eager_measurement["later_ready_ns"],
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        active_qemu.stop()
+        active_qemu = None
+
         report = helper.build_qemu_rpc_prewarm_report(
             native=native_measurement,
             persistent=policies["off"],
             lazy=policies["lazy"],
+            eager=eager_measurement,
             manifest_digests=digests,
             qemu_version=run([qemu_binary, "--version"], cwd=repo_root).stdout.splitlines()[0],
             source_commit=run(["git", "rev-parse", "HEAD"], cwd=repo_root).stdout.strip(),
@@ -354,6 +433,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "first_request_count": 1,
                     "repeated_request_count": args.repeated_count,
                     "boot_identity_probes": "one prewarm probe and one post-request probe",
+                    "eager_startup_interarrival_seconds": args.eager_interarrival_seconds,
+                    "eager_later_interarrival_seconds": args.eager_interarrival_seconds,
+                    "eager_immediate_next_count": 1,
+                    "eager_later_ready_count": args.repeated_count,
                 },
             }
         )

@@ -184,6 +184,7 @@ def build_qemu_rpc_prewarm_report(
     native: Dict[str, Any],
     persistent: Dict[str, Any],
     lazy: Dict[str, Any],
+    eager: Dict[str, Any],
     manifest_digests: Dict[str, str],
     qemu_version: str,
     source_commit: str,
@@ -217,6 +218,34 @@ def build_qemu_rpc_prewarm_report(
     if any(boot_id in {"", "unavailable"} for boot_id in lazy_boots):
         raise ValueError("lazy boot IDs must be available and distinct")
 
+    eager_later = eager.get("later_ready_ns")
+    eager_responses = eager.get("responses")
+    if not isinstance(eager_later, list) or not eager_later:
+        raise ValueError("eager later_ready_ns must contain samples")
+    if not isinstance(eager_responses, list) or len(eager_responses) != len(eager_later) + 2:
+        raise ValueError("eager response count must equal first, immediate next, and later-ready samples")
+    eager_boots = []
+    for index, response in enumerate(eager_responses):
+        result = result_object(response)
+        if result.get("is_correct") is not True:
+            raise ValueError(f"eager response {index} is_correct must be true")
+        boot_id = result.get("boot_id")
+        if not isinstance(boot_id, str) or boot_id in {"", "unavailable"}:
+            raise ValueError(f"eager response {index} boot ID must be available")
+        if result.get("guest_invocation_count") != 1:
+            raise ValueError(f"eager response {index} must be the first invocation in a clean evaluator")
+        eager_boots.append(boot_id)
+    if len(set(eager_boots)) != len(eager_boots):
+        raise ValueError("eager boot IDs must be distinct for every served request")
+    if eager.get("startup_interarrival_ns", 0) <= 0 or eager.get("later_interarrival_ns", 0) <= 0:
+        raise ValueError("eager preparation intervals must be positive")
+    if eager.get("first_ready_ns", 0) <= 0 or eager["first_ready_ns"] >= 1_000_000_000:
+        raise ValueError("eager first prepared request must complete below the 1 second ready-hit bound")
+    if eager.get("immediate_next_ns", 0) <= 0:
+        raise ValueError("eager immediate-next request must be measured")
+    if any(value <= 0 or value >= 1_000_000_000 for value in eager_later):
+        raise ValueError("eager later-ready requests must complete below the 1 second ready-hit bound")
+
     def phase(row: Dict[str, Any]) -> Dict[str, Any]:
         liveness_ns = row["liveness_ns"]
         prewarm_ns = row["prewarm_probe_ns"]
@@ -231,8 +260,8 @@ def build_qemu_rpc_prewarm_report(
             "response_batch_sha256": response_digest({"responses": row["responses"]}),
         }
 
-    report = {
-        "schema": "shimmy-qemu-rpc-prewarm-benchmark/v2",
+    return {
+        "schema": "shimmy-qemu-rpc-prewarm-benchmark/v3",
         "status": "PASS",
         "source_commit": source_commit,
         "accelerator": "tcg",
@@ -240,6 +269,7 @@ def build_qemu_rpc_prewarm_report(
         "transport": "stdio",
         "request_concurrency": 1,
         "response_parity": True,
+        "eager_response_contract": True,
         "http_health_semantics": "process HTTP liveness only; it does not prove that the guest runtime is ready",
         "prewarm_probe": "public HTTP request with Command: healthcheck routed through the selected evaluator",
         "manifest_digests": manifest_digests,
@@ -276,16 +306,28 @@ def build_qemu_rpc_prewarm_report(
                     "distinct": True,
                 },
             },
-        },
-        "unsupported_policies": {
             "eager": {
-                "status": "rejected",
-                "reason": "requires a post-response Lambda runtime loop, which is not enabled",
-            }
+                "reset_policy": "eager",
+                "lifecycle": "each QEMU VM serves exactly one request; old VM exit precedes background spawn of one clean replacement",
+                "initialization_placement": "replacement boot overlaps the configured idle interval after the prior evaluation",
+                "http_liveness_ns": eager["liveness_ns"],
+                "startup_preparation_interval_ns": eager["startup_interarrival_ns"],
+                "first_ready_request_ns": eager["first_ready_ns"],
+                "immediate_next_request_ns": eager["immediate_next_ns"],
+                "later_interarrival_ns": eager["later_interarrival_ns"],
+                "later_ready_requests": summarize_ns(eager_later),
+                "ready_hit_upper_bound_ns": 1_000_000_000,
+                "fresh_state_proven": True,
+                "boot_identity": {
+                    "per_request": eager_boots,
+                    "all_distinct": True,
+                },
+                "response_batch_sha256": response_digest({"responses": eager_responses}),
+            },
         },
-        "comparison_policy": "compare explicit prewarm cost, first request after prewarm, and repeated requests separately; lazy prewarm is intentionally ineffective",
+        "deployment_boundary": "eager is qualified here only for a continuously running non-Lambda HTTP service; Lambda still rejects it without an owned Runtime API response/next loop",
+        "comparison_policy": "compare persistent reuse, invocation-scoped fresh boot, eager immediate-next wait, and eager later ready-hit separately",
     }
-    return report
 
 
 def build_lane_report(

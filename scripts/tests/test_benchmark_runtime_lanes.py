@@ -142,6 +142,23 @@ class QEMURPCPrewarmReportTests(unittest.TestCase):
             "result": {"is_correct": True, "echo": {"params": {"sequence": sequence}}},
         }
 
+    def eager(self):
+        responses = []
+        for index, boot_id in enumerate(("eager-a", "eager-b", "eager-c", "eager-d", "eager-e")):
+            response = self.response(index)
+            response["result"]["boot_id"] = boot_id
+            response["result"]["guest_invocation_count"] = 1
+            responses.append(response)
+        return {
+            "liveness_ns": 10,
+            "startup_interarrival_ns": 30_000_000_000,
+            "first_ready_ns": 7,
+            "immediate_next_ns": 1200,
+            "later_interarrival_ns": 30_000_000_000,
+            "later_ready_ns": [8, 9, 10],
+            "responses": responses,
+        }
+
     def test_report_proves_prewarm_effectiveness_by_boot_identity(self):
         responses = [self.response(index) for index in range(4)]
         report = module.build_qemu_rpc_prewarm_report(
@@ -168,6 +185,7 @@ class QEMURPCPrewarmReportTests(unittest.TestCase):
                 "responses": responses,
                 "boot_ids": ["boot-b", "boot-c"],
             },
+            eager=self.eager(),
             manifest_digests={"kernel": "a" * 64, "initrd": "b" * 64, "rootfs": "c" * 64},
             qemu_version="QEMU emulator version 10.0",
             source_commit="d" * 40,
@@ -176,7 +194,9 @@ class QEMURPCPrewarmReportTests(unittest.TestCase):
         self.assertEqual(report["policies"]["off"]["repeated_requests"]["median_ns"], 8)
         self.assertTrue(report["policies"]["off"]["prewarm_effective"])
         self.assertFalse(report["policies"]["lazy"]["prewarm_effective"])
-        self.assertEqual(report["unsupported_policies"]["eager"]["status"], "rejected")
+        self.assertEqual(report["schema"], "shimmy-qemu-rpc-prewarm-benchmark/v3")
+        self.assertTrue(report["policies"]["eager"]["fresh_state_proven"])
+        self.assertEqual(report["policies"]["eager"]["later_ready_requests"]["median_ns"], 9)
         self.assertTrue(report["response_parity"])
 
     def test_report_rejects_policy_response_mismatch(self):
@@ -195,6 +215,7 @@ class QEMURPCPrewarmReportTests(unittest.TestCase):
                 native=base,
                 persistent={**base, "responses": mismatch, "boot_ids": ["boot-a", "boot-a"]},
                 lazy={**base, "boot_ids": ["boot-b", "boot-c"]},
+                eager=self.eager(),
                 manifest_digests={"kernel": "a" * 64, "initrd": "b" * 64, "rootfs": "c" * 64},
                 qemu_version="QEMU emulator version 10.0",
                 source_commit="d" * 40,
@@ -214,6 +235,30 @@ class QEMURPCPrewarmReportTests(unittest.TestCase):
                 native=base,
                 persistent={**base, "boot_ids": ["boot-a", "boot-b"]},
                 lazy={**base, "boot_ids": ["boot-c", "boot-d"]},
+                eager=self.eager(),
+                manifest_digests={"kernel": "a" * 64, "initrd": "b" * 64, "rootfs": "c" * 64},
+                qemu_version="QEMU emulator version 10.0",
+                source_commit="d" * 40,
+            )
+
+    def test_report_rejects_eager_state_reuse_or_unready_later_sample(self):
+        responses = [self.response(index) for index in range(4)]
+        base = {
+            "liveness_ns": 1,
+            "prewarm_probe_ns": 2,
+            "first_ns": 3,
+            "repeated_ns": [4, 5, 6],
+            "responses": responses,
+        }
+        eager = self.eager()
+        eager["responses"][1]["result"]["boot_id"] = "eager-a"
+        eager["later_ready_ns"][1] = 1_000_000_000
+        with self.assertRaisesRegex(ValueError, "eager"):
+            module.build_qemu_rpc_prewarm_report(
+                native=base,
+                persistent={**base, "boot_ids": ["boot-a", "boot-a"]},
+                lazy={**base, "boot_ids": ["boot-b", "boot-c"]},
+                eager=eager,
                 manifest_digests={"kernel": "a" * 64, "initrd": "b" * 64, "rootfs": "c" * 64},
                 qemu_version="QEMU emulator version 10.0",
                 source_commit="d" * 40,

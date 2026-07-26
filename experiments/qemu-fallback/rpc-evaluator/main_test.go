@@ -127,6 +127,25 @@ func TestEvaluateHealthReportsProcessAndBoot(t *testing.T) {
 	}
 }
 
+func TestEvaluateLifecycleEvidenceIsOptInAndCountsWithinOneEvaluator(t *testing.T) {
+	t.Setenv("SHIMMY_RPC_FIXTURE_LIFECYCLE_EVIDENCE", "true")
+	evalInvocationCount.Store(0)
+	for index := uint64(1); index <= 2; index++ {
+		response := evaluateRequest(rpcRequest{
+			JSONRPC: "2.0",
+			ID:      json.RawMessage("10"),
+			Method:  "eval",
+		})
+		result, ok := response.Result.(evaluatorResult)
+		if !ok {
+			t.Fatalf("eval result = %#v", response.Result)
+		}
+		if result.GuestInvocationCount != index || result.PID <= 0 || result.BootID == "" {
+			t.Fatalf("lifecycle evidence %d = %#v", index, result)
+		}
+	}
+}
+
 func TestServeOneRejectsUnknownMethodWithJSONRPCError(t *testing.T) {
 	request := []byte(`{"jsonrpc":"2.0","id":8,"method":"unknown","params":[]}`)
 	var input bytes.Buffer

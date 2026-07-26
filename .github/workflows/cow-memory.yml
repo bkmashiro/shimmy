@@ -43,6 +43,12 @@ jobs:
             -run='^(TestCow|TestReactorPython(PoolSize|InitConcurrency|Flyweight|DispatcherPartialStart)|TestBorrowedReactorPythonRunner)' \
             -count=1 -v -timeout=120s
 
+      - name: Run explicit snapshot strategy correctness tests
+        run: |
+          go test -tags=wasm_experimental ./internal/execution/wasm \
+            -run='^(TestSoftDirtyStrategy|TestMprotectStrategy)' \
+            -count=1 -v -timeout=120s
+
   python-reactor-cow:
     name: Python reactor prepared-image proof
     if: github.event_name == 'workflow_dispatch' && inputs.python_reactor

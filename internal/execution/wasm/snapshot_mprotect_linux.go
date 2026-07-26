@@ -177,6 +177,7 @@ type MprotectStrategy struct {
 	pageSize  int
 	pageCount int
 	snapshot  []byte
+	closed    bool
 	// pinner keeps the WASM linear memory backing array pinned so the GC
 	// cannot move it while the C signal handler references the address. (C-1 fix)
 	pinner runtime.Pinner
@@ -358,10 +359,23 @@ func (s *MprotectStrategy) forceDirtyNPages(count int) {
 // Close deactivates fault tracking, removes the SIGSEGV handler, and restores
 // full read-write access.
 func (s *MprotectStrategy) Close() error {
+	if s == nil {
+		return nil
+	}
+	mprotectMu.Lock()
+	defer mprotectMu.Unlock()
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+
 	C.mprotect_set_active(0)
 	C.mprotect_remove()
 	C.mprotect_rw(C.uint64_t(uintptr(s.basePtr)), C.uint64_t(s.memSize))
-	s.pinner.Unpin() // C-1 fix: release GC pin
+	s.pinner.Unpin()            // C-1 fix: release GC pin
 	mprotectActiveCount.Add(-1) // C-3 fix: allow a new instance
+	s.snapshot = nil
+	s.basePtr = nil
+	s.memSize = 0
 	return nil
 }

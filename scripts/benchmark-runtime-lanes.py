@@ -179,6 +179,99 @@ def build_qemu_report(
     }
 
 
+def build_qemu_rpc_prewarm_report(
+    *,
+    native: Dict[str, Any],
+    persistent: Dict[str, Any],
+    lazy: Dict[str, Any],
+    manifest_digests: Dict[str, str],
+    qemu_version: str,
+    source_commit: str,
+) -> Dict[str, Any]:
+    lanes = {"native": native, "off": persistent, "lazy": lazy}
+    for name, row in lanes.items():
+        repeated = row.get("repeated_ns")
+        responses = row.get("responses")
+        if not isinstance(repeated, list) or not repeated:
+            raise ValueError(f"{name} repeated_ns must contain samples")
+        if not isinstance(responses, list) or len(responses) != len(repeated) + 1:
+            raise ValueError(f"{name} response count must equal first plus repeated samples")
+        for index, response in enumerate(responses):
+            if result_object(response).get("is_correct") is not True:
+                raise ValueError(f"{name} response {index} is_correct must be true")
+
+    native_responses = native["responses"]
+    for name, row in (("off", persistent), ("lazy", lazy)):
+        for index, (expected, observed) in enumerate(zip(native_responses, row["responses"])):
+            if expected != observed:
+                raise ValueError(f"{name} response mismatch at sample {index}")
+
+    persistent_boots = persistent.get("boot_ids")
+    lazy_boots = lazy.get("boot_ids")
+    if not isinstance(persistent_boots, list) or len(persistent_boots) < 2 or len(set(persistent_boots)) != 1:
+        raise ValueError("persistent boot IDs must be available and identical")
+    if persistent_boots[0] in {"", "unavailable"}:
+        raise ValueError("persistent boot IDs must be available and identical")
+    if not isinstance(lazy_boots, list) or len(lazy_boots) < 2 or len(set(lazy_boots)) != len(lazy_boots):
+        raise ValueError("lazy boot IDs must be available and distinct")
+    if any(boot_id in {"", "unavailable"} for boot_id in lazy_boots):
+        raise ValueError("lazy boot IDs must be available and distinct")
+
+    def phase(row: Dict[str, Any]) -> Dict[str, Any]:
+        ready_ns = row["ready_ns"]
+        first_ns = row["first_ns"]
+        return {
+            "server_ready_ns": ready_ns,
+            "first_request_ns": first_ns,
+            "ready_plus_first_ns": ready_ns + first_ns,
+            "repeated_requests": summarize_ns(row["repeated_ns"]),
+            "response_batch_sha256": response_digest({"responses": row["responses"]}),
+        }
+
+    report = {
+        "schema": "shimmy-qemu-rpc-prewarm-benchmark/v1",
+        "status": "PASS",
+        "source_commit": source_commit,
+        "accelerator": "tcg",
+        "interface": "rpc",
+        "transport": "stdio",
+        "request_concurrency": 1,
+        "response_parity": True,
+        "manifest_digests": manifest_digests,
+        "qemu_version": qemu_version,
+        "native": {
+            **phase(native),
+            "lifecycle": "persistent native RPC evaluator started before readiness",
+        },
+        "policies": {
+            "off": {
+                **phase(persistent),
+                "reset_policy": "off",
+                "lifecycle": "persistent QEMU RPC VM booted before readiness and reused across requests",
+                "initialization_placement": "guest boot is charged to server readiness",
+                "repeated_request_semantics": "warm requests in the same guest VM",
+                "boot_identity": {"samples": persistent_boots, "same": True},
+            },
+            "lazy": {
+                **phase(lazy),
+                "reset_policy": "lazy",
+                "lifecycle": "invocation-scoped QEMU RPC VM booted and destroyed for every request",
+                "initialization_placement": "guest boot is charged to every request, not server readiness",
+                "repeated_request_semantics": "repeated fresh-VM requests; not a warm path",
+                "boot_identity": {"samples": lazy_boots, "distinct": True},
+            },
+        },
+        "unsupported_policies": {
+            "eager": {
+                "status": "rejected",
+                "reason": "requires a post-response Lambda runtime loop, which is not enabled",
+            }
+        },
+        "comparison_policy": "compare ready-plus-first for one-request instances and repeated requests separately; lazy repeated requests are fresh, not warm",
+    }
+    return report
+
+
 def build_lane_report(
     *,
     lane: str,

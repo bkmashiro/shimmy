@@ -142,6 +142,14 @@ jobs:
           REQUEST_COUNT: "3"
         run: experiments/qemu-fallback/benchmark-ci-file.sh
 
+      - name: Benchmark QEMU RPC persistent prewarm and lazy reset
+        run: |
+          experiments/qemu-fallback/benchmark-ci-rpc-prewarm.py \
+            --artifact-dir "${{ github.workspace }}/artifacts/qemu-fallback" \
+            --bin-dir "${{ runner.temp }}/qemu-runtime-lane-bench" \
+            --output "${{ github.workspace }}/artifacts/runtime-lane-bench/qemu-rpc-prewarm.json" \
+            --repeated-count 3
+
       - name: Upload QEMU evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -150,7 +158,6 @@ jobs:
           path: |
             artifacts/runtime-lane-bench/
             artifacts/qemu-fallback/manifest.json
-            ${{ runner.temp }}/qemu-runtime-lane-bench/native.log
-            ${{ runner.temp }}/qemu-runtime-lane-bench/qemu.log
+            ${{ runner.temp }}/qemu-runtime-lane-bench/*.log
           if-no-files-found: error
           retention-days: 90

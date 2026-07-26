@@ -135,6 +135,71 @@ class QEMUReportTests(unittest.TestCase):
             )
 
 
+class QEMURPCPrewarmReportTests(unittest.TestCase):
+    def response(self, sequence):
+        return {
+            "command": "eval",
+            "result": {"is_correct": True, "echo": {"params": {"sequence": sequence}}},
+        }
+
+    def test_report_proves_persistent_and_lazy_boot_identity(self):
+        responses = [self.response(index) for index in range(4)]
+        report = module.build_qemu_rpc_prewarm_report(
+            native={"ready_ns": 1, "first_ns": 2, "repeated_ns": [3, 4, 5], "responses": responses},
+            persistent={
+                "ready_ns": 100,
+                "first_ns": 6,
+                "repeated_ns": [7, 8, 9],
+                "responses": responses,
+                "boot_ids": ["boot-a", "boot-a"],
+            },
+            lazy={
+                "ready_ns": 10,
+                "first_ns": 1000,
+                "repeated_ns": [1100, 1200, 1300],
+                "responses": responses,
+                "boot_ids": ["boot-b", "boot-c"],
+            },
+            manifest_digests={"kernel": "a" * 64, "initrd": "b" * 64, "rootfs": "c" * 64},
+            qemu_version="QEMU emulator version 10.0",
+            source_commit="d" * 40,
+        )
+        self.assertEqual(report["policies"]["off"]["ready_plus_first_ns"], 106)
+        self.assertEqual(report["policies"]["off"]["repeated_requests"]["median_ns"], 8)
+        self.assertTrue(report["policies"]["off"]["boot_identity"]["same"])
+        self.assertTrue(report["policies"]["lazy"]["boot_identity"]["distinct"])
+        self.assertEqual(report["unsupported_policies"]["eager"]["status"], "rejected")
+        self.assertTrue(report["response_parity"])
+
+    def test_report_rejects_policy_response_mismatch(self):
+        responses = [self.response(index) for index in range(4)]
+        mismatch = list(responses)
+        mismatch[2] = self.response(99)
+        base = {"ready_ns": 1, "first_ns": 2, "repeated_ns": [3, 4, 5], "responses": responses}
+        with self.assertRaisesRegex(ValueError, "response mismatch"):
+            module.build_qemu_rpc_prewarm_report(
+                native=base,
+                persistent={**base, "responses": mismatch, "boot_ids": ["boot-a", "boot-a"]},
+                lazy={**base, "boot_ids": ["boot-b", "boot-c"]},
+                manifest_digests={"kernel": "a" * 64, "initrd": "b" * 64, "rootfs": "c" * 64},
+                qemu_version="QEMU emulator version 10.0",
+                source_commit="d" * 40,
+            )
+
+    def test_report_rejects_wrong_boot_lifecycle(self):
+        responses = [self.response(index) for index in range(4)]
+        base = {"ready_ns": 1, "first_ns": 2, "repeated_ns": [3, 4, 5], "responses": responses}
+        with self.assertRaisesRegex(ValueError, "persistent boot IDs"):
+            module.build_qemu_rpc_prewarm_report(
+                native=base,
+                persistent={**base, "boot_ids": ["boot-a", "boot-b"]},
+                lazy={**base, "boot_ids": ["boot-c", "boot-d"]},
+                manifest_digests={"kernel": "a" * 64, "initrd": "b" * 64, "rootfs": "c" * 64},
+                qemu_version="QEMU emulator version 10.0",
+                source_commit="d" * 40,
+            )
+
+
 class ReportContractTests(unittest.TestCase):
     def test_lane_report_separates_ready_first_and_steady(self):
         report = module.build_lane_report(

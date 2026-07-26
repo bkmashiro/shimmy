@@ -58,8 +58,7 @@ type AgentPythonDispatcher struct {
 	preparedMisses  atomic.Uint64
 	preparedRefills atomic.Uint64
 
-	runCounter  atomic.Uint64
-	slotCounter atomic.Uint64
+	runCounter atomic.Uint64
 }
 
 type agentPythonModuleSlot struct {
@@ -482,10 +481,7 @@ func (d *AgentPythonDispatcher) newPreparedModuleSlot(ctx context.Context, takeS
 	var cowSupport *cowRuntimeSupport
 	if takeSnapshot && d.cfg.SnapshotMode == "cow" {
 		cowImage = newCowImageCoordinator()
-		cowSupport = newCowRuntimeSupport(
-			fmt.Sprintf("agent-python-slot-%d", d.slotCounter.Add(1)),
-			cowImage,
-		)
+		cowSupport = newCowRuntimeSupport("cow", cowImage)
 		if cowSupport == nil {
 			_ = cowImage.Close()
 			cowImage = nil

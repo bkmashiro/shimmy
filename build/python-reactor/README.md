@@ -1,19 +1,36 @@
-# Historical python-reactor build notes
+# Agent Python Runtime bundle
 
-This directory is no longer the source of truth for building `python-reactor.wasm`.
+This directory contains Shimmy's pinned, consumer-verified Agent Python Runtime
+`numpy-core` bundle.
 
-Replacement source of truth:
+## Canonical files
 
-- Repository: `bkmashiro/webassembly-language-runtimes`
-- Workflow: `.github/workflows/build-python-reactor.yml`
-- Frozen historical pin: `v1.0.14` (not approved for new deployments)
-- Artifact SHA256: `78dcbb6d673351c0d3b776c42d2fb93b6f638cdc714d58072dece4b115edaa72`
-- Historical exports: `py_init`, `py_prepare`, `evaluate`, `py_exec`, `alloc`, `dealloc`, `resp_buf`, `resp_len`
+```text
+artifacts/agent-python-runtime-numpy-core.wasm
+artifacts/manifest.json
+artifacts/SHA256SUMS
+artifacts/sbom.spdx.json
+artifacts/THIRD_PARTY_NOTICES.md
+artifacts/extension-selection.json
+```
 
-The files in this directory are retained only as historical/reference material from the earlier in-repo CPython 3.12 reactor experiment:
+Verify the complete bundle with:
 
-- `py_reactor.c` — older local reactor wrapper source.
-- `ci-build.yml` — older workflow sketch against vmware-labs CPython 3.12/WASI SDK 20 assets.
-- `artifacts/python-reactor.wasm` — historical Git LFS compatibility fixture; it is not a deployment source.
+```bash
+cd build/python-reactor/artifacts
+sha256sum --check SHA256SUMS
+```
 
-Do not update `ci-build.yml` or `py_reactor.c` when changing the real reactor artifact. Build a clean replacement in `webassembly-language-runtimes`, publish an immutable tagged release, and provide its SHA-256, exports, package/API manifest, no-polyfill evidence, and raw smoke results. Only after those gates pass should this repository update its pin, restore automatic reactor CI, or replace a 200+ MiB compatibility fixture required by the new ABI.
+The manifest binds the artifact to producer commit
+`76b49158cc6c4824491561531bfe7e34872cb820`, ABI v1, the `numpy-core` profile,
+and SHA-256
+`90c27951b2d8c2c7a8b42705b365cb4231c6dad207aad5260d55d2f9a85f1034`.
+
+Shimmy does not build the CPython/NumPy artifact in this directory. Artifact
+production remains isolated in `bkmashiro/agent-python-runtime`; this repository
+owns the Host adapter, manifest verification, protocol compatibility, and final
+consumer E2E gates.
+
+`py_reactor.c`, `ci-build.yml`, and `artifacts/python-reactor.wasm` are legacy
+CPython 3.12 experiment files. They remain only until the new path passes remote
+CI and are not reachable from the production profile router.

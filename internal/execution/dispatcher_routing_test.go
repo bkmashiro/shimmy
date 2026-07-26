@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -77,14 +76,7 @@ func TestNewDispatcher_Wasm_PythonReactorProfile_RoutesToReactorPython(t *testin
 	})
 
 	require.Error(t, err)
-	if runtime.GOOS != "linux" {
-		assert.Contains(t, err.Error(), "Linux")
-		return
-	}
-	assert.True(t,
-		strings.Contains(err.Error(), "PythonScriptPath") || strings.Contains(err.Error(), "ModulePath must be set"),
-		"expected reactor-python validation error (missing script/wasm path)",
-	)
+	assert.Contains(t, err.Error(), "PythonScriptPath")
 }
 
 func TestNewDispatcher_Wasm_UnknownProfileErrorsWithValidValues(t *testing.T) {
@@ -105,6 +97,7 @@ func TestNewDispatcher_Wasm_UnknownProfileErrorsWithValidValues(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `unsupported FUNCTION_WASM_PROFILE "ultra-bad-profile"`)
 	assert.Contains(t, err.Error(), "generic")
+	assert.Contains(t, err.Error(), "agent-python")
 	assert.Contains(t, err.Error(), "python-reactor")
 	assert.Contains(t, err.Error(), "reactor-python")
 }
@@ -125,10 +118,6 @@ func TestNewDispatcher_ReactorPythonInterface_IgnoresWasmProfile(t *testing.T) {
 	})
 
 	require.Error(t, err)
-	if runtime.GOOS != "linux" {
-		assert.Contains(t, err.Error(), "Linux")
-		return
-	}
 	assert.NotContains(t, err.Error(), "unsupported FUNCTION_WASM_PROFILE")
 	assert.Contains(t, err.Error(), "PythonScriptPath")
 }
@@ -197,11 +186,6 @@ func TestNewDispatcher_ReactorPython_ExplicitInterface_EmptyModulePath(t *testin
 	})
 
 	require.Error(t, err, "reactor-python with empty ModulePath must fail")
-	if runtime.GOOS != "linux" {
-		assert.Contains(t, err.Error(), "Linux",
-			"non-Linux hosts should fail before reactor-python config validation")
-		return
-	}
 	assert.Contains(t, err.Error(), "ModulePath",
 		"error should be the reactor-python WASM config error, not a node/pyodide error")
 }
@@ -259,11 +243,7 @@ func TestNewDispatcher_ReactorPython_BundlesLambdaFeedbackPackageAtStartup(t *te
 	})
 
 	require.Error(t, err)
-	if runtime.GOOS != "linux" {
-		assert.Contains(t, err.Error(), "Linux")
-	} else {
-		assert.Contains(t, err.Error(), "ModulePath")
-	}
+	assert.Contains(t, err.Error(), "ModulePath")
 	require.FileExists(t, out, "reactor package mode should generate the bundle before reactor startup")
 	argsBytes, readErr := os.ReadFile(logPath)
 	require.NoError(t, readErr)
@@ -305,11 +285,7 @@ func TestNewDispatcher_ReactorPython_DefaultsLambdaFeedbackEntrypoints(t *testin
 	})
 
 	require.Error(t, err)
-	if runtime.GOOS != "linux" {
-		assert.Contains(t, err.Error(), "Linux")
-	} else {
-		assert.Contains(t, err.Error(), "ModulePath")
-	}
+	assert.Contains(t, err.Error(), "ModulePath")
 	require.FileExists(t, out, "reactor package mode should generate the bundle before reactor startup")
 	argsBytes, readErr := os.ReadFile(logPath)
 	require.NoError(t, readErr)
@@ -354,11 +330,7 @@ func TestNewDispatcher_ReactorPython_LoadsLambdaFeedbackConfigFileWithEnvOverrid
 	})
 
 	require.Error(t, err)
-	if runtime.GOOS != "linux" {
-		assert.Contains(t, err.Error(), "Linux")
-	} else {
-		assert.Contains(t, err.Error(), "ModulePath")
-	}
+	assert.Contains(t, err.Error(), "ModulePath")
 	require.FileExists(t, out, "reactor package mode should generate the bundle before reactor startup")
 	argsBytes, readErr := os.ReadFile(logPath)
 	require.NoError(t, readErr)
@@ -391,11 +363,6 @@ func TestNewDispatcher_ReactorPython_EmptyScriptPath(t *testing.T) {
 	})
 
 	require.Error(t, err, "reactor-python with no script path must fail")
-	if runtime.GOOS != "linux" {
-		assert.Contains(t, err.Error(), "Linux",
-			"non-Linux hosts should fail before reactor-python script validation")
-		return
-	}
 	assert.Contains(t, err.Error(), "PythonScriptPath",
 		"empty script path should fall through to reactor-python, not Pyodide")
 }

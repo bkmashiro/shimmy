@@ -19,6 +19,11 @@ type Config struct {
 	// .wasm file path when FUNCTION_INTERFACE=wasm).
 	ModulePath string `conf:"cmd"`
 
+	// AgentPythonManifestPath binds the clean Python reactor artifact to its
+	// producer manifest. When empty, the agent-python dispatcher reads
+	// manifest.json next to ModulePath. FUNCTION_WASM_MANIFEST overrides it.
+	AgentPythonManifestPath string `conf:"wasm_manifest"`
+
 	// MaxInstances is the maximum number of concurrently active module
 	// instances. When the pool is exhausted requests block until a slot is
 	// available. Defaults to runtime.NumCPU() when <= 0.
@@ -158,6 +163,9 @@ func (c *Config) applyEnv() {
 	// FUNCTION_WASM_MODULE overrides FUNCTION_COMMAND as the .wasm file path.
 	if v := os.Getenv("FUNCTION_WASM_MODULE"); v != "" {
 		c.ModulePath = v
+	}
+	if v := os.Getenv("FUNCTION_WASM_MANIFEST"); v != "" {
+		c.AgentPythonManifestPath = v
 	}
 	if v := os.Getenv("FUNCTION_WASM_MAX_MEMORY_PAGES"); v != "" {
 		if n, err := strconv.ParseUint(v, 10, 32); err == nil {

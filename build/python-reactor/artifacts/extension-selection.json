@@ -1,0 +1,66 @@
+{
+  "claim": "build-time static extension selection; runtime dynamic linking is not used",
+  "link_inputs": [
+    {
+      "path": "numpy/_core/_multiarray_umath.a",
+      "role": "extension",
+      "sha256": "cfa65b3a33c0108d25dd439a8d16dfd78074d725934274f6d6468ae6a27ed970",
+      "size": 20122374
+    },
+    {
+      "path": "numpy/linalg/_umath_linalg.a",
+      "role": "extension",
+      "sha256": "68fd31fdf22e46b4a3a900d05ec3c621de0facfe298e4631654e3845224c6d9f",
+      "size": 5362344
+    },
+    {
+      "path": "numpy/_core/libnpymath.a",
+      "role": "support",
+      "sha256": "ccf16230be44d772ace02175dfb7cd3aeb6a5c36a50ea37b545ec7454777ce90",
+      "size": 183036
+    },
+    {
+      "path": "numpy/_core/libunique_hash.a",
+      "role": "support",
+      "sha256": "7a080a70dd3f4bae9690013e4759d4936eaffb18985d1b1ff8b5e22466341f9f",
+      "size": 2120
+    },
+    {
+      "path": "numpy/_core/lib_multiarray_umath_mtargets.a",
+      "role": "support",
+      "sha256": "7161a06dd7acbce936f0b3e1d81f86a24fa2153d143d8701ef37d45d8687b857",
+      "size": 14476
+    }
+  ],
+  "modules": [
+    {
+      "archive": "numpy/_core/_multiarray_umath.a",
+      "archive_sha256": "cfa65b3a33c0108d25dd439a8d16dfd78074d725934274f6d6468ae6a27ed970",
+      "archive_size": 20122374,
+      "init_symbol": "PyInit__multiarray_umath",
+      "manifest": "numpy/_core/_multiarray_umath.json",
+      "manifest_sha256": "3e59e3feed8a99c82b08762b81bf68600f73ba12c066b9ff85b42f01efd6887b",
+      "module": "numpy._core._multiarray_umath",
+      "static_inputs": [
+        "numpy/_core/libnpymath.a",
+        "numpy/_core/libunique_hash.a",
+        "numpy/_core/lib_multiarray_umath_mtargets.a"
+      ]
+    },
+    {
+      "archive": "numpy/linalg/_umath_linalg.a",
+      "archive_sha256": "68fd31fdf22e46b4a3a900d05ec3c621de0facfe298e4631654e3845224c6d9f",
+      "archive_size": 5362344,
+      "init_symbol": "PyInit__umath_linalg",
+      "manifest": "numpy/linalg/_umath_linalg.json",
+      "manifest_sha256": "5ba04de3f4775ba6d86ff32d585cc59e6e0435c6aae1a3fafa83772904b64e3d",
+      "module": "numpy.linalg._umath_linalg",
+      "static_inputs": [
+        "numpy/_core/libnpymath.a"
+      ]
+    }
+  ],
+  "package": "numpy",
+  "profile": "core",
+  "schema_version": 1
+}

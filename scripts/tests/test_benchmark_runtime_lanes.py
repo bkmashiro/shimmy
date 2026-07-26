@@ -41,10 +41,10 @@ class LaneAssertionTests(unittest.TestCase):
                 {"result": {"is_correct": True, "guest_invocation_count": 1, "snapshot_isolation_ok": False}},
             )
 
-    def test_reactor_consumer_requires_correct_result(self):
-        module.assert_lane_response("reactor-consumer", {"result": {"is_correct": True}})
+    def test_agent_python_fresh_requires_correct_result(self):
+        module.assert_lane_response("agent-python-fresh", {"result": {"is_correct": True}})
         with self.assertRaisesRegex(ValueError, "is_correct"):
-            module.assert_lane_response("reactor-consumer", {"result": {"is_correct": False}})
+            module.assert_lane_response("agent-python-fresh", {"result": {"is_correct": False}})
 
     def test_pyodide_requires_scipy_result_shape(self):
         module.assert_lane_response(
@@ -291,7 +291,7 @@ class ReportContractTests(unittest.TestCase):
 
     def test_report_is_json_serializable(self):
         report = module.build_lane_report(
-            lane="reactor-consumer",
+            lane="agent-python-fresh",
             workload="numeric tolerance",
             lifecycle="fresh guest instance per request",
             initialization_placement="artifact verified before readiness",

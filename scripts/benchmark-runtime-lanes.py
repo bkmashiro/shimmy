@@ -47,13 +47,13 @@ LANES: Dict[str, LaneSpec] = {
         initialization_placement="module compilation and pool startup occur before HTTP readiness",
         resource_limit="1 CPU / 256 MiB",
     ),
-    "reactor-consumer": LaneSpec(
+    "agent-python-fresh": LaneSpec(
         service="python-reactor",
         port=18082,
         payload={"response": "3.14159", "answer": "3.1416", "params": {"tolerance": 0.001}},
         workload="Python numeric-tolerance evaluator consumed through the pinned external runtime artifact",
-        lifecycle="persistent Shimmy server; fresh guest instance lifecycle is owned by the consumer adapter",
-        initialization_placement="artifact verification and runtime initialization occur before HTTP readiness",
+        lifecycle="persistent Shimmy server; compiled artifact reused, fresh Agent Python module initialized and closed per request",
+        initialization_placement="startup validates one initialized probe before HTTP readiness; every request repeats module _initialize/runtime_init",
         resource_limit="2 CPUs / 2 GiB",
     ),
     "pyodide-scipy": LaneSpec(
@@ -122,7 +122,7 @@ def assert_lane_response(lane: str, response: Dict[str, Any]) -> None:
         if result.get("snapshot_isolation_ok") is not True:
             raise ValueError("generic snapshot_isolation_ok must be true")
         return
-    if lane in {"reactor-consumer", "dbi-lean"}:
+    if lane in {"agent-python-fresh", "dbi-lean"}:
         if result.get("is_correct") is not True:
             raise ValueError(f"{lane} is_correct must be true")
         return

@@ -4,6 +4,12 @@
 is the target contract, not approval to deploy or automatically test the frozen
 legacy pin.
 
+Exact-bundle reproducibility, the inspected agent-runtime ABI difference, and
+the NumPy binary128 canary are defined in
+[Clean Python runtime handoff gates](python-runtime-handoff.md). This page keeps
+the Lambda Feedback package/configuration contract; both documents must pass
+before replacement.
+
 ## Deployment shape
 
 Use `wasm` as the execution boundary and `python-reactor` as the WASM profile:
@@ -56,8 +62,9 @@ exports: py_init, py_prepare, evaluate, py_exec, alloc, dealloc, resp_buf, resp_
 
 Replacement acceptance procedure:
 
-1. Build the replacement in `bkmashiro/webassembly-language-runtimes` and publish
-   an immutable tagged asset.
+1. Build the replacement in the authoritative producer named by the handoff
+   (`bkmashiro/agent-python-runtime` is the current candidate) and publish an
+   immutable tagged asset.
 2. Record producer commit, exact URL/tag, SHA-256, CPython/WASI versions, exports,
    package/API manifest, and known unsupported features.
 3. Prove the required host ABI without legacy `py_exec`/response-buffer polyfills.

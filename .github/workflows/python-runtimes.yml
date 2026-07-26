@@ -12,6 +12,10 @@ on:
       - "examples/lambda-feedback-fixtures/**"
       - "scripts/demo-python-examples.sh"
       - "scripts/smoke-pyodide-package-http.sh"
+      - "scripts/python-runtime-handoff/**"
+      - "docs/python-runtime-handoff.md"
+      - "docs/lambda-feedback-handoff.md"
+      - "docs/README.md"
       - "internal/execution/dispatcher*.go"
       - "internal/execution/supervisor/adapter_rpc*.go"
       - "internal/execution/worker/**"
@@ -28,6 +32,10 @@ on:
       - "examples/lambda-feedback-fixtures/**"
       - "scripts/demo-python-examples.sh"
       - "scripts/smoke-pyodide-package-http.sh"
+      - "scripts/python-runtime-handoff/**"
+      - "docs/python-runtime-handoff.md"
+      - "docs/lambda-feedback-handoff.md"
+      - "docs/README.md"
       - "internal/execution/dispatcher*.go"
       - "internal/execution/supervisor/adapter_rpc*.go"
       - "internal/execution/worker/**"
@@ -42,6 +50,39 @@ permissions:
   contents: read
 
 jobs:
+  python-runtime-handoff-contract:
+    name: Python runtime handoff contracts (no artifact)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Test exact-bundle and binary128 contracts
+        run: |
+          python3 -m unittest discover \
+            -s scripts/python-runtime-handoff/tests \
+            -p 'test_*.py' \
+            -v
+          python3 - <<'PY'
+          import ast
+          from pathlib import Path
+
+          for filename in (
+              "compare_bundles.py",
+              "float128_canary.py",
+              "validate_float128.py",
+          ):
+              path = Path("scripts/python-runtime-handoff") / filename
+              ast.parse(path.read_text(), filename=str(path))
+          print("PASS: handoff Python sources parse without importing the guest canary")
+          PY
+
   pyodide-compatibility:
     name: Pyodide script/package compatibility
     runs-on: ubuntu-latest

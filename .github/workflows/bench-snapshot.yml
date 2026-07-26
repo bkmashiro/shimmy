@@ -1,4 +1,4 @@
-name: Shimmy Sandbox Benchmarks
+name: Shimmy Mechanism Benchmarks
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   bench:
-    name: Full Linux sandbox benchmark
+    name: Linux mechanism microbenchmarks
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -84,6 +84,6 @@ jobs:
         uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: snapshot-bench-${{ github.sha }}
+          name: mechanism-bench-${{ github.sha }}
           path: bench-*.txt
           retention-days: 90

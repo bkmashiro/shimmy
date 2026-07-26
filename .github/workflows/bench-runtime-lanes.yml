@@ -1,0 +1,146 @@
+name: Runtime Lane E2E Benchmarks
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runtime-lane-bench-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  compose-lanes:
+    name: Generic / reactor consumer / Pyodide / DBI
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      SHIMMY_DEMO_IMAGE_PREFIX: shimmy-bench
+      SHIMMY_DEMO_TAG: ci
+      SHIMMY_DEMO_VERSION: bench-${{ github.run_number }}
+      SHIMMY_DEMO_COMMIT: ${{ github.sha }}
+      SHIMMY_DEMO_INCLUDE_DBI: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Pull the pinned external runtime artifact
+        run: git lfs pull --include="build/python-reactor/artifacts/agent-python-runtime-numpy-core.wasm" --exclude=""
+
+      - name: Validate benchmark contract
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest \
+            scripts.tests.test_benchmark_runtime_lanes -v
+          docker compose --profile dbi -f demo/compose/compose.yaml config --quiet
+
+      - name: Record runner environment
+        run: |
+          mkdir -p artifacts/runtime-lane-bench
+          {
+            uname -a
+            lscpu
+            docker version
+            docker compose version
+          } > artifacts/runtime-lane-bench/compose-env.txt
+
+      - name: Build runtime lane images
+        run: |
+          docker compose --profile dbi -f demo/compose/compose.yaml build \
+            generic python-reactor pyodide-scipy dbi-lean
+
+      - name: Benchmark public HTTP lifecycle phases
+        run: |
+          python3 scripts/benchmark-runtime-lanes.py \
+            --compose-file demo/compose/compose.yaml \
+            --warmups 2 \
+            --samples 10 \
+            --output artifacts/runtime-lane-bench/compose-lanes.json
+
+      - name: Capture failure logs
+        if: failure()
+        run: |
+          docker compose --profile dbi -f demo/compose/compose.yaml \
+            logs --no-color > artifacts/runtime-lane-bench/compose-failure.log 2>&1 || true
+
+      - name: Upload compose-lane evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: runtime-lanes-compose-${{ github.sha }}
+          path: artifacts/runtime-lane-bench/
+          if-no-files-found: error
+          retention-days: 90
+
+  qemu-tcg:
+    name: QEMU TCG fresh-VM file profile
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install QEMU and guest image tools
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            busybox-static \
+            dracut-core \
+            squashfs-tools \
+            linux-image-virtual \
+            qemu-system-x86 \
+            qemu-utils
+
+      - name: Resolve boot artifacts
+        run: |
+          kernel=$(readlink -f /boot/vmlinuz)
+          test -f "$kernel"
+          sudo chmod a+r "$kernel"
+          printf 'KERNEL_PATH=%s\n' "$kernel" >> "$GITHUB_ENV"
+
+      - name: Validate benchmark contract and runner
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest \
+            scripts.tests.test_benchmark_runtime_lanes -v
+          bash -n experiments/qemu-fallback/benchmark-ci-file.sh
+
+      - name: Record runner environment
+        run: |
+          mkdir -p artifacts/runtime-lane-bench
+          {
+            go version
+            uname -a
+            lscpu
+            qemu-system-x86_64 --version
+          } > artifacts/runtime-lane-bench/qemu-env.txt
+
+      - name: Build manifest-bound guest fixture
+        env:
+          OUTPUT_DIR: ${{ github.workspace }}/artifacts/qemu-fallback
+          BUILD_DIR: ${{ runner.temp }}/qemu-runtime-lane-image
+          KERNEL_PATH: ${{ env.KERNEL_PATH }}
+        run: experiments/qemu-fallback/build-image.sh
+
+      - name: Benchmark native and QEMU public HTTP requests
+        env:
+          ARTIFACT_DIR: ${{ github.workspace }}/artifacts/qemu-fallback
+          BIN_DIR: ${{ runner.temp }}/qemu-runtime-lane-bench
+          OUTPUT: ${{ github.workspace }}/artifacts/runtime-lane-bench/qemu-file.json
+          REQUEST_COUNT: "3"
+        run: experiments/qemu-fallback/benchmark-ci-file.sh
+
+      - name: Upload QEMU evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: runtime-lanes-qemu-${{ github.sha }}
+          path: |
+            artifacts/runtime-lane-bench/
+            artifacts/qemu-fallback/manifest.json
+            ${{ runner.temp }}/qemu-runtime-lane-bench/native.log
+            ${{ runner.temp }}/qemu-runtime-lane-bench/qemu.log
+          if-no-files-found: error
+          retention-days: 90

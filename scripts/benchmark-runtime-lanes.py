@@ -303,10 +303,10 @@ def benchmark_lane(
     request_timeout: float,
 ) -> Dict[str, Any]:
     run([*prefix, "rm", "-s", "-f", spec.service], check=False)
-    image = image_metadata(prefix, spec.service)
     started = time.perf_counter_ns()
     try:
         run([*prefix, "up", "-d", "--no-build", spec.service])
+        image = image_metadata(prefix, spec.service)
         base = f"http://127.0.0.1:{spec.port}"
         wait_for_health(base + "/health", ready_timeout)
         ready_ns = time.perf_counter_ns() - started

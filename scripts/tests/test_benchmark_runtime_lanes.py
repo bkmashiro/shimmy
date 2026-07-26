@@ -3,6 +3,7 @@ import json
 import pathlib
 import sys
 import unittest
+from unittest import mock
 
 
 SCRIPT = pathlib.Path(__file__).parents[1] / "benchmark-runtime-lanes.py"
@@ -64,6 +65,43 @@ class LaneAssertionTests(unittest.TestCase):
     def test_unknown_lane_fails_closed(self):
         with self.assertRaisesRegex(ValueError, "unknown lane"):
             module.assert_lane_response("mystery", {"result": {"is_correct": True}})
+
+
+class OrchestrationTests(unittest.TestCase):
+    def test_compose_starts_service_before_inspecting_its_image(self):
+        commands = []
+
+        def fake_run(command, **_kwargs):
+            command = list(command)
+            commands.append(command)
+            if command[:3] == ["docker", "image", "inspect"]:
+                return module.subprocess.CompletedProcess(
+                    command,
+                    0,
+                    stdout=json.dumps([{"Id": "sha256:abc", "Size": 123, "RepoDigests": []}]),
+                    stderr="",
+                )
+            if "images" in command:
+                return module.subprocess.CompletedProcess(command, 0, stdout="sha256:abc\n", stderr="")
+            return module.subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        response = {"result": {"is_correct": True, "guest_invocation_count": 1, "snapshot_isolation_ok": True}}
+        with mock.patch.object(module, "run", side_effect=fake_run), mock.patch.object(
+            module, "wait_for_health"
+        ), mock.patch.object(module, "timed_request", return_value=(100, response)):
+            module.benchmark_lane(
+                "generic",
+                module.LANES["generic"],
+                ["docker", "compose", "-f", "compose.yaml"],
+                warmups=0,
+                samples=1,
+                ready_timeout=1,
+                request_timeout=1,
+            )
+
+        up_index = next(index for index, command in enumerate(commands) if "up" in command)
+        images_index = next(index for index, command in enumerate(commands) if "images" in command)
+        self.assertLess(up_index, images_index)
 
 
 class QEMUReportTests(unittest.TestCase):

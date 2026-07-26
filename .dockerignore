@@ -3,7 +3,11 @@
 .demo-logs
 .demo-lambda-sources
 bin
-build
+build/*
+!build/python-reactor/
+build/python-reactor/*
+!build/python-reactor/artifacts/
+!build/python-reactor/artifacts/**
 coverage.out
 lcov.info
 *.test

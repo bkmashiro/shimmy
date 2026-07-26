@@ -103,6 +103,7 @@ The `Python Runtime Routes` workflow pulls only the pinned LFS object and runs:
 - explicit Host capability denial;
 - timeout followed by a successful replacement request;
 - NumPy core operations;
+- real Lambda Feedback boilerplate bundle eval and preview;
 - IEEE binary128 preservation through the final Shimmy path.
 
 The binary128 canary requires 16-byte storage, at least 112 explicit mantissa

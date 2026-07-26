@@ -1,124 +1,100 @@
 # WASM backend model
 
-This document separates three concepts that are easy to conflate:
+Shimmy separates:
 
-1. **Runtime interface** — how Shimmy runs and communicates with an evaluator.
-2. **WASM runtime/profile** — what kind of WASM guest Shimmy expects once it has a module.
-3. **Build/deployment recipe** — how a source language is compiled or bundled into that module.
+1. **execution interface** — process, protocol, and ownership boundary;
+2. **WASM profile** — ABI and lifecycle expected from a supplied module;
+3. **build recipe** — how source code becomes that module or evaluator bundle.
 
-The important rule is: **do not create one `FUNCTION_INTERFACE` value per source language**.
+Do not create one `FUNCTION_INTERFACE` value per source language, and do not
+infer a runtime from imports, requirements, or file extensions.
 
-For copy-pasteable launch configurations, see [deployment-recipes.md](deployment-recipes.md).
-
-## Product support tiers
+## Support tiers
 
 | Tier | Paths | Positioning |
 |---|---|---|
-| Primary | Generic WASM; Python reactor profile | Main in-process execution model. The Python-reactor interface remains primary, but its legacy artifact pin is frozen pending a clean replacement handoff. |
-| Migration | `file`; `rpc`; Pyodide | Compatibility paths for existing workers and heavy Python packages while evaluators move toward the primary model. |
-| Fallback | DynamoRIO wrapper; QEMU wrapper | Explicit terminal fallbacks around `file`/`rpc`; neither is a new evaluator interface. |
-| Optional strategy | COW; UFFD; soft-dirty; mprotect | Operator-selected memory experiments. Full-copy remains the default and none is selected from evaluator source. |
+| Primary | Generic WASM; Agent Python | In-process wazero execution. |
+| Migration | `file`; `rpc`; Pyodide | Existing workers and heavy Python compatibility. |
+| Terminal fallback | DynamoRIO; QEMU | Explicit wrappers around `file`/`rpc`, never automatic retries. |
+| Generic memory options | COW; UFFD; soft-dirty; mprotect | Explicit generic-WASM experiments; full copy remains default. |
 
-These tiers describe product direction; they do not silently change the historical
-`rpc` configuration default. Runtime selection is always explicit. Shimmy does not
-inspect imports, requirements files, or source extensions to choose a path.
+## Execution interfaces
 
-## 1. Runtime interface
+| Interface | Meaning |
+|---|---|
+| `wasm` | Primary in-process wazero boundary. `FUNCTION_WASM_PROFILE` selects the guest contract. |
+| `rpc` | Persistent subprocess with JSON-RPC transport. |
+| `file` | Subprocess-per-request file protocol. |
+| `pyodide` | Node/Pyodide compatibility lane for heavy packages. |
+| `reactor-python` | Legacy configuration alias that routes to Agent Python. |
+| `python-wasm` | Independent older resident Python/WASM comparison path. |
 
-`FUNCTION_INTERFACE` should describe the execution and communication boundary, not the language used to author the evaluator.
+## WASM profiles
 
-| Interface | Meaning | Current status |
-|---|---|---|
-| `rpc` | Existing persistent subprocess with JSON-RPC transport. | Migration / compatibility path. |
-| `file` | Existing subprocess-per-request file protocol. | Migration / compatibility path. |
-| `wasm` | In-process wazero WASM/WASI module instance pool. | Primary execution interface when a built `.wasm` module is provided. |
-| `pyodide` | Node/Pyodide subprocess compatibility lane for heavy Python packages. | Migration path; not the same isolation/performance model as `wasm`. |
-| `reactor-python` | CPython-WASI reactor path with snapshot/restore semantics. | Compatibility alias for `FUNCTION_WASM_PROFILE=python-reactor` under `FUNCTION_INTERFACE=wasm`; kept for migration compatibility. |
-| `python-wasm` | Older resident Python/WASM path. | Legacy/comparison only; state can leak across requests and the path is a retirement candidate after replacement evidence lands. |
-
-## 2. WASM profile
-
-Once `FUNCTION_INTERFACE=wasm` is selected, Shimmy still needs to know what kind of WASM guest it is loading.
-
-**Preferred deployment recipe for Python-reactor on WASM**:
+### Generic
 
 ```bash
 FUNCTION_INTERFACE=wasm
-FUNCTION_WASM_PROFILE=python-reactor
-FUNCTION_WASM_MODULE=/path/to/python-reactor.wasm
-FUNCTION_WASM_PYTHON_SCRIPT=/path/to/eval.py
+FUNCTION_WASM_PROFILE=generic
+FUNCTION_WASM_MODULE=/path/to/evaluator.wasm
 ```
 
-Legacy compatibility mode is still accepted for now:
+The guest directly exports Shimmy's `alloc + evaluate` ABI. The source language
+is irrelevant at runtime. Generic modules can opt into the existing snapshot
+strategies.
+
+### Agent Python
 
 ```bash
-FUNCTION_INTERFACE=reactor-python
+FUNCTION_INTERFACE=wasm
+FUNCTION_WASM_PROFILE=agent-python
+FUNCTION_WASM_MODULE=/path/to/agent-python-runtime-numpy-core.wasm
+FUNCTION_WASM_MANIFEST=/path/to/manifest.json
 FUNCTION_WASM_PYTHON_SCRIPT=/path/to/eval.py
-FUNCTION_COMMAND=/path/to/python-reactor.wasm
 ```
 
-| Profile | What Shimmy receives | Runtime expectation |
+The profile consumes Agent Python Runtime ABI v1:
+
+```text
+_initialize
+runtime_init
+runtime_prepare
+alloc / dealloc
+execute
+agent_runtime_v1.host_call
+```
+
+The artifact and manifest are verified before compilation. Shimmy compiles once,
+then creates a fresh, exclusively owned module for every request. Served modules
+are closed, never restored or returned to a pool. Snapshot/COW configuration is
+rejected for this profile.
+
+`python-reactor`, `reactor-python`, and `FUNCTION_INTERFACE=reactor-python` are
+configuration aliases for Agent Python. They do not activate the deleted legacy
+loader.
+
+## Memory-strategy boundary
+
+Generic snapshot modes cover WASM linear memory only. They do not reset globals,
+tables, Host/WASI state, descriptors, clocks, entropy, Go buffers, or external
+effects. Linux COW uses a dispatcher-scoped sealed image and fixed-size private
+mappings; it is not whole-instance cloning.
+
+Agent Python uses a stronger and simpler lifecycle claim: fresh instance. A
+future prepared pool may retain only never-served, single-use initialized
+instances. It must not reintroduce memory restore or widen the reset claim.
+
+## Build recipes
+
+| Source | Recipe | Runtime shape |
 |---|---|---|
-| `generic` | A pre-built `.wasm` module. | Exposes the Shimmy `alloc` / `evaluate` ABI directly. Source language is irrelevant at runtime. |
-| `python-reactor` | A CPython-WASI reactor module plus evaluator script/package config. | Host initializes Python, prepares the selected evaluator, snapshots post-import memory, and restores after requests. A replacement artifact must expose `py_prepare` plus the host-facing `alloc` / `evaluate` ABI and pass the handoff gates; the legacy pin is frozen historical evidence. |
-| `js-javy` / future JS profile | A WASI module produced by a JS compiler/bundler. | Needs a clear ABI adapter; current JS demo still uses an RPC/subprocess-style route. |
+| Go | `GOOS=wasip1 GOARCH=wasm go build` plus Shimmy ABI | Generic WASM. |
+| Rust | `cargo build --target wasm32-wasip1` plus ABI wrapper | Generic WASM. |
+| C/C++ | WASI SDK targeting `wasm32-wasip1` | Generic WASM. |
+| Plain Python / NumPy core | Pinned Agent Python artifact plus evaluator script or startup bundle | Agent Python profile. |
+| SciPy/heavy Python | Pyodide package ecosystem | Pyodide compatibility lane. |
+| JavaScript | Javy/QuickJS-to-WASI plus an explicit ABI adapter | Future generic integration; current demo remains RPC-style. |
 
-The repository now accepts `FUNCTION_INTERFACE=wasm` + `FUNCTION_WASM_PROFILE` for profile selection and keeps `FUNCTION_INTERFACE=reactor-python` as a compatibility alias.
-
-### Prepared-memory strategy boundary
-
-Snapshot strategy is orthogonal to runtime profile. The default remains full
-copy. On Linux, an operator may explicitly select
-`FUNCTION_WASM_SNAPSHOT_MODE=cow` for eligible generic or Python-reactor
-instances. This mode shares only a sealed linear-memory baseline through
-per-instance `MAP_PRIVATE` mappings; it does not clone wazero engine objects,
-Go state, WASI handles, globals/tables, or external effects.
-
-Python COW captures the evaluator-specific state after trusted `py_prepare` and
-headroom reservation. It is not a cold CPython image shared across unrelated
-evaluators. Each runner prepares independently and attaches only after size and
-SHA-256 equality; otherwise that runner keeps the existing full-copy path.
-After attachment, linear memory is fixed-size and `memory.grow` fails closed.
-
-COW and UFFD are separate opt-in strategies. COW uses the kernel's ordinary
-private file mapping and needs no user-space fault handler. UFFD remains useful
-for its current per-instance dirty-page restore path and as an independent
-comparison/fallback. Any future combined design requires its own evidence and
-must not replace COW correctness with fault-handler complexity.
-
-The implementation depends on wazero `v1.11.0`'s experimental allocator API, is
-Linux-only, and is not eligible for automatic/default promotion without a
-separate compatibility decision. See [deployment-recipes.md](deployment-recipes.md)
-for operator configuration and exclusions.
-
-## 3. Build/deployment recipe
-
-Language-specific compilation belongs in deployment tooling and documentation. Shimmy's request dispatcher should not guess source language from imports or `requirements.txt` and should not grow `rust-wasm`, `go-wasm`, `python-wasm`, `js-wasm`, etc. as peer runtime modes.
-
-Examples:
-
-| Source language | Build/deployment recipe | Runtime config shape |
-|---|---|---|
-| Go | `GOOS=wasip1 GOARCH=wasm go build ... -o eval.wasm` | `FUNCTION_INTERFACE=wasm`, module path points to `eval.wasm`. |
-| Rust | `cargo build --target wasm32-wasip1` with a Shimmy ABI wrapper. | `FUNCTION_INTERFACE=wasm`, module path points to the built artifact. |
-| C/C++ | WASI SDK / clang targeting `wasm32-wasip1`. | `FUNCTION_INTERFACE=wasm`, module path points to the built artifact. |
-| Plain Python / NumPy subset | CPython-WASI reactor artifact plus evaluator script or Lambda Feedback package bundle. | `FUNCTION_INTERFACE=wasm` + `FUNCTION_WASM_PROFILE=python-reactor`. |
-| SciPy/heavy Python | Pyodide runner with packages loaded in the Pyodide ecosystem. | `FUNCTION_INTERFACE=pyodide`; compatibility lane, not the core in-process WASM pool. |
-| JavaScript | Javy/QuickJS or another JS-to-WASI compiler plus an ABI adapter. | Not fully integrated into the generic WASM ABI yet; current example uses RPC with `wazero run`. |
-
-## Current gap
-
-The generic WASM backend already demonstrates the runtime side: if you provide a `.wasm` module exposing the ABI, Shimmy can run it in the wazero-backed pool and restore guest state between requests.
-
-What is not yet complete/polished:
-
-- clean Python-reactor artifact handoff and repinning without legacy host polyfills;
-- Lambda/AWS smoke deployment guidance for the recommended recipes;
-- JS/Javy integration with the generic in-process ABI instead of the current RPC/subprocess-style demo;
-- retirement of the older resident `python-wasm` path after replacement evidence is accepted.
-
-## Recommended documentation language
-
-Use this wording in talks and handoff docs:
-
-> `wasm` is the execution backend. Generic WASM means Shimmy has already been given a module that implements the ABI. Source-language compilation is a build/deployment recipe: Go, Rust, C/C++, Python, and JavaScript can each have their own recipe without becoming separate `FUNCTION_INTERFACE` modes.
+The current remaining product gaps are release/deployment qualification for the
+new Python artifact, in-process JavaScript ABI integration, and an explicit
+retirement decision for the independent resident `python-wasm` path.

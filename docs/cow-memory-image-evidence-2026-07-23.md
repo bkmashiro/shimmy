@@ -2,14 +2,15 @@
 
 ## Status
 
-Shimmy has an **explicit, Linux-only prepared-memory COW prototype** for generic
-WASM and the CPython-WASI Python-reactor profile. The default remains full copy.
-The implementation uses wazero `v1.11.0`'s experimental memory allocator API,
-a sealed dispatcher-scoped `memfd`, and one writable `MAP_PRIVATE` mapping per
-eligible instance.
+**Archived legacy-reactor evidence.** This report remains an auditable record of
+the July 2026 generic-WASM and deleted `py_init/py_prepare` experiment. The
+current Agent Python v1 profile does not use snapshot/COW; it serves fresh,
+single-use module instances. Only the generic-WASM mechanism evidence below
+remains applicable to current code.
 
-This document records correctness and mechanism evidence. It is not a production
-performance claim and does not justify an automatic/default strategy change.
+This document records legacy correctness and mechanism evidence. It is not a
+production performance claim and does not justify an automatic/default strategy
+change.
 
 ## Evidence environment
 

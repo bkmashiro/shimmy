@@ -203,8 +203,9 @@ Feedback layout uses the WASM backend plus an explicit profile:
 
 ```bash
 FUNCTION_INTERFACE=wasm
-FUNCTION_WASM_PROFILE=python-reactor
-FUNCTION_WASM_MODULE=/opt/python-reactor.wasm
+FUNCTION_WASM_PROFILE=agent-python
+FUNCTION_WASM_MODULE=/opt/agent-python/agent-python-runtime-numpy-core.wasm
+FUNCTION_WASM_MANIFEST=/opt/agent-python/manifest.json
 FUNCTION_LF_ROOT=/var/task
 ```
 
@@ -222,8 +223,9 @@ For more complex packages, keep the environment small with one JSON config file:
 
 ```bash
 FUNCTION_INTERFACE=wasm
-FUNCTION_WASM_PROFILE=python-reactor
-FUNCTION_WASM_MODULE=/opt/python-reactor.wasm
+FUNCTION_WASM_PROFILE=agent-python
+FUNCTION_WASM_MODULE=/opt/agent-python/agent-python-runtime-numpy-core.wasm
+FUNCTION_WASM_MANIFEST=/opt/agent-python/manifest.json
 FUNCTION_LF_CONFIG=/var/task/shimmy-lf.json
 ```
 
@@ -234,8 +236,7 @@ Example `shimmy-lf.json`:
   "root": "/var/task",
   "eval": "evaluation_function.evaluation:evaluation_function",
   "preview": "evaluation_function.preview:preview_function",
-  "include_roots": ["/opt/lf-puredeps"],
-  "sys_path": ["/opt/lf-puredeps.zip"]
+  "include_roots": ["/opt/lf-puredeps"]
 }
 ```
 
@@ -287,9 +288,9 @@ scripts/demo-wasm.sh
   evaluators should use Pyodide today.
 - Do not claim automatic import/requirements routing. Runtime selection is
   explicit via `FUNCTION_INTERFACE`.
-- Do not present the macOS Python direct fallback as a real `reactor-python` run.
-  The actual `reactor-python` backend is Linux-only in this branch.
-- Do not present the frozen reactor pin as a current deployment or demo artifact.
+- Agent Python runs through the same wazero adapter on macOS and Linux; do not
+  substitute Pyodide or a native Python process and label it Agent Python.
+- The checked-in bundle is acceptance evidence, not proof of a deployed image.
 - Do not claim zpoline/soft-dirty as the Lambda path. Current probe results favor
   `userfaultfd` write-protect support over soft-dirty/zpoline assumptions.
 

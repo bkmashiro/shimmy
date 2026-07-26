@@ -1,119 +1,108 @@
 # Deployment recipes
 
-This page is the short version of the current runtime/profile/env surface. Use it when launching Shimmy or wiring Lambda smoke tests.
+`FUNCTION_INTERFACE` selects the execution boundary, not the evaluator language.
+Runtime selection is explicit; Shimmy never scans imports, requirements, or file
+extensions.
 
-## Rule of thumb
+## Runtime matrix
 
-`FUNCTION_INTERFACE` names the execution boundary. It is not the evaluator language.
-
-- Use `FUNCTION_INTERFACE=wasm` for in-process wazero execution.
-- Use `FUNCTION_WASM_PROFILE` only when a WASM module needs profile-specific setup.
-- Select the runtime explicitly. Shimmy never scans imports, `requirements.txt`,
-  or source file extensions to choose a backend.
-- HTTP request bodies, stdio JSON-RPC frames, and Pyodide frames share a 4 MiB
-  default limit. QEMU keeps its existing explicit `FUNCTION_QEMU_MAX_FRAME_BYTES`
-  override, but its default comes from the same contract.
-- Use fixed artifact versions and SHA256 checks for large runtime images.
-- Keep `FUNCTION_INTERFACE=reactor-python` only as a compatibility alias; new deployments should use `wasm` + `FUNCTION_WASM_PROFILE=python-reactor`.
-- Environment variables select a path after its runtime artifacts are deployed. They do not install Node/Pyodide, DynamoRIO clients, or the reactor artifact automatically.
-- Product direction is primary `wasm` (generic or Python-reactor profile), migration
-  `file`/`rpc`/Pyodide, and explicit DBI/QEMU terminal fallback. Full-copy remains
-  the default memory strategy.
-
-## Recommended recipes
-
-| Scenario | Use when | Required env | Optional env | Notes |
-|---|---|---|---|---|
-| Generic WASM | Evaluator is already a WASI module exposing Shimmy ABI. | `FUNCTION_INTERFACE=wasm`; `FUNCTION_COMMAND=/path/to/eval.wasm` or `FUNCTION_WASM_MODULE=/path/to/eval.wasm` | `FUNCTION_WASM_PROFILE=generic`; `FUNCTION_MAX_PROCS`; `FUNCTION_WORKER_SEND_TIMEOUT`; `FUNCTION_WASM_COMPILE_CACHE`; `FUNCTION_WASM_SNAPSHOT_MODE` | Runtime expects `alloc(len)` + `evaluate(ptr, len)` returning `[uint32 length][JSON]`. Source language is irrelevant. |
-| Python-reactor script | Plain Python / NumPy/SymPy-compatible evaluator script, fast in-process WASM path. | `FUNCTION_INTERFACE=wasm`; `FUNCTION_WASM_PROFILE=python-reactor`; `FUNCTION_WASM_MODULE=/path/to/python-reactor.wasm`; `FUNCTION_WASM_PYTHON_SCRIPT=/path/to/eval.py` | `FUNCTION_MAX_PROCS`; `FUNCTION_WORKER_SEND_TIMEOUT`; `FUNCTION_WASM_COMPILE_CACHE`; `FUNCTION_WASM_PYTHON_PRELOAD`; `FUNCTION_WASM_SNAPSHOT_MODE` | Primary Python interface. Its legacy artifact pin is frozen; do not use it as a new deployment source while a clean replacement is pending. |
-| Python-reactor Lambda Feedback package | LF package-style evaluator that can run with packages already in the reactor artifact plus bundled pure-Python deps. | `FUNCTION_INTERFACE=wasm`; `FUNCTION_WASM_PROFILE=python-reactor`; `FUNCTION_WASM_MODULE=/path/to/python-reactor.wasm`; `FUNCTION_LF_ROOT=/path/to/package`; `FUNCTION_LF_EVAL_ENTRYPOINT=module:function` | `FUNCTION_LF_CONFIG`; `FUNCTION_LF_PREVIEW_ENTRYPOINT`; `FUNCTION_LF_ADAPTER_ROOT`; `FUNCTION_LF_BUNDLER`; `FUNCTION_LF_INCLUDE_ROOTS`; `FUNCTION_LF_SYS_PATH`; `FUNCTION_LF_BUNDLE_OUT` | Shimmy runs the bundler once at startup, then executes the generated script through python-reactor. |
-| Pyodide compatibility | Heavy Python package stack, especially SciPy/Pandas or Emscripten/Pyodide-only packages. | `FUNCTION_INTERFACE=pyodide`; `FUNCTION_PYODIDE_RUNNER=/path/to/runner.js`; plus either `FUNCTION_PYODIDE_SCRIPT=/path/to/eval.py` or package-mode envs | `FUNCTION_PYODIDE_PACKAGES`; `FUNCTION_PYODIDE_ROOT`; `FUNCTION_PYODIDE_EVAL_ENTRYPOINT`; `FUNCTION_PYODIDE_PREVIEW_ENTRYPOINT`; `FUNCTION_PYODIDE_ADAPTER` | This is a Node/Pyodide subprocess lane, not the same in-process wazero pool as `wasm`. |
-| RPC/file migration | Existing non-WASM workers or integrations migrating toward the in-process model. | `FUNCTION_INTERFACE=rpc` or `FUNCTION_INTERFACE=file`; `FUNCTION_COMMAND=...` | RPC transport/file-mode worker options | Kept for compatibility and comparison. |
-| Full Linux via QEMU | An existing `file` or `rpc` worker needs a sealed full-Linux compatibility environment. | Existing interface/command config; `FUNCTION_QEMU_ENABLED=true`; `FUNCTION_QEMU_BINARY`; `FUNCTION_QEMU_ROOTFS`; `FUNCTION_QEMU_IMAGE_MANIFEST` | `FUNCTION_QEMU_RUNNER`; `FUNCTION_QEMU_ACCELERATOR`; bounded memory/vCPU/boot settings; `FUNCTION_QEMU_NETWORK_PROFILE`; `FUNCTION_QEMU_RESET_POLICY=lazy\|off` | Transparent wrapper only: do not use `FUNCTION_INTERFACE=qemu`. Lambda defaults to lazy one-shot VM ownership; non-Lambda RPC remains persistent. QEMU and DBI are mutually exclusive. |
-
-## Verification status
-
-| Path | Local/config verification | Target/integration evidence |
+| Scenario | Required configuration | Notes |
 |---|---|---|
-| Python-reactor | Dispatcher/profile tests and package-bundling startup tests | Historical CodeBuild Linux schema-v2/v3 evidence exists for the frozen `v1.0.14` pin; replacement evidence is required before repinning or new deployment guidance. |
-| Pyodide | Dispatcher/script/package-mode routing tests and the checked-in Node runner contract | GitHub Actions 17-row HTTP E2E plus CodeBuild schema-v2/v3 Pure/NumPy/SymPy/SciPy runs |
-| Native + DBI | Wrapper argv/config/fail-closed unit tests for both `file` and `rpc` | Real Lambda x86_64 Python and Lean HTTP E2E plus the bounded seven-rule policy matrix |
-| Full Linux via QEMU | Wrapper/protocol/lifecycle tests plus byte-reproducible manifest-bound Linux artifacts | GitHub-hosted x86_64 TCG file and all-RPC-transport parity; DoC TCG fresh-file parity. Lambda TCG is not yet qualified and DoC KVM is permission-blocked. |
+| Generic WASM | `FUNCTION_INTERFACE=wasm`; `FUNCTION_WASM_PROFILE=generic`; `FUNCTION_WASM_MODULE=/path/eval.wasm` | Guest exports Shimmy `alloc + evaluate` ABI. Generic snapshot modes remain available. |
+| Agent Python script | `FUNCTION_INTERFACE=wasm`; `FUNCTION_WASM_PROFILE=agent-python`; `FUNCTION_WASM_MODULE=/path/agent-python-runtime-numpy-core.wasm`; `FUNCTION_WASM_MANIFEST=/path/manifest.json`; `FUNCTION_WASM_PYTHON_SCRIPT=/path/eval.py` | CPython 3.14 + NumPy core. Fresh, single-use module per request. |
+| Agent Python LF package | Agent Python artifact/manifest plus `FUNCTION_LF_ROOT=/path/package` | Shimmy bundles package modules and pure-Python include roots once at startup. |
+| Pyodide compatibility | `FUNCTION_INTERFACE=pyodide`; runner plus script or package-mode variables | Compatibility lane for SciPy/Pandas and Emscripten packages. |
+| RPC/file migration | `FUNCTION_INTERFACE=rpc` or `file`; `FUNCTION_COMMAND=...` | Existing subprocess protocols. |
+| Full Linux via QEMU | Existing `rpc`/`file` configuration plus explicit `FUNCTION_QEMU_*` artifact and lifecycle values | Transparent terminal fallback; QEMU and DBI are mutually exclusive. |
 
-The checked-in evidence files verify the listed paths and tested boundaries,
-not automatic dependency installation, arbitrary package compatibility, or a
-complete production sandbox.
+Shared HTTP, stdio JSON-RPC, and Pyodide frames default to 4 MiB. Agent
+Python's guest ABI additionally bounds each request and response to 1 MiB.
 
-## Frozen historical record for `python-reactor.wasm`
+## Agent Python
 
-The following pin is retained only so historical evidence remains reproducible. It
-is frozen and is not an approved source for new deployments or automatic CI. A
-replacement must come from `bkmashiro/webassembly-language-runtimes`, include an
-immutable URL/tag and SHA-256, expose the required host ABI without legacy
-polyfills, and pass script/package/state-reset/error/timeout evidence before this
-section or `scripts/python-reactor-artifact.env` is updated.
-
-Frozen historical pin:
+Canonical repository paths:
 
 ```text
-release: https://github.com/bkmashiro/webassembly-language-runtimes/releases/tag/v1.0.14
-asset:   python-reactor.wasm
-sha256:  78dcbb6d673351c0d3b776c42d2fb93b6f638cdc714d58072dece4b115edaa72
-exports: py_init, py_prepare, evaluate, py_exec, alloc, dealloc, resp_buf, resp_len
+build/python-reactor/artifacts/agent-python-runtime-numpy-core.wasm
+build/python-reactor/artifacts/manifest.json
 ```
 
-The verification script can reproduce the historical hash/export record when
-explicitly invoked. Historical checked-in LFS fixtures remain compatibility test
-inputs; they are not a deployment source of truth. Do not repin, delete old
-fixtures, or restore automatic reactor CI until the replacement handoff is
-accepted. For the eventual gate sequence, use
-[lambda-feedback-handoff.md](lambda-feedback-handoff.md).
+Artifact identity:
 
-## Prepared-memory COW (Linux, explicit opt-in)
+```text
+size:     63,626,531 bytes
+sha256:   90c27951b2d8c2c7a8b42705b365cb4231c6dad207aad5260d55d2f9a85f1034
+commit:   76b49158cc6c4824491561531bfe7e34872cb820
+ABI:      v1
+profile:  numpy-core
+```
 
-`FUNCTION_WASM_SNAPSHOT_MODE=cow` selects the Linux prepared-memory COW prototype.
-It is not the default and is not selected by the deprecated UFFD boolean.
+### Script
 
 ```bash
-FUNCTION_WASM_SNAPSHOT_MODE=cow
+FUNCTION_INTERFACE=wasm \
+FUNCTION_WASM_PROFILE=agent-python \
+FUNCTION_WASM_MODULE=build/python-reactor/artifacts/agent-python-runtime-numpy-core.wasm \
+FUNCTION_WASM_MANIFEST=build/python-reactor/artifacts/manifest.json \
+FUNCTION_WASM_PYTHON_SCRIPT=examples/eval-python/eval.py \
+FUNCTION_WASM_MAX_MEMORY_PAGES=8192 \
+FUNCTION_MAX_PROCS=1 \
+./shimmy serve
 ```
 
-The implementation pins wazero `v1.11.0` and uses its experimental memory
-allocator API. A dispatcher publishes one sealed `memfd` image and maps a
-writable `MAP_PRIVATE` view into each eligible instance. Instances prepare
-independently; size and SHA-256 must match before an instance attaches. A
-mismatch, unsupported platform, or allocator failure falls back to the existing
-per-instance full-copy strategy with a warning. COW never silently attaches a
-different prepared state.
+`FUNCTION_WASM_PYTHON_PRELOAD=evaluator` is the default and executes the trusted
+script through `runtime_prepare`. `off` remains accepted for compatibility and
+executes the trusted script inside each fresh request namespace.
 
-For Python reactor, the image is captured after `_initialize`, `py_init`, trusted
-`py_prepare`/imports, and request-headroom reservation. Healthy runners restore
-the image after copying each response to a Go-owned value and return to the pool
-already clean. Timeout/cancellation closes and discards the affected wazero
-module; a replacement prepares independently and must pass the same image gate.
+Do not set `FUNCTION_WASM_SNAPSHOT_MODE` or `FUNCTION_WASM_USE_UFFD` for Agent
+Python. The profile closes every served module and rejects snapshot settings
+rather than silently ignoring them.
 
-Current eligibility and limits:
+### Lambda Feedback package
 
-- Linux only; non-Linux builds retain full-copy semantics.
-- Active COW mappings are fixed-size after `Take`; `memory.grow` fails closed.
-- The shared image is dispatcher-scoped, not a process-global artifact cache.
-- COW covers WASM linear memory only. It does not reset mutable globals/tables,
-  Host/WASI descriptors or offsets, Host RNG/clock state, Go buffers, or external
-  filesystem/network/provider effects. Those remain capability/lifecycle audit
-  obligations; request-scoped Host stderr is reset separately.
-- UFFD remains an independent dirty-page strategy/fallback. COW does not require
-  or install a UFFD handler; combining them would need separate evidence.
-- GitHub runner RSS/PSS, minor-fault, and reset-only benchmark artifacts are
-  mechanism diagnostics, not production or end-to-end speed claims.
+```bash
+FUNCTION_INTERFACE=wasm \
+FUNCTION_WASM_PROFILE=agent-python \
+FUNCTION_WASM_MODULE=build/python-reactor/artifacts/agent-python-runtime-numpy-core.wasm \
+FUNCTION_WASM_MANIFEST=build/python-reactor/artifacts/manifest.json \
+FUNCTION_LF_ROOT=examples/lambda-feedback-fixtures/boilerplate-python \
+FUNCTION_LF_INCLUDE_ROOTS=/opt/lf-puredeps \
+./shimmy serve
+```
 
-Do not promote COW to `auto`/default without a separate compatibility and
-production evidence decision.
+Supported startup options include `FUNCTION_LF_CONFIG`, eval/preview entrypoint
+overrides, adapter/bundler paths, include roots, and bundle output. The Agent
+profile exposes no Host filesystem to guest code, so `FUNCTION_LF_SYS_PATH` and
+`sys_path` config entries fail closed. Embed pure-Python dependencies with
+`FUNCTION_LF_INCLUDE_ROOTS` instead.
 
-## QEMU full-Linux fallback (explicit opt-in)
+The only custom guest import is `agent_runtime_v1.host_call`. Shimmy currently
+denies it, so no network, credential, or transaction capability is granted.
 
-QEMU wraps the existing process worker. Keep `FUNCTION_INTERFACE=file` or
-`FUNCTION_INTERFACE=rpc`; all current RPC transports remain valid. A minimal
-file-worker deployment looks like:
+Verify locally:
+
+```bash
+scripts/smoke-python-reactor-handoff.sh artifact-only
+scripts/smoke-python-reactor-handoff.sh direct
+scripts/demo-python-examples.sh reactor-only
+```
+
+## Generic WASM snapshot modes
+
+Generic `FUNCTION_WASM_PROFILE=generic` supports explicit snapshot strategies
+through `FUNCTION_WASM_SNAPSHOT_MODE`: `memcpy`, `soft-dirty`, `mprotect`,
+`uffd`, and `cow` where available. Full copy remains the default.
+
+The Linux COW prototype uses a dispatcher-scoped sealed prepared-memory image
+and fixed-size private mappings. It covers linear memory only, not globals,
+tables, WASI/Host state, external effects, RNG, clocks, or descriptors. It must
+not be used to claim whole-instance freshness. The Agent Python profile does not
+use this mechanism.
+
+## QEMU full-Linux fallback
+
+QEMU wraps an existing process worker; keep `FUNCTION_INTERFACE=file` or `rpc`.
+A minimal file-worker configuration is:
 
 ```bash
 FUNCTION_INTERFACE=file \
@@ -127,88 +116,21 @@ FUNCTION_QEMU_ACCELERATOR=tcg \
 FUNCTION_QEMU_NETWORK_PROFILE=none \
 FUNCTION_QEMU_MEMORY_MB=512 \
 FUNCTION_QEMU_VCPUS=1 \
-FUNCTION_QEMU_BOOT_TIMEOUT=120s \
 ./shimmy serve
 ```
 
-Deployment requirements and boundaries:
-
-- Build and ship the manifest, pinned kernel, reproducible initramfs and
-  read-only raw SquashFS rootfs together. The builder records the source-lock
-  digest in the manifest; the runner validates that field and verifies every
-  referenced artifact SHA-256 before starting QEMU.
-- The original command, arguments, working directory and required dependencies
-  must exist at the configured paths inside the guest image.
-- `file` retains a fresh worker/VM per request. Non-Lambda `rpc` retains one
-  persistent worker/VM and tunnels stdio, IPC, TCP, HTTP or WebSocket as raw
-  streams.
-- In AWS Lambda (`AWS_LAMBDA_RUNTIME_API` present), QEMU defaults to
-  `FUNCTION_QEMU_RESET_POLICY=lazy`. RPC does not boot during Shimmy init;
-  each evaluation boots one VM on demand and synchronously stops and waits for
-  that runner after success or failure. A later invocation boots the next clean
-  VM, so an environment reclaimed while idle performs no wasted reset work.
-  `off` restores the historical persistent RPC lifecycle. `eager`, VM snapshot
-  restore and same-process `loadvm` are not yet enabled or qualified.
-- `FUNCTION_QEMU_NETWORK_PROFILE=none` is the default tested profile. It does
-  not expose Host files, credentials, SSH agents or Host networking.
-- Enabling QEMU and DynamoRIO together fails during configuration. Shimmy never
-  replays a request under QEMU after native or DBI execution fails.
-- Select `kvm` only when `/dev/kvm` is readable and writable by the service
-  account. There is no silent KVM-to-TCG fallback in qualification profiles.
-- Current evidence is **PARTIAL**: see
-  [`qemu-fallback-evidence.json`](qemu-fallback-evidence.json). Hosted and DoC
-  TCG evidence is not a substitute for the still-unrun AWS Lambda TCG gate.
-
-## Examples
-
-### Generic WASM
-
-```bash
-FUNCTION_INTERFACE=wasm \
-FUNCTION_WASM_MODULE=examples/demo-stateful/eval.wasm \
-FUNCTION_MAX_PROCS=1 \
-./shimmy serve
-```
-
-### Python-reactor script
-
-```bash
-FUNCTION_INTERFACE=wasm \
-FUNCTION_WASM_PROFILE=python-reactor \
-FUNCTION_WASM_MODULE=internal/execution/wasm/testdata/python-reactor.wasm \
-FUNCTION_WASM_PYTHON_SCRIPT=examples/eval-python/eval.py \
-FUNCTION_MAX_PROCS=1 \
-./shimmy serve
-```
-
-### Python-reactor LF package
-
-```bash
-FUNCTION_INTERFACE=wasm \
-FUNCTION_WASM_PROFILE=python-reactor \
-FUNCTION_WASM_MODULE=internal/execution/wasm/testdata/python-reactor.wasm \
-FUNCTION_LF_ROOT=examples/lambda-feedback-fixtures/boilerplate-python \
-FUNCTION_LF_EVAL_ENTRYPOINT=evaluation_function.evaluation:evaluation_function \
-FUNCTION_LF_PREVIEW_ENTRYPOINT=evaluation_function.preview:preview_function \
-FUNCTION_LF_ADAPTER_ROOT=examples/lambda-feedback-adapter \
-FUNCTION_LF_BUNDLER=tools/lf-bundle-python/lf_bundle_python.py \
-./shimmy serve
-```
-
-### Pyodide compatibility
-
-```bash
-FUNCTION_INTERFACE=pyodide \
-FUNCTION_PYODIDE_RUNNER=examples/eval-pyodide/runner.js \
-FUNCTION_PYODIDE_SCRIPT=examples/eval-pyodide/eval.py \
-FUNCTION_PYODIDE_PACKAGES=scipy,numpy \
-./shimmy serve
-```
+The manifest and every image component are SHA-256 verified. `file` owns one
+fresh VM per request. Non-Lambda `rpc` is persistent; Lambda defaults to lazy
+single-use ownership. Shimmy never retries a failed native/DBI request under
+QEMU. There is no silent KVM-to-TCG fallback.
 
 ## Compatibility aliases
 
-These still work but should not be used for new deployment docs:
+Accepted but not recommended for new configurations:
 
-- `FUNCTION_INTERFACE=reactor-python` — compatibility alias for the python-reactor profile.
-- `FUNCTION_COMMAND=/path/to/module.wasm` — still accepted for WASM module paths, but `FUNCTION_WASM_MODULE` is clearer in deployment recipes.
-- `FUNCTION_INTERFACE=python-wasm` — older resident Python/WASM path; keep only for comparison/legacy tests.
+- `FUNCTION_WASM_PROFILE=python-reactor` and `reactor-python` route to
+  `agent-python`;
+- `FUNCTION_INTERFACE=reactor-python` routes to the same Agent Python path;
+- `FUNCTION_COMMAND=/path/module.wasm` remains a generic module-path alias;
+- `FUNCTION_INTERFACE=python-wasm` is the independent legacy resident Python
+  comparison path.

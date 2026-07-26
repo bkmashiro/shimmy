@@ -1,110 +1,102 @@
-# Python-reactor Lambda Feedback handoff
+# Lambda Feedback on Agent Python
 
-**Status:** pending a clean replacement artifact. The interface/configuration below
-is the target contract, not approval to deploy or automatically test the frozen
-legacy pin.
+**Status:** integrated and covered by local/remote consumer gates. This page does
+not claim that a deployment or image has been published.
 
-Exact-bundle reproducibility, the inspected agent-runtime ABI difference, and
-the NumPy binary128 canary are defined in
-[Clean Python runtime handoff gates](python-runtime-handoff.md). This page keeps
-the Lambda Feedback package/configuration contract; both documents must pass
-before replacement.
+The runtime and artifact evidence is documented in
+[Agent Python runtime integration](python-runtime-handoff.md).
 
 ## Deployment shape
 
-Use `wasm` as the execution boundary and `python-reactor` as the WASM profile:
+Use the explicit `agent-python` profile, the pinned Wasm, its manifest, and a
+Lambda Feedback package root:
 
 ```bash
 FUNCTION_INTERFACE=wasm
-FUNCTION_WASM_PROFILE=python-reactor
-FUNCTION_WASM_MODULE=/opt/python-reactor.wasm
+FUNCTION_WASM_PROFILE=agent-python
+FUNCTION_WASM_MODULE=/opt/agent-python/agent-python-runtime-numpy-core.wasm
+FUNCTION_WASM_MANIFEST=/opt/agent-python/manifest.json
 FUNCTION_LF_ROOT=/var/task
 ```
 
-For non-standard package layouts, prefer one config file over a long env list:
+For a non-standard layout, use one config file:
 
 ```bash
-FUNCTION_INTERFACE=wasm
-FUNCTION_WASM_PROFILE=python-reactor
-FUNCTION_WASM_MODULE=/opt/python-reactor.wasm
 FUNCTION_LF_CONFIG=/var/task/shimmy-lf.json
 ```
-
-Example `shimmy-lf.json`:
 
 ```json
 {
   "root": "/var/task",
   "eval": "evaluation_function.evaluation:evaluation_function",
   "preview": "evaluation_function.preview:preview_function",
-  "include_roots": ["/opt/lf-puredeps"],
-  "sys_path": ["/opt/lf-puredeps.zip"]
+  "include_roots": ["/opt/lf-puredeps"]
 }
 ```
 
-Explicit `FUNCTION_LF_*` environment variables override config-file values.
+Explicit `FUNCTION_LF_*` variables override config-file values.
 
-## Artifact policy
+At startup Shimmy runs `tools/lf-bundle-python/lf_bundle_python.py` once and
+passes the generated trusted script to `runtime_prepare`. Bundling is not done
+per request. Each request still receives a fresh, single-use runtime instance.
 
-`python-reactor.wasm` must be pinned by immutable release URL/tag and SHA-256. Do
-not use a floating `latest` asset for handoff or Lambda smoke.
+## Filesystem and dependency boundary
 
-The existing entry in `scripts/python-reactor-artifact.env` is frozen historical
-evidence and must not be used for a new deployment:
+Agent Python exposes no Host filesystem paths to guest code. Consequently:
+
+- `FUNCTION_LF_INCLUDE_ROOTS` is supported: Shimmy reads and embeds those
+  pure-Python dependencies before sandbox startup;
+- `FUNCTION_LF_SYS_PATH` and `sys_path` in `FUNCTION_LF_CONFIG` are rejected;
+- no `ctypes`, NumPy random, FFT, filesystem, or import polyfills are injected;
+- NumPy core and linear algebra come from the pinned runtime artifact;
+- SciPy-heavy evaluators remain on the Pyodide route.
+
+The guest imports only `agent_runtime_v1.host_call` beyond WASI. Shimmy currently
+rejects every capability call, so package evaluators cannot obtain network or
+credential access through the runtime.
+
+## Artifact identity
 
 ```text
-repo:    bkmashiro/webassembly-language-runtimes
-version: v1.0.14
-asset:   python-reactor.wasm
-sha256:  78dcbb6d673351c0d3b776c42d2fb93b6f638cdc714d58072dece4b115edaa72
-exports: py_init, py_prepare, evaluate, py_exec, alloc, dealloc, resp_buf, resp_len
+file:     agent-python-runtime-numpy-core.wasm
+size:     63,626,531 bytes
+sha256:   90c27951b2d8c2c7a8b42705b365cb4231c6dad207aad5260d55d2f9a85f1034
+commit:   76b49158cc6c4824491561531bfe7e34872cb820
+ABI:      v1
+profile:  numpy-core
 ```
 
-Replacement acceptance procedure:
+The complete bundle is checked in through Git LFS under
+`build/python-reactor/artifacts/`. `SHA256SUMS`, `manifest.json`, SBOM, notices,
+and extension selection are verified before E2E execution.
 
-1. Build the replacement in the authoritative producer named by the handoff
-   (`bkmashiro/agent-python-runtime` is the current candidate) and publish an
-   immutable tagged asset.
-2. Record producer commit, exact URL/tag, SHA-256, CPython/WASI versions, exports,
-   package/API manifest, and known unsupported features.
-3. Prove the required host ABI without legacy `py_exec`/response-buffer polyfills.
-4. Run real script and Lambda Feedback package smokes, repeated state-reset
-   canaries, recoverable-error follow-up, timeout/discard/replacement, and
-   multi-runner prepared-baseline checks on Linux.
-5. Review the raw evidence. Only then update `scripts/python-reactor-artifact.env`,
-   deployment docs, and automatic CI.
-6. Replace a 200+ MiB checked-in compatibility fixture only when a test explicitly
-   requires the new ABI; remove old LFS objects in a separate auditable step.
+## Smoke commands
 
-## Smoke commands after a replacement candidate lands
-
-Do not run these against the frozen legacy pin as current acceptance evidence.
-
-Fast local smoke, safe on macOS:
+Fast artifact/protocol/routing gate:
 
 ```bash
 scripts/smoke-python-reactor-handoff.sh artifact-only
 ```
 
-Linux host smoke:
+Real runtime compatibility, NumPy binary128, capability denial, and timeout
+recovery:
 
 ```bash
 scripts/smoke-python-reactor-handoff.sh direct
 ```
 
-Docker smoke for handoff evidence:
+Real HTTP examples for plain Python and NumPy:
 
 ```bash
-scripts/smoke-python-reactor-handoff.sh docker
+scripts/demo-python-examples.sh reactor-only
 ```
 
-The Docker mode verifies the candidate artifact, checks shell syntax, runs
-dispatcher routing tests, cross-compiles the WASM package test binary for Linux,
-then executes the Lambda Feedback bundle matrix through
-`scripts/demo-reactor-lambda-feedback-bundles.sh docker`.
+The new runtime is cross-platform under wazero; these commands do not require a
+Linux-only loader or a Docker fallback.
 
-## Compatibility notes
+## Compatibility names
 
-- `FUNCTION_INTERFACE=reactor-python` still works as a compatibility alias, but do not use it in new deployment docs.
-- Replacement artifacts must export `evaluate`; the legacy `py_exec + resp_buf + resp_len` fallback is frozen compatibility code, not an accepted replacement contract.
-- Heavy Python package stacks that need Pyodide/Emscripten should use `FUNCTION_INTERFACE=pyodide`, not the python-reactor profile.
+`FUNCTION_WASM_PROFILE=python-reactor`, `reactor-python`, and the legacy
+`FUNCTION_INTERFACE=reactor-python` are accepted as configuration aliases. All
+of them route to the same Agent Python v1 implementation. New configurations
+should use `FUNCTION_INTERFACE=wasm` and `FUNCTION_WASM_PROFILE=agent-python`.

@@ -48,7 +48,7 @@ Default host ports are `18081` through `18084`, bound to `127.0.0.1` only; overr
 
 ## Pinned inputs
 
-- Python reactor (frozen historical demo input): `bkmashiro/webassembly-language-runtimes@v1.0.14`, SHA-256 `78dcbb6d673351c0d3b776c42d2fb93b6f638cdc714d58072dece4b115edaa72`.
+- Agent Python Runtime NumPy bundle: producer commit `76b49158cc6c4824491561531bfe7e34872cb820`, Wasm SHA-256 `90c27951b2d8c2c7a8b42705b365cb4231c6dad207aad5260d55d2f9a85f1034`, checked in through Git LFS with its manifest/SBOM/notices.
 - Pyodide: npm lockfile under `examples/eval-pyodide/` (`0.28.x`).
 - Lean evaluator: `lambda-feedback/compareLeanTest@cb99cfc95748772d4ea67d63f3875c2d574660fc` with the checked-in Shimmy file-protocol adapter.
 - DynamoRIO: `11.91.20545`, tar SHA-256 `db8b9f3d0dc14a469da1dc791e120a6cc6d968d2b18facb7bcaa471f4bde22da`, a minimal runtime tree, and a bounded evidence client. This lane is not a complete production sandbox.

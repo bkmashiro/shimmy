@@ -1,4 +1,4 @@
-name: Snapshot Strategy Benchmarks
+name: Shimmy Sandbox Benchmarks
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   bench:
-    name: Generic WASM benchmark (bare Linux)
+    name: Full Linux sandbox benchmark
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -45,6 +45,31 @@ jobs:
           go test ./internal/execution/wasm \
             -run='TestLargeRestoreBenchmarkPlan|TestDirtyPageRanges|TestUffdStrategyDirtyPageCountReportsTrackedBits' \
             -count=1 -v
+
+      - name: Benchmark subprocess RPC baselines
+        run: |
+          go test -run='^$' \
+            -bench='^BenchmarkSubprocessRPC_Echo' \
+            -benchtime=2s -count=5 -timeout=1800s -benchmem \
+            ./internal/execution/ | tee bench-subprocess.txt
+
+      - name: Benchmark generic WASM dispatcher and restore strategies
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          go test -run='^$' \
+            -bench='^(BenchmarkDispatcher_Send_|BenchmarkSnapshotRestore_)' \
+            -benchtime=2s -count=5 -timeout=1800s -benchmem \
+            ./internal/execution/wasm/ | tee bench-wasm-runtime.txt
+
+      - name: Benchmark Linux COW reset against full copy
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          go test -run='^$' \
+            -bench='^BenchmarkCowVsFullCopyResetOnly$' \
+            -benchtime=2s -count=5 -timeout=1800s -benchmem \
+            ./internal/execution/wasm/ | tee bench-cow.txt
 
       - name: Benchmark large-memory restore and UFFD phases
         env:

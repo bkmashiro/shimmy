@@ -71,6 +71,26 @@ func TestCowWazeroMemoryGrowthFailsAfterPreparedImageAttach(t *testing.T) {
 	require.True(t, supervisor.IsHealthy(), "a rejected grow leaves the fixed mapping valid")
 }
 
+func TestAgentPythonSnapshotStrategyNameReportsCowFallbackAsMemcpy(t *testing.T) {
+	cfg := Config{
+		ModulePath:     echoModulePath(t),
+		MaxInstances:   1,
+		Timeout:        5 * time.Second,
+		SnapshotMode:   "memcpy",
+		MaxMemoryPages: 256,
+	}
+	dispatcher := NewDispatcher(cfg, newTestLogger(t))
+	require.NoError(t, dispatcher.Start(context.Background()))
+	t.Cleanup(func() { require.NoError(t, dispatcher.Shutdown(context.Background())) })
+
+	supervisor := <-dispatcher.pool
+	defer func() { dispatcher.pool <- supervisor }()
+	strategy := newCowSnapshotStrategy(nil, nil, newTestLogger(t))
+	require.NoError(t, strategy.Take(supervisor.mod.Memory()))
+	require.False(t, strategy.UsingCow())
+	require.Equal(t, "memcpy", agentPythonSnapshotStrategyName(strategy))
+}
+
 func TestCowSupervisorRestoreFailureMarksInstanceUnhealthy(t *testing.T) {
 	cfg := Config{
 		ModulePath:     echoModulePath(t),

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +18,15 @@ import (
 	"github.com/tetratelabs/wazero"
 	"go.uber.org/zap"
 )
+
+type agentPythonSnapshotSelectionTestStrategy struct {
+	SnapshotStrategy
+	selected string
+}
+
+func (s *agentPythonSnapshotSelectionTestStrategy) selectedSnapshotMode() string {
+	return s.selected
+}
 
 func writeAgentPythonManifestFixture(t *testing.T, customModule, customName string) (string, string) {
 	t.Helper()
@@ -254,6 +264,52 @@ def preview_function(response, answer, params=None):
 
 func TestAgentPythonSnapshotStrategyName(t *testing.T) {
 	assert.Equal(t, "memcpy", agentPythonSnapshotStrategyName(NewFullMemcpyStrategy()))
+	assert.Equal(t, "cow", agentPythonSnapshotStrategyName(&agentPythonSnapshotSelectionTestStrategy{
+		SnapshotStrategy: NewFullMemcpyStrategy(),
+		selected:         "cow",
+	}))
+	assert.Equal(t, "memcpy", agentPythonSnapshotStrategyName(&agentPythonSnapshotSelectionTestStrategy{
+		SnapshotStrategy: NewFullMemcpyStrategy(),
+		selected:         "memcpy",
+	}))
+}
+
+func TestAcquireAgentPythonSnapshotSlotReplenishesMissingSlot(t *testing.T) {
+	prepared := make(chan *agentPythonModuleSlot, 1)
+	closed := make(chan struct{})
+	want := &agentPythonModuleSlot{snapshotSelected: "memcpy"}
+	calls := 0
+
+	got, err := acquireAgentPythonSnapshotSlot(
+		context.Background(),
+		prepared,
+		closed,
+		func(context.Context) (*agentPythonModuleSlot, error) {
+			calls++
+			return want, nil
+		},
+	)
+
+	require.NoError(t, err)
+	assert.Same(t, want, got)
+	assert.Equal(t, 1, calls)
+}
+
+func TestAcquireAgentPythonSnapshotSlotReturnsReplenishFailure(t *testing.T) {
+	prepared := make(chan *agentPythonModuleSlot, 1)
+	closed := make(chan struct{})
+	wantErr := errors.New("replacement unavailable")
+
+	_, err := acquireAgentPythonSnapshotSlot(
+		context.Background(),
+		prepared,
+		closed,
+		func(context.Context) (*agentPythonModuleSlot, error) {
+			return nil, wantErr
+		},
+	)
+
+	require.ErrorIs(t, err, wantErr)
 }
 
 func TestRestoreAgentPythonSnapshotRejectsMemoryGrowth(t *testing.T) {

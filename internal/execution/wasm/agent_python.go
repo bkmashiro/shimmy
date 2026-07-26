@@ -321,12 +321,20 @@ func (d *AgentPythonDispatcher) Send(ctx context.Context, method string, params 
 	var slot *agentPythonModuleSlot
 	switch d.cfg.PythonLifecycle {
 	case "snapshot":
-		select {
-		case slot = <-d.prepared:
-		case <-d.closedCh:
-			return nil, errors.New("agent-python: dispatcher is shut down")
-		case <-ctx.Done():
-			return nil, fmt.Errorf("agent-python: acquire prepared module: %w", ctx.Err())
+		slot, err = acquireAgentPythonSnapshotSlot(
+			runContext,
+			d.prepared,
+			d.closedCh,
+			func(createContext context.Context) (*agentPythonModuleSlot, error) {
+				return d.newPreparedModuleSlot(createContext, true)
+			},
+		)
+		if err != nil {
+			return nil, err
+		}
+		if slot.snapshotSelected != d.snapshotSelected {
+			_ = slot.close(context.Background())
+			return nil, fmt.Errorf("agent-python: replenished snapshot strategy %q, want %q", slot.snapshotSelected, d.snapshotSelected)
 		}
 	case "single-use":
 		select {
@@ -376,6 +384,34 @@ func (d *AgentPythonDispatcher) Send(ctx context.Context, method string, params 
 		return nil, err
 	}
 	return map[string]any{"command": method, "result": result}, nil
+}
+
+func acquireAgentPythonSnapshotSlot(
+	ctx context.Context,
+	prepared <-chan *agentPythonModuleSlot,
+	closed <-chan struct{},
+	create func(context.Context) (*agentPythonModuleSlot, error),
+) (*agentPythonModuleSlot, error) {
+	select {
+	case slot := <-prepared:
+		if slot != nil {
+			return slot, nil
+		}
+	case <-closed:
+		return nil, errors.New("agent-python: dispatcher is shut down")
+	case <-ctx.Done():
+		return nil, fmt.Errorf("agent-python: acquire prepared module: %w", ctx.Err())
+	default:
+	}
+
+	slot, err := create(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("agent-python: replenish missing prepared snapshot slot: %w", err)
+	}
+	if slot == nil {
+		return nil, errors.New("agent-python: replenish missing prepared snapshot slot returned nil")
+	}
+	return slot, nil
 }
 
 func (d *AgentPythonDispatcher) resetMode() string {
@@ -536,7 +572,16 @@ func restoreAgentPythonSnapshot(slot *agentPythonModuleSlot) error {
 	return slot.strategy.Restore(memory)
 }
 
+type snapshotModeReporter interface {
+	selectedSnapshotMode() string
+}
+
 func agentPythonSnapshotStrategyName(strategy SnapshotStrategy) string {
+	if reporter, ok := strategy.(snapshotModeReporter); ok {
+		if selected := reporter.selectedSnapshotMode(); selected != "" {
+			return selected
+		}
+	}
 	name := fmt.Sprintf("%T", strategy)
 	switch {
 	case strings.Contains(name, "CowSnapshotStrategy"):

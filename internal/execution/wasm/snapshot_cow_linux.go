@@ -479,6 +479,12 @@ func (s *CowSnapshotStrategy) Close() error {
 
 func (s *CowSnapshotStrategy) UsingCow() bool  { return s.usingCow }
 func (s *CowSnapshotStrategy) ImageID() string { return s.imageID }
+func (s *CowSnapshotStrategy) selectedSnapshotMode() string {
+	if s.usingCow {
+		return "cow"
+	}
+	return "memcpy"
+}
 
 // cowRuntimeSupport binds one per-instance allocator to one dispatcher-scoped
 // image coordinator while keeping construction details outside the hot path.

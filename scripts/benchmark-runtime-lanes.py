@@ -149,7 +149,10 @@ def assert_lane_runtime_logs(lane: str, logs: str) -> str | None:
         return None
     selected = "linear-memory-cow"
     if selected not in logs:
-        raise ValueError(f"agent-python-cow startup logs must select {selected}")
+        raise ValueError(
+            f"agent-python-cow startup logs must select {selected}; "
+            f"logs_tail={logs[-4000:]!r}"
+        )
     return selected
 
 
@@ -391,6 +394,10 @@ def run(command: Sequence[str], *, capture: bool = True, check: bool = True) -> 
     )
 
 
+def command_output(completed: subprocess.CompletedProcess) -> str:
+    return (completed.stdout or "") + (completed.stderr or "")
+
+
 def compose_prefix(compose_file: pathlib.Path) -> List[str]:
     return ["docker", "compose", "--profile", "dbi", "-f", str(compose_file)]
 
@@ -511,10 +518,12 @@ def benchmark_lane(
         )
         report["service"] = spec.service
         report["resource_limit"] = spec.resource_limit
-        runtime_logs = run(
-            [*prefix, "logs", "--no-color", "--tail=200", spec.service],
-            check=False,
-        ).stdout
+        runtime_logs = command_output(
+            run(
+                [*prefix, "logs", "--no-color", "--tail=200", spec.service],
+                check=False,
+            )
+        )
         selected_reset_mode = assert_lane_runtime_logs(lane, runtime_logs)
         if selected_reset_mode is not None:
             report["selected_reset_mode"] = selected_reset_mode
@@ -525,7 +534,9 @@ def benchmark_lane(
             report["dbi_client_marker"] = marker
         return report
     except Exception:
-        logs = run([*prefix, "logs", "--no-color", "--tail=200", spec.service], check=False).stdout
+        logs = command_output(
+            run([*prefix, "logs", "--no-color", "--tail=200", spec.service], check=False)
+        )
         if logs:
             print(f"--- {lane} logs ---\n{logs}", file=sys.stderr)
         raise

@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import pathlib
+import subprocess
 import sys
 import unittest
 from unittest import mock
@@ -103,6 +104,15 @@ class ComposeLifecycleContractTests(unittest.TestCase):
 
 
 class OrchestrationTests(unittest.TestCase):
+    def test_command_output_combines_stdout_and_stderr(self):
+        completed = subprocess.CompletedProcess(
+            ["docker", "compose", "logs"],
+            0,
+            stdout="out-line\n",
+            stderr="err-line\n",
+        )
+        self.assertEqual("out-line\nerr-line\n", module.command_output(completed))
+
     def test_compose_starts_service_before_inspecting_its_image(self):
         commands = []
 

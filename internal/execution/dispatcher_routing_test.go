@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -212,6 +211,25 @@ func TestNewDispatcher_ReactorPython_RejectsPackageEntrypoints(t *testing.T) {
 	assert.Contains(t, err.Error(), "FUNCTION_INTERFACE=pyodide")
 }
 
+func TestNewDispatcher_AgentPythonRejectsRuntimeSysPath(t *testing.T) {
+	t.Setenv("FUNCTION_LF_ROOT", t.TempDir())
+	t.Setenv("FUNCTION_LF_SYS_PATH", "/opt/runtime-deps.zip")
+
+	_, err := execution.NewDispatcher(execution.Params{
+		Context: context.Background(),
+		Config: execution.Config{
+			Supervisor: supervisor.Config{
+				IO: supervisor.IOConfig{Interface: supervisor.ReactorPythonIO},
+			},
+		},
+		Log: zap.NewNop(),
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not expose Host filesystem paths")
+	assert.Contains(t, err.Error(), "FUNCTION_LF_INCLUDE_ROOTS")
+}
+
 func TestNewDispatcher_ReactorPython_BundlesLambdaFeedbackPackageAtStartup(t *testing.T) {
 	root := t.TempDir()
 	adapterRoot := t.TempDir()
@@ -225,8 +243,7 @@ func TestNewDispatcher_ReactorPython_BundlesLambdaFeedbackPackageAtStartup(t *te
 	t.Setenv("FUNCTION_LF_ADAPTER_ROOT", adapterRoot)
 	t.Setenv("FUNCTION_LF_BUNDLER", bundler)
 	t.Setenv("FUNCTION_LF_BUNDLE_OUT", out)
-	t.Setenv("FUNCTION_LF_INCLUDE_ROOTS", strings.Join([]string{"/opt/puredeps", "/opt/polyfills"}, ","))
-	t.Setenv("FUNCTION_LF_SYS_PATH", "/opt/puredeps.zip")
+	t.Setenv("FUNCTION_LF_INCLUDE_ROOTS", "/opt/puredeps")
 
 	_, err := execution.NewDispatcher(execution.Params{
 		Context: context.Background(),
@@ -253,8 +270,6 @@ func TestNewDispatcher_ReactorPython_BundlesLambdaFeedbackPackageAtStartup(t *te
 	assert.Contains(t, args, "--eval-entrypoint\nevaluation_function.evaluation:evaluation_function")
 	assert.Contains(t, args, "--preview-entrypoint\nevaluation_function.preview:preview_function")
 	assert.Contains(t, args, "--include-root\n/opt/puredeps")
-	assert.Contains(t, args, "--include-root\n/opt/polyfills")
-	assert.Contains(t, args, "--sys-path\n/opt/puredeps.zip")
 	assert.Contains(t, args, "--out\n"+out)
 }
 
@@ -310,8 +325,7 @@ func TestNewDispatcher_ReactorPython_LoadsLambdaFeedbackConfigFileWithEnvOverrid
   "adapter_root": "`+adapterRoot+`",
   "bundler": "`+bundler+`",
   "out": "`+out+`",
-  "include_roots": ["/opt/from-config"],
-  "sys_path": ["/opt/from-config.zip"]
+  "include_roots": ["/opt/from-config"]
 }`), 0o644))
 
 	t.Setenv("FUNCTION_LF_CONFIG", configPath)
@@ -340,7 +354,6 @@ func TestNewDispatcher_ReactorPython_LoadsLambdaFeedbackConfigFileWithEnvOverrid
 	assert.Contains(t, args, "--eval-entrypoint\noverride.module:eval")
 	assert.Contains(t, args, "--preview-entrypoint\npackage.preview:preview")
 	assert.Contains(t, args, "--include-root\n/opt/from-config")
-	assert.Contains(t, args, "--sys-path\n/opt/from-config.zip")
 }
 
 // TestNewDispatcher_ReactorPython_EmptyScriptPath verifies that when

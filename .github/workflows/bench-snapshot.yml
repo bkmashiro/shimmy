@@ -2,18 +2,13 @@ name: Snapshot Strategy Benchmarks
 
 on:
   workflow_dispatch:
-    inputs:
-      suite:
-        description: Benchmark suite to run
-        required: true
-        default: large
-        type: choice
-        options:
-          - large
-          - full
+
+permissions:
+  contents: read
+
 jobs:
   bench:
-    name: Benchmark (bare Linux)
+    name: Generic WASM benchmark (bare Linux)
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -59,54 +54,6 @@ jobs:
             -bench='^(BenchmarkLargeMemoryRestore|BenchmarkUffdLargeMemoryPhases)$' \
             -benchtime=1x -count=3 -timeout=3600s -benchmem \
             ./internal/execution/wasm/ | tee bench-large.txt
-
-      - name: Download python-reactor.wasm
-        if: github.event_name == 'workflow_dispatch' && inputs.suite == 'full'
-        run: |
-          curl -fsSL \
-            "https://github.com/bkmashiro/shimmy-wasm-go/releases/download/wasm-artifacts/python-reactor.wasm" \
-            -o python-reactor.wasm
-          ls -lh python-reactor.wasm
-
-      - name: BenchmarkRestoreNPages
-        if: github.event_name == 'workflow_dispatch' && inputs.suite == 'full'
-        env:
-          PYTHON_REACTOR_WASM: ${{ github.workspace }}/python-reactor.wasm
-          CGO_ENABLED: "1"
-        run: |
-          go test -run='^$' -bench=BenchmarkRestoreNPages \
-            -benchtime=10s -timeout=3600s -benchmem \
-            ./internal/execution/wasm/ | tee bench-dirty.txt
-
-      - name: BenchmarkStrategy
-        if: github.event_name == 'workflow_dispatch' && inputs.suite == 'full'
-        env:
-          PYTHON_REACTOR_WASM: ${{ github.workspace }}/python-reactor.wasm
-          CGO_ENABLED: "1"
-        run: |
-          go test -run='^$' -bench=BenchmarkStrategy \
-            -benchtime=20s -timeout=3600s -benchmem \
-            ./internal/execution/wasm/ | tee bench-strategy.txt
-
-      - name: BenchmarkPool
-        if: github.event_name == 'workflow_dispatch' && inputs.suite == 'full'
-        env:
-          PYTHON_REACTOR_WASM: ${{ github.workspace }}/python-reactor.wasm
-          CGO_ENABLED: "1"
-        run: |
-          go test -run='^$' -bench=BenchmarkPool \
-            -benchtime=15s -timeout=3600s -benchmem \
-            ./internal/execution/wasm/ | tee bench-pool.txt
-
-      - name: BenchmarkTakeOnly and BenchmarkRestoreOnly
-        if: github.event_name == 'workflow_dispatch' && inputs.suite == 'full'
-        env:
-          PYTHON_REACTOR_WASM: ${{ github.workspace }}/python-reactor.wasm
-          CGO_ENABLED: "1"
-        run: |
-          go test -run='^$' -bench='BenchmarkTakeOnly|BenchmarkRestoreOnly' \
-            -benchtime=10s -timeout=3600s -benchmem \
-            ./internal/execution/wasm/ | tee bench-isolate.txt
 
       - name: Upload benchmark evidence
         uses: actions/upload-artifact@v7

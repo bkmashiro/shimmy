@@ -2,69 +2,67 @@
   {
     "fixture": "boilerplate-python",
     "source": ".demo-lambda-sources/evaluation-function-boilerplate-python",
-    "status": "reactor-bundle",
-    "reactor_bundle": true,
+    "status": "agent-python-qualified",
+    "agent_python_bundle": true,
     "pyodide_package": true,
     "requires_pure_python_deps": [],
-    "requires_reactor_artifact_deps": [],
-    "pyodide_only_reasons": [],
-    "verified_probes": ["eval", "preview-registration"]
+    "requires_agent_artifact_deps": [],
+    "unqualified_reasons": [],
+    "verified_probes": ["eval", "preview"]
   },
   {
     "fixture": "compare-boolean",
     "source": ".demo-lambda-sources/compareBoolean",
-    "status": "reactor-bundle-pure-deps",
-    "reactor_bundle": true,
+    "status": "not-qualified",
+    "agent_python_bundle": false,
     "pyodide_package": true,
-    "requires_pure_python_deps": ["mpmath"],
-    "requires_reactor_artifact_deps": ["sympy"],
-    "requires_bundle_polyfills": ["ctypes"],
-    "pyodide_only_reasons": [],
-    "verified_probes": ["eval", "preview-entrypoint"]
+    "requires_pure_python_deps": ["mpmath", "sympy"],
+    "requires_agent_artifact_deps": [],
+    "unqualified_reasons": ["SymPy is not packaged", "no ctypes compatibility polyfill is injected"],
+    "verified_probes": []
   },
   {
     "fixture": "array-equal",
     "source": ".demo-lambda-sources/ArrayEqual/app",
-    "status": "reactor-bundle-artifact-native",
-    "reactor_bundle": true,
+    "status": "agent-python-candidate",
+    "agent_python_bundle": true,
     "pyodide_package": true,
     "requires_pure_python_deps": [],
-    "requires_reactor_artifact_deps": ["numpy"],
-    "pyodide_only_reasons": [],
-    "verified_probes": ["eval"]
+    "requires_agent_artifact_deps": ["numpy"],
+    "unqualified_reasons": ["current Agent Python fixture E2E has not been run"],
+    "verified_probes": []
   },
   {
     "fixture": "is-similar",
     "source": ".demo-lambda-sources/IsSimilar/app",
-    "status": "reactor-bundle-artifact-native",
-    "reactor_bundle": true,
+    "status": "agent-python-candidate",
+    "agent_python_bundle": true,
     "pyodide_package": true,
     "requires_pure_python_deps": [],
-    "requires_reactor_artifact_deps": ["numpy"],
-    "pyodide_only_reasons": [],
-    "verified_probes": ["eval"]
+    "requires_agent_artifact_deps": ["numpy"],
+    "unqualified_reasons": ["current Agent Python fixture E2E has not been run"],
+    "verified_probes": []
   },
   {
     "fixture": "symbolic-equal",
     "source": ".demo-lambda-sources/SymbolicEqual/app",
-    "status": "reactor-bundle-pure-deps",
-    "reactor_bundle": true,
+    "status": "not-qualified",
+    "agent_python_bundle": false,
     "pyodide_package": true,
-    "requires_pure_python_deps": ["mpmath", "typing_extensions", "antlr4-python3-runtime", "latex2sympy2"],
-    "requires_reactor_artifact_deps": ["sympy"],
-    "requires_bundle_rewrites": ["typing.io -> typing", "typing.re -> typing"],
-    "pyodide_only_reasons": [],
-    "verified_probes": ["eval", "latex-preview"]
+    "requires_pure_python_deps": ["sympy", "mpmath", "typing_extensions", "antlr4-python3-runtime", "latex2sympy2"],
+    "requires_agent_artifact_deps": [],
+    "unqualified_reasons": ["SymPy and the LaTeX dependency stack are not packaged"],
+    "verified_probes": []
   },
   {
     "fixture": "short-text-answer",
     "source": ".demo-lambda-sources/shortTextAnswer/app",
     "status": "pyodide-only",
-    "reactor_bundle": false,
+    "agent_python_bundle": false,
     "pyodide_package": true,
     "requires_pure_python_deps": ["certifi"],
-    "requires_reactor_artifact_deps": ["numpy"],
-    "pyodide_only_reasons": ["nltk data/filesystem setup", "gensim/scipy dependency chain", "matplotlib heavy native/rendering stack"],
+    "requires_agent_artifact_deps": ["numpy"],
+    "unqualified_reasons": ["nltk data/filesystem setup", "gensim/scipy dependency chain", "matplotlib native/rendering stack"],
     "verified_probes": []
   }
 ]

@@ -30,7 +30,3 @@ Shimmy does not build the CPython/NumPy artifact in this directory. Artifact
 production remains isolated in `bkmashiro/agent-python-runtime`; this repository
 owns the Host adapter, manifest verification, protocol compatibility, and final
 consumer E2E gates.
-
-`py_reactor.c`, `ci-build.yml`, and `artifacts/python-reactor.wasm` are legacy
-CPython 3.12 experiment files. They remain only until the new path passes remote
-CI and are not reachable from the production profile router.

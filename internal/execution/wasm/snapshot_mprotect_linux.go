@@ -124,7 +124,7 @@ static uint64_t read_dirty_word(int i) {
 static int dirty_nwords(void) { return g_dirty_nwords; }
 
 // force_dirty_n_pages: for benchmarking only.
-// Simulates N pages having been written during py_exec:
+// Simulates N pages having been written during guest execution:
 //   1. One mprotect(PROT_READ|PROT_WRITE) call covers the ENTIRE region.
 //      (N individual per-page mprotect calls fragment the kernel VMA tree,
 //       causing O(N²) VMA merge/split work in mprotect_ro — measured as

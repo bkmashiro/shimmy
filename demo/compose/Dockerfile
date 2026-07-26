@@ -1,9 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
 ARG GO_VERSION=1.24
-ARG REACTOR_REPO=bkmashiro/webassembly-language-runtimes
-ARG REACTOR_VERSION=v1.0.14
-ARG REACTOR_SHA256=78dcbb6d673351c0d3b776c42d2fb93b6f638cdc714d58072dece4b115edaa72
 ARG DR_VERSION=11.91.20545
 ARG DR_SHA256=db8b9f3d0dc14a469da1dc791e120a6cc6d968d2b18facb7bcaa471f4bde22da
 ARG LEAN_EVALUATOR_REF=cb99cfc95748772d4ea67d63f3875c2d574660fc
@@ -29,16 +26,6 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     GOOS=wasip1 GOARCH=wasm go build -trimpath -buildvcs=false \
       -buildmode=c-shared -o /out/generic-evaluator.wasm .
 
-FROM --platform=$BUILDPLATFORM alpine:3.22 AS reactor-fetch
-ARG REACTOR_REPO
-ARG REACTOR_VERSION
-ARG REACTOR_SHA256
-RUN apk add --no-cache ca-certificates curl
-RUN curl -fL --retry 3 \
-      "https://github.com/${REACTOR_REPO}/releases/download/${REACTOR_VERSION}/python-reactor.wasm" \
-      -o /python-reactor.wasm && \
-    echo "${REACTOR_SHA256}  /python-reactor.wasm" | sha256sum -c -
-
 FROM busybox:1.37.0-musl AS generic
 COPY --from=shimmy-build /out/shimmy /shimmy
 COPY --from=shimmy-build /out/generic-evaluator.wasm /opt/evaluators/generic.wasm
@@ -55,14 +42,16 @@ CMD ["serve", "--host", "0.0.0.0", "--port", "8080"]
 
 FROM busybox:1.37.0-musl AS python-reactor
 COPY --from=shimmy-build /out/shimmy /shimmy
-COPY --from=reactor-fetch /python-reactor.wasm /opt/runtimes/python-reactor.wasm
+COPY build/python-reactor/artifacts/ /opt/runtimes/agent-python/
 COPY examples/eval-python/eval.py /opt/evaluators/eval.py
+RUN echo "90c27951b2d8c2c7a8b42705b365cb4231c6dad207aad5260d55d2f9a85f1034  /opt/runtimes/agent-python/agent-python-runtime-numpy-core.wasm" | sha256sum -c -
 ENV LOG_LEVEL=error \
     FUNCTION_INTERFACE=wasm \
-    FUNCTION_WASM_PROFILE=python-reactor \
-    FUNCTION_WASM_MODULE=/opt/runtimes/python-reactor.wasm \
+    FUNCTION_WASM_PROFILE=agent-python \
+    FUNCTION_WASM_MODULE=/opt/runtimes/agent-python/agent-python-runtime-numpy-core.wasm \
+    FUNCTION_WASM_MANIFEST=/opt/runtimes/agent-python/manifest.json \
     FUNCTION_WASM_PYTHON_SCRIPT=/opt/evaluators/eval.py \
-    FUNCTION_WASM_MAX_MEMORY_PAGES=4096 \
+    FUNCTION_WASM_MAX_MEMORY_PAGES=8192 \
     FUNCTION_MAX_PROCS=1 \
     FUNCTION_WORKER_SEND_TIMEOUT=60s
 USER 65532:65532

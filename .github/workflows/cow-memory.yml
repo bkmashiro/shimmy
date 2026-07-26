@@ -3,11 +3,6 @@ name: COW Prepared Memory
 on:
   workflow_dispatch:
     inputs:
-      python_reactor:
-        description: Download the pinned Python reactor and run the heavy prepared-baseline proof
-        required: true
-        default: false
-        type: boolean
       mechanism_evidence:
         description: Record reset-only RSS/PSS, page-fault, COW/full-copy, and optional UFFD mechanism evidence
         required: true
@@ -19,7 +14,7 @@ permissions:
 
 jobs:
   cow-linux:
-    name: COW correctness (bare Linux)
+    name: Generic WASM COW correctness (bare Linux)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -37,10 +32,10 @@ jobs:
       - name: Download Go modules
         run: go mod download
 
-      - name: Run focused COW correctness tests
+      - name: Run focused generic COW correctness tests
         run: |
           go test ./internal/execution/wasm \
-            -run='^(TestCow|TestReactorPython(PoolSize|InitConcurrency|Flyweight|DispatcherPartialStart)|TestBorrowedReactorPythonRunner)' \
+            -run='^TestCow' \
             -count=1 -v -timeout=120s
 
       - name: Run explicit snapshot strategy correctness tests
@@ -48,80 +43,6 @@ jobs:
           go test -tags=wasm_experimental ./internal/execution/wasm \
             -run='^(TestSoftDirtyStrategy|TestMprotectStrategy)' \
             -count=1 -v -timeout=120s
-
-  python-reactor-cow:
-    name: Python reactor prepared-image proof
-    if: github.event_name == 'workflow_dispatch' && inputs.python_reactor
-    needs: cow-linux
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    defaults:
-      run:
-        shell: bash -euo pipefail {0}
-
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Download pinned Python reactor artifact
-        run: |
-          curl -fsSL \
-            "https://github.com/bkmashiro/webassembly-language-runtimes/releases/download/v1.0.14/python-reactor.wasm" \
-            -o python-reactor.wasm
-          echo "78dcbb6d673351c0d3b776c42d2fb93b6f638cdc714d58072dece4b115edaa72  python-reactor.wasm" \
-            | sha256sum --check
-          sha256sum python-reactor.wasm | tee python-reactor.sha256
-
-      - name: Run prepared-baseline and repeated-state proof
-        env:
-          PYTHON_REACTOR_WASM: ${{ github.workspace }}/python-reactor.wasm
-          COW_EVIDENCE_PATH: ${{ github.workspace }}/cow-python-evidence.json
-        run: |
-          go test ./internal/execution/wasm \
-            -run='^TestCowPythonReactorPreparedBaselines$' \
-            -count=1 -v -timeout=30m 2>&1 | tee cow-python-test.log
-
-      - name: Record shared-runtime density at N=1/2/4/8
-        env:
-          PYTHON_REACTOR_WASM: ${{ github.workspace }}/python-reactor.wasm
-          COW_DENSITY_CACHE_DIR: ${{ runner.temp }}/wazero-density-cache
-        run: |
-          for instances in 1 2 4 8; do
-            COW_DENSITY_INSTANCES="$instances" \
-            COW_DENSITY_EVIDENCE_PATH="${GITHUB_WORKSPACE}/cow-python-density-${instances}.json" \
-              go test ./internal/execution/wasm \
-                -run='^TestCowPythonReactorFlyweightDensity$' \
-                -count=1 -v -timeout=30m \
-                2>&1 | tee "cow-python-density-${instances}.log"
-          done
-
-      - name: Compare complete prepared request latency
-        env:
-          PYTHON_REACTOR_WASM: ${{ github.workspace }}/python-reactor.wasm
-        run: |
-          go test ./internal/execution/wasm \
-            -run='^$' -bench='^BenchmarkCowPythonPreparedFullRequest$' \
-            -benchtime=5x -count=1 -benchmem -timeout=30m \
-            2>&1 | tee cow-python-benchmark.log
-
-      - name: Upload prepared-image evidence
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: cow-python-${{ github.sha }}
-          path: |
-            python-reactor.sha256
-            cow-python-evidence.json
-            cow-python-test.log
-            cow-python-density-*.json
-            cow-python-density-*.log
-            cow-python-benchmark.log
-          if-no-files-found: warn
-          retention-days: 90
 
   mechanism-evidence:
     name: COW mechanism evidence (reset-only)

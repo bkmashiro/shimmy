@@ -11,8 +11,12 @@ on:
       - "examples/lambda-feedback-adapter/**"
       - "examples/lambda-feedback-fixtures/**"
       - "scripts/demo-python-examples.sh"
+      - "scripts/smoke-python-reactor-handoff.sh"
+      - "scripts/verify-python-reactor-artifact.sh"
+      - "scripts/python-reactor-artifact.env"
       - "scripts/smoke-pyodide-package-http.sh"
       - "scripts/python-runtime-handoff/**"
+      - "tools/lf-bundle-python/**"
       - "build/python-reactor/artifacts/**"
       - "docs/python-runtime-handoff.md"
       - "docs/lambda-feedback-handoff.md"
@@ -34,8 +38,12 @@ on:
       - "examples/lambda-feedback-adapter/**"
       - "examples/lambda-feedback-fixtures/**"
       - "scripts/demo-python-examples.sh"
+      - "scripts/smoke-python-reactor-handoff.sh"
+      - "scripts/verify-python-reactor-artifact.sh"
+      - "scripts/python-reactor-artifact.env"
       - "scripts/smoke-pyodide-package-http.sh"
       - "scripts/python-runtime-handoff/**"
+      - "tools/lf-bundle-python/**"
       - "build/python-reactor/artifacts/**"
       - "docs/python-runtime-handoff.md"
       - "docs/lambda-feedback-handoff.md"
@@ -121,7 +129,7 @@ jobs:
           AGENT_PYTHON_RUNTIME_MANIFEST: ${{ github.workspace }}/build/python-reactor/artifacts/manifest.json
         run: |
           go test ./internal/execution/wasm \
-            -run='^TestAgentPythonDispatcher(RealNumPyArtifactCompatibility|TimeoutDoesNotPoisonRuntime)$' \
+            -run='^TestAgentPythonDispatcher(RealNumPyArtifactCompatibility|TimeoutDoesNotPoisonRuntime|RealLambdaFeedbackBundle)$' \
             -count=1 -v -timeout=15m
 
   pyodide-compatibility:

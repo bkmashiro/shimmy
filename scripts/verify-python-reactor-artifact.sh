@@ -5,23 +5,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=scripts/python-reactor-artifact.env
 source "${ROOT}/scripts/python-reactor-artifact.env"
 
-need() { command -v "$1" >/dev/null 2>&1; }
-
-sha256_file() {
-  if need sha256sum; then
-    sha256sum "$1" | awk '{print $1}'
-  else
-    shasum -a 256 "$1" | awk '{print $1}'
-  fi
-}
-
 usage() {
-  cat >&2 <<EOF
-usage: $0 [path/to/python-reactor.wasm]
+  cat >&2 <<'EOF'
+usage: scripts/verify-python-reactor-artifact.sh [artifact.wasm [manifest.json]]
 
-Verifies the pinned python-reactor.wasm artifact hash and required exports.
-If no path is provided, verifies/downloads the pinned release in the artifact cache.
-If the target file is missing, downloads ${SHIMMY_REACTOR_URL} first.
+Verifies the pinned Agent Python Runtime bundle, manifest binding, and actual
+Wasm v1 imports/exports. No artifact is downloaded implicitly.
 EOF
 }
 
@@ -30,79 +19,156 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   exit 0
 fi
 
-wasm="${1:-${SHIMMY_REACTOR_ARTIFACT_DIR}/python-reactor-${SHIMMY_REACTOR_VERSION}.wasm}"
-if [[ ! -f "${wasm}" ]]; then
-  echo "==> ${wasm} missing; downloading ${SHIMMY_REACTOR_URL}"
-  mkdir -p "$(dirname "${wasm}")"
-  if need curl; then
-    curl -fL "${SHIMMY_REACTOR_URL}" -o "${wasm}"
-  elif need wget; then
-    wget -O "${wasm}" "${SHIMMY_REACTOR_URL}"
-  else
-    echo "error: curl or wget is required to download ${SHIMMY_REACTOR_URL}" >&2
-    exit 1
-  fi
-fi
+wasm="${1:-${SHIMMY_REACTOR_WASM}}"
+manifest="${2:-$(dirname "${wasm}")/${SHIMMY_REACTOR_MANIFEST}}"
 
-actual="$(sha256_file "${wasm}")"
-echo "==> artifact: ${wasm}"
-echo "    release: ${SHIMMY_REACTOR_REPO}@${SHIMMY_REACTOR_VERSION}"
-echo "    sha256:  ${actual}"
-if [[ "${actual}" != "${SHIMMY_REACTOR_SHA256}" ]]; then
-  echo "error: sha256 mismatch; expected ${SHIMMY_REACTOR_SHA256}" >&2
-  exit 1
-fi
-
-python3 - "${wasm}" <<'PY'
+python3 - "${wasm}" "${manifest}" "${SHIMMY_REACTOR_SHA256}" "${SHIMMY_REACTOR_PRODUCER_COMMIT}" <<'PY'
+import hashlib
+import json
+import re
 import sys
 from pathlib import Path
 
-path = Path(sys.argv[1])
-data = path.read_bytes()
-required = {"py_init", "py_prepare", "evaluate", "py_exec", "alloc", "dealloc", "resp_buf", "resp_len"}
+wasm_path = Path(sys.argv[1])
+manifest_path = Path(sys.argv[2])
+expected_sha = sys.argv[3]
+expected_commit = sys.argv[4]
 
-pos = 8
-if data[:4] != b"\0asm":
-    raise SystemExit(f"error: {path} is not a WebAssembly module")
+if not wasm_path.is_file():
+    raise SystemExit(f"error: pinned artifact is missing: {wasm_path}")
+if not manifest_path.is_file():
+    raise SystemExit(f"error: pinned manifest is missing: {manifest_path}")
+if wasm_path.is_symlink() or manifest_path.is_symlink():
+    raise SystemExit("error: artifact and manifest must not be symlinks")
 
-def read_u32(i):
+manifest = json.loads(manifest_path.read_text())
+data = wasm_path.read_bytes()
+digest = hashlib.sha256(data).hexdigest()
+artifact = manifest.get("artifact", {})
+build = manifest.get("build", {})
+
+checks = {
+    "schema_version": manifest.get("schema_version") == 2,
+    "abi_version": manifest.get("abi_version") == "v1",
+    "artifact_profile": manifest.get("artifact_profile") == "numpy-core",
+    "target": manifest.get("target") == "wasm32-wasip1",
+    "execution_model": build.get("execution_model") == "reactor",
+    "compiler_target": build.get("compiler_target") == "wasm32-wasip1",
+    "producer_commit": build.get("repository_commit") == expected_commit,
+    "artifact_filename": artifact.get("filename") == wasm_path.name,
+    "artifact_size": artifact.get("size") == len(data),
+    "artifact_sha256": artifact.get("sha256") == digest == expected_sha,
+}
+failed = [name for name, ok in checks.items() if not ok]
+if failed:
+    raise SystemExit("error: manifest binding failed: " + ", ".join(failed))
+if not re.fullmatch(r"[0-9a-f]{40}", build.get("repository_commit", "")):
+    raise SystemExit("error: producer commit is not full lowercase hex")
+if data[:8] != b"\0asm\x01\0\0\0":
+    raise SystemExit("error: artifact is not a WebAssembly core module")
+
+
+def read_u32(pos):
+    value = 0
     shift = 0
-    result = 0
     while True:
-        b = data[i]
-        i += 1
-        result |= (b & 0x7F) << shift
-        if not (b & 0x80):
-            return result, i
+        if pos >= len(data) or shift > 35:
+            raise SystemExit("error: malformed Wasm varuint")
+        byte = data[pos]
+        pos += 1
+        value |= (byte & 0x7F) << shift
+        if not byte & 0x80:
+            return value, pos
         shift += 7
 
-def read_name(i):
-    n, i = read_u32(i)
-    s = data[i:i+n].decode("utf-8", "replace")
-    return s, i+n
 
-exports = set()
+def read_name(pos):
+    length, pos = read_u32(pos)
+    end = pos + length
+    if end > len(data):
+        raise SystemExit("error: malformed Wasm name")
+    return data[pos:end].decode("utf-8"), end
+
+
+def skip_limits(pos):
+    flags, pos = read_u32(pos)
+    _, pos = read_u32(pos)
+    if flags & 1:
+        _, pos = read_u32(pos)
+    return pos
+
+
+imports = []
+exports = []
+pos = 8
 while pos < len(data):
-    sec_id = data[pos]
+    section_id = data[pos]
     pos += 1
-    sec_len, pos = read_u32(pos)
-    end = pos + sec_len
-    if sec_id == 7:
+    section_length, pos = read_u32(pos)
+    end = pos + section_length
+    if end > len(data):
+        raise SystemExit("error: malformed Wasm section length")
+    if section_id == 2:
+        count, pos = read_u32(pos)
+        for _ in range(count):
+            module, pos = read_name(pos)
+            name, pos = read_name(pos)
+            imports.append((module, name))
+            kind = data[pos]
+            pos += 1
+            if kind == 0:
+                _, pos = read_u32(pos)
+            elif kind == 1:
+                pos += 1
+                pos = skip_limits(pos)
+            elif kind == 2:
+                pos = skip_limits(pos)
+            elif kind == 3:
+                pos += 2
+            elif kind == 4:
+                _, pos = read_u32(pos)
+                _, pos = read_u32(pos)
+            else:
+                raise SystemExit(f"error: unsupported Wasm import kind {kind}")
+    elif section_id == 7:
         count, pos = read_u32(pos)
         for _ in range(count):
             name, pos = read_name(pos)
-            kind = data[pos]
+            exports.append(name)
             pos += 1
             _, pos = read_u32(pos)
-            if kind == 0:
-                exports.add(name)
-        break
     pos = end
 
-missing = sorted(required - exports)
-print("    exports: ", ", ".join(sorted(exports & required)))
+manifest_imports = sorted((item["module"], item["name"]) for item in manifest["wasm"]["imports"])
+manifest_exports = sorted(manifest["wasm"]["exports"])
+if sorted(imports) != manifest_imports:
+    raise SystemExit("error: actual Wasm imports differ from manifest")
+if sorted(exports) != manifest_exports:
+    raise SystemExit("error: actual Wasm exports differ from manifest")
+custom = [(module, name) for module, name in imports if module != "wasi_snapshot_preview1"]
+if custom != [("agent_runtime_v1", "host_call")]:
+    raise SystemExit(f"error: unexpected custom imports: {custom}")
+required = {"memory", "_initialize", "runtime_init", "runtime_prepare", "alloc", "dealloc", "execute"}
+missing = sorted(required - set(exports))
 if missing:
     raise SystemExit("error: missing required exports: " + ", ".join(missing))
-PY
 
-echo "    ✓ python-reactor artifact verified"
+checksums = manifest_path.with_name("SHA256SUMS")
+if not checksums.is_file() or checksums.is_symlink():
+    raise SystemExit(f"error: checksum inventory is missing: {checksums}")
+for line in checksums.read_text().splitlines():
+    checksum, filename = line.split(maxsplit=1)
+    candidate = checksums.parent / filename
+    if candidate.parent != checksums.parent or not candidate.is_file() or candidate.is_symlink():
+        raise SystemExit(f"error: unsafe or missing bundle file: {filename}")
+    actual = hashlib.sha256(candidate.read_bytes()).hexdigest()
+    if actual != checksum:
+        raise SystemExit(f"error: checksum mismatch: {filename}")
+
+print(f"artifact: {wasm_path}")
+print(f"profile:  {manifest['artifact_profile']}")
+print(f"commit:   {build['repository_commit']}")
+print(f"sha256:   {digest}")
+print("exports:  " + ", ".join(sorted(required)))
+print("PASS: Agent Python Runtime bundle verified")
+PY

@@ -7,7 +7,7 @@ import (
 )
 
 // poolItem is the interface satisfied by any item that can be shut down when
-// draining a pool (wasmSupervisor, ResidentPythonRunner, ReactorPythonRunner).
+// draining a pool (for example wasmSupervisor or ResidentPythonRunner).
 type poolItem interface {
 	Shutdown(ctx context.Context) error
 }

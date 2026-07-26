@@ -26,11 +26,3 @@ func TestPythonPreloadModeRejectsUnknownValue(t *testing.T) {
 		t.Fatal("unknown preload mode must fail closed")
 	}
 }
-
-func TestPythonSnapshotHeadroomDefaultsToEightMiB(t *testing.T) {
-	var cfg Config
-	cfg.applyDefaults()
-	if cfg.PythonSnapshotHeadroomBytes != 8*1024*1024 {
-		t.Fatalf("headroom = %d, want 8 MiB", cfg.PythonSnapshotHeadroomBytes)
-	}
-}

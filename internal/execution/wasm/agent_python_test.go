@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -145,6 +147,14 @@ func TestDecodeAgentPythonResponseMapsPythonExceptionToLegacyStructuredResult(t 
 	assert.Equal(t, "python_exception", result["error_code"])
 }
 
+func TestAgentPythonRejectsHostFilesystemPaths(t *testing.T) {
+	t.Setenv("FUNCTION_WASM_ALLOWED_PATHS", "/tmp")
+	dispatcher := NewAgentPythonDispatcher(Config{}, zap.NewNop())
+	err := dispatcher.Start(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not expose Host filesystem paths")
+}
+
 func TestAgentPythonDispatcherRealNumPyArtifactCompatibility(t *testing.T) {
 	wasmPath := os.Getenv("AGENT_PYTHON_RUNTIME_WASM")
 	manifestPath := os.Getenv("AGENT_PYTHON_RUNTIME_MANIFEST")
@@ -274,4 +284,61 @@ def evaluation_function(response, answer, params=None):
 	after, err := dispatcher.Send(context.Background(), "eval", map[string]any{"response": "42", "answer": "42"})
 	require.NoError(t, err)
 	assert.Equal(t, true, after["result"].(map[string]any)["is_correct"])
+}
+
+func TestAgentPythonDispatcherRealLambdaFeedbackBundle(t *testing.T) {
+	wasmPath := os.Getenv("AGENT_PYTHON_RUNTIME_WASM")
+	manifestPath := os.Getenv("AGENT_PYTHON_RUNTIME_MANIFEST")
+	if wasmPath == "" || manifestPath == "" {
+		t.Skip("set AGENT_PYTHON_RUNTIME_WASM and AGENT_PYTHON_RUNTIME_MANIFEST")
+	}
+
+	_, currentFile, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(currentFile), "..", "..", ".."))
+	bundlePath := filepath.Join(t.TempDir(), "boilerplate.bundle.py")
+	command := exec.Command("python3",
+		filepath.Join(repoRoot, "tools", "lf-bundle-python", "lf_bundle_python.py"),
+		"--root", filepath.Join(repoRoot, "examples", "lambda-feedback-fixtures", "boilerplate-python"),
+		"--adapter-root", filepath.Join(repoRoot, "examples", "lambda-feedback-adapter"),
+		"--eval-entrypoint", "evaluation_function.evaluation:evaluation_function",
+		"--preview-entrypoint", "evaluation_function.preview:preview_function",
+		"--out", bundlePath,
+	)
+	command.Env = append(os.Environ(), "PYTHONDONTWRITEBYTECODE=1")
+	output, err := command.CombinedOutput()
+	require.NoError(t, err, string(output))
+
+	dispatcher := NewAgentPythonDispatcher(Config{
+		ModulePath:              wasmPath,
+		AgentPythonManifestPath: manifestPath,
+		PythonScriptPath:        bundlePath,
+		MaxMemoryPages:          8192,
+		MaxInstances:            1,
+		Timeout:                 2 * time.Minute,
+	}, zap.NewNop())
+	startContext, startCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer startCancel()
+	require.NoError(t, dispatcher.Start(startContext))
+	t.Cleanup(func() {
+		shutdownContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = dispatcher.Shutdown(shutdownContext)
+	})
+
+	evalResult, err := dispatcher.Send(context.Background(), "eval", map[string]any{
+		"response": "same",
+		"answer":   "same",
+		"params":   map[string]any{},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, true, evalResult["result"].(map[string]any)["is_correct"])
+
+	previewResult, err := dispatcher.Send(context.Background(), "preview", map[string]any{
+		"response": "x+y",
+		"params":   map[string]any{},
+	})
+	require.NoError(t, err)
+	preview := previewResult["result"].(map[string]any)["preview"].(map[string]any)
+	assert.Equal(t, "x+y", preview["sympy"])
 }

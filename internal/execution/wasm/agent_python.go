@@ -98,6 +98,9 @@ func (d *AgentPythonDispatcher) Start(ctx context.Context) error {
 	if d.cfg.SnapshotMode != "" || d.cfg.UseUffd {
 		return errors.New("agent-python: snapshot modes are unsupported for the fresh-instance runtime; unset FUNCTION_WASM_SNAPSHOT_MODE and FUNCTION_WASM_USE_UFFD")
 	}
+	if len(d.cfg.AllowedPaths) != 0 {
+		return errors.New("agent-python does not expose Host filesystem paths; unset FUNCTION_WASM_ALLOWED_PATHS")
+	}
 	if d.cfg.PythonScriptPath == "" {
 		return errors.New("agent-python: PythonScriptPath must be set (FUNCTION_WASM_PYTHON_SCRIPT)")
 	}

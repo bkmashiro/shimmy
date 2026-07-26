@@ -3,43 +3,53 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODE="${1:-artifact-only}"
+# shellcheck source=scripts/python-reactor-artifact.env
+source "${ROOT}/scripts/python-reactor-artifact.env"
 
 usage() {
   cat >&2 <<'EOF'
-usage: scripts/smoke-python-reactor-handoff.sh [artifact-only|direct|docker]
+usage: scripts/smoke-python-reactor-handoff.sh [artifact-only|direct]
 
-artifact-only  Verify pinned artifact + compile/routing tests. Fast and macOS-safe.
-direct         Also run the Linux host Lambda Feedback bundle matrix directly.
-docker         Also run the Lambda Feedback bundle matrix inside golang:1.24 Docker.
+artifact-only  Verify the pinned bundle, protocol tests, routing, and Linux compile.
+direct         Also execute compatibility, NumPy binary128, denial, and timeout recovery.
 EOF
 }
 
 case "${MODE}" in
-  artifact-only|direct|docker) ;;
+  artifact-only|direct) ;;
   -h|--help) usage; exit 0 ;;
   *) usage; exit 1 ;;
 esac
 
 cd "${ROOT}"
 
-echo "==> verifying pinned python-reactor artifact"
+echo "==> verifying pinned Agent Python Runtime bundle"
 scripts/verify-python-reactor-artifact.sh
 
 echo "==> shell syntax checks"
 bash -n scripts/demo-python-examples.sh \
-  scripts/demo-reactor-lambda-feedback-bundles.sh \
+  scripts/smoke-python-reactor-handoff.sh \
   scripts/verify-python-reactor-artifact.sh
 
-echo "==> dispatcher routing tests"
-go test ./internal/execution -run 'TestNewDispatcher_.*Wasm|TestNewDispatcher_.*Reactor|TestScriptRouting' -v
+echo "==> protocol and dispatcher routing tests"
+go test ./internal/execution/wasm \
+  -run='Test(VerifyAgentPython|BuildAgentPython|DecodeAgentPython)' \
+  -count=1
+go test ./internal/execution \
+  -run='TestNewDispatcher_.*Wasm|TestNewDispatcher_.*Reactor|TestScriptRouting' \
+  -count=1
 
-echo "==> linux compile gate for wasm package"
-GOOS=linux GOARCH=amd64 go test -c ./internal/execution/wasm -o /tmp/shimmy-wasm.test
+echo "==> Linux compile gate"
+GOOS=linux GOARCH=amd64 go test -c ./internal/execution/wasm -o /tmp/shimmy-wasm-agent-python.test
+rm -f /tmp/shimmy-wasm-agent-python.test
 
-if [[ "${MODE}" == "artifact-only" ]]; then
-  echo "==> artifact-only smoke complete"
-  exit 0
+if [[ "${MODE}" == "direct" ]]; then
+  echo "==> real Agent Python Runtime E2E"
+  AGENT_PYTHON_RUNTIME_WASM="${SHIMMY_REACTOR_WASM}" \
+  AGENT_PYTHON_RUNTIME_MANIFEST="${SHIMMY_REACTOR_MANIFEST_PATH}" \
+    go test ./internal/execution/wasm \
+      -run='^TestAgentPythonDispatcher(RealNumPyArtifactCompatibility|TimeoutDoesNotPoisonRuntime|RealLambdaFeedbackBundle)$' \
+      -count=1 -v -timeout=15m
 fi
 
-echo "==> Lambda Feedback reactor bundle matrix (${MODE})"
-scripts/demo-reactor-lambda-feedback-bundles.sh "${MODE}"
+echo "PASS: Agent Python Runtime handoff smoke (${MODE})"

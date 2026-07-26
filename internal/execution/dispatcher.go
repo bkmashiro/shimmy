@@ -236,6 +236,9 @@ func reactorPythonLambdaFeedbackConfig() (lambdaFeedbackBundleConfig, bool, erro
 	if envSysPath := splitEnvList(os.Getenv("FUNCTION_LF_SYS_PATH")); len(envSysPath) > 0 {
 		sysPath = envSysPath
 	}
+	if len(sysPath) > 0 {
+		return lambdaFeedbackBundleConfig{}, true, fmt.Errorf("agent-python does not expose Host filesystem paths to the guest; embed dependencies at startup with FUNCTION_LF_INCLUDE_ROOTS")
+	}
 
 	return lambdaFeedbackBundleConfig{
 		Root:              root,
@@ -246,7 +249,6 @@ func reactorPythonLambdaFeedbackConfig() (lambdaFeedbackBundleConfig, bool, erro
 		Python:            firstNonEmpty(os.Getenv("FUNCTION_LF_BUNDLE_PYTHON"), fileCfg.Python, "python3"),
 		Out:               firstNonEmpty(os.Getenv("FUNCTION_LF_BUNDLE_OUT"), fileCfg.Out),
 		IncludeRoots:      includeRoots,
-		SysPath:           sysPath,
 	}, true, nil
 }
 
@@ -288,7 +290,6 @@ type lambdaFeedbackBundleConfig struct {
 	Python            string
 	Out               string
 	IncludeRoots      []string
-	SysPath           []string
 }
 
 func buildLambdaFeedbackBundle(ctx context.Context, cfg lambdaFeedbackBundleConfig) (string, error) {
@@ -319,9 +320,6 @@ func buildLambdaFeedbackBundle(ctx context.Context, cfg lambdaFeedbackBundleConf
 	}
 	for _, includeRoot := range cfg.IncludeRoots {
 		args = append(args, "--include-root", includeRoot)
-	}
-	for _, sysPath := range cfg.SysPath {
-		args = append(args, "--sys-path", sysPath)
 	}
 
 	cmd := exec.CommandContext(ctx, cfg.Python, args...)

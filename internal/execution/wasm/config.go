@@ -77,19 +77,15 @@ type Config struct {
 	// FUNCTION_WASM_SNAPSHOT_MODE env var.
 	SnapshotMode string `conf:"wasm_snapshot_mode"`
 
-	// PythonScriptPath is the path to the Python eval script (eval.py).
-	// Only used when FUNCTION_INTERFACE=python-wasm.
+	// PythonScriptPath is the host path to the trusted Python evaluation script.
+	// Used by Agent Python and the independent resident Python compatibility path.
 	// The script must define evaluation_function(response, answer, params=None).
 	PythonScriptPath string `conf:"wasm_python_script"`
 
-	// PythonPreloadMode controls whether the trusted evaluator script and its
-	// imports are loaded before the pristine snapshot. "evaluator" (default)
-	// enables post-import snapshots; "off" preserves legacy per-request exec.
+	// PythonPreloadMode controls whether Agent Python passes the trusted evaluator
+	// through runtime_prepare. "evaluator" is the default; "off" executes the
+	// trusted script in each fresh request namespace.
 	PythonPreloadMode string `conf:"wasm_python_preload"`
-
-	// PythonSnapshotHeadroomBytes grows guest memory before taking a prepared
-	// snapshot so normal request allocations do not immediately trigger drift.
-	PythonSnapshotHeadroomBytes uint64 `conf:"wasm_python_snapshot_headroom_bytes"`
 
 	// CompileCacheDir, if non-empty, enables wazero's on-disk compilation cache.
 	// Set via FUNCTION_WASM_COMPILE_CACHE env var. Shared across all runners and
@@ -111,9 +107,7 @@ func (c *Config) applyDefaults() {
 	if c.PythonPreloadMode == "" {
 		c.PythonPreloadMode = "evaluator"
 	}
-	if c.PythonSnapshotHeadroomBytes == 0 {
-		c.PythonSnapshotHeadroomBytes = 8 * 1024 * 1024
-	}
+
 	// Resolve deprecated UseUffd → SnapshotMode so downstream code never
 	// needs to check both fields.
 	if c.SnapshotMode == "" && c.UseUffd {
@@ -190,11 +184,7 @@ func (c *Config) applyEnv() {
 	if v := os.Getenv("FUNCTION_WASM_PYTHON_PRELOAD"); v != "" {
 		c.PythonPreloadMode = v
 	}
-	if v := os.Getenv("FUNCTION_WASM_PYTHON_SNAPSHOT_HEADROOM_BYTES"); v != "" {
-		if n, err := strconv.ParseUint(v, 10, 64); err == nil {
-			c.PythonSnapshotHeadroomBytes = n
-		}
-	}
+
 	if v := os.Getenv("FUNCTION_WASM_COMPILE_CACHE"); v != "" {
 		c.CompileCacheDir = v
 	}

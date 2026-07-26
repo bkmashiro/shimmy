@@ -35,6 +35,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Pull the pinned Agent Python artifact
+        run: git lfs pull --include="build/python-reactor/artifacts/agent-python-runtime-numpy-core.wasm" --exclude=""
+
       - name: Validate Compose configuration
         run: docker compose -f demo/compose/compose.yaml config --quiet
 
@@ -70,6 +73,10 @@ jobs:
             platforms: linux/amd64
     steps:
       - uses: actions/checkout@v7
+
+      - name: Pull the pinned Agent Python artifact
+        if: matrix.target == 'python-reactor'
+        run: git lfs pull --include="build/python-reactor/artifacts/agent-python-runtime-numpy-core.wasm" --exclude=""
 
       - uses: docker/setup-qemu-action@v4
 

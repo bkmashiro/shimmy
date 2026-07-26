@@ -7,8 +7,6 @@ source "${ROOT}/scripts/python-reactor-artifact.env"
 HOST="127.0.0.1"
 BIN="${SHIMMY_DEMO_BIN:-${ROOT}/bin/shimmy-demo}"
 LOG_DIR="${ROOT}/.demo-logs"
-REACTOR_DOCKER="${SHIMMY_DEMO_REACTOR_DOCKER:-0}"
-GO_IMAGE="${SHIMMY_REACTOR_GO_IMAGE:-golang:1.24}"
 mkdir -p "${LOG_DIR}"
 
 need() { command -v "$1" >/dev/null 2>&1; }
@@ -81,48 +79,17 @@ PY
 }
 
 ensure_reactor_wasm() {
-  local wasm="${ROOT}/internal/execution/wasm/testdata/python-reactor.wasm"
-  if [[ ! -f "${wasm}" ]]; then
-    echo "==> Downloading python-reactor.wasm"
-    mkdir -p "$(dirname "${wasm}")"
-    curl -fsSL \
-      "${SHIMMY_REACTOR_URL}" \
-      -o "${wasm}"
-  fi
-  printf '%s\n' "${wasm}"
-}
-
-run_reactor_examples_docker() {
-  if ! need docker; then
-    echo "error: Docker is required when SHIMMY_DEMO_REACTOR_DOCKER=1" >&2
+  if [[ ! -f "${SHIMMY_REACTOR_WASM}" ]]; then
+    echo "error: pinned Agent Python artifact is missing: ${SHIMMY_REACTOR_WASM}" >&2
     exit 1
   fi
-
-  echo
-  echo "==> Reactor-python examples via Docker (${GO_IMAGE})"
-  echo "    running only the reactor-python portion inside Linux; host Pyodide demo will run afterwards"
-  docker run --rm \
-    -v "${ROOT}":/repo \
-    -v "${SHIMMY_REACTOR_ARTIFACT_DIR}":/artifacts \
-    -v shimmy-go-mod-cache:/go/pkg/mod \
-    -v shimmy-go-build-cache:/root/.cache/go-build \
-    -w /repo \
-    -e SHIMMY_REACTOR_ARTIFACT_DIR=/artifacts \
-    -e SHIMMY_DEMO_REACTOR_DOCKER=0 \
-    -e SHIMMY_DEMO_BIN=/tmp/shimmy-demo \
-    "${GO_IMAGE}" \
-    bash -lc 'set -euo pipefail; export PATH=/usr/local/go/bin:$PATH; if ! command -v python3 >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then apt-get update >/dev/null && apt-get install -y --no-install-recommends python3 curl ca-certificates >/dev/null; fi; ./scripts/demo-python-examples.sh reactor-only'
+  printf '%s\n' "${SHIMMY_REACTOR_WASM}"
 }
 
 run_plain_reactor() {
   echo
-  echo "==> Plain Python route: examples/eval-python via reactor-python"
+  echo "==> Plain Python route: examples/eval-python via agent-python"
   echo '    sample: response="3.14159", answer="3.1416", params={"tolerance":0.001}'
-  if [[ "$(uname -s)" != "Linux" ]]; then
-    echo "    skipped: reactor-python backend is Linux-only in this branch"
-    echo "    run real reactor-python smoke with: ./scripts/smoke-python-reactor-handoff.sh docker"
-    return 0
-  fi
 
   local wasm p base log pid resp
   wasm="$(ensure_reactor_wasm)"
@@ -132,12 +99,13 @@ run_plain_reactor() {
     exec env \
       LOG_LEVEL=error \
       FUNCTION_INTERFACE=wasm \
-      FUNCTION_WASM_PROFILE=python-reactor \
+      FUNCTION_WASM_PROFILE=agent-python \
       FUNCTION_WASM_MODULE="${wasm}" \
+      FUNCTION_WASM_MANIFEST="${SHIMMY_REACTOR_MANIFEST_PATH}" \
       FUNCTION_WASM_PYTHON_SCRIPT="${ROOT}/examples/eval-python/eval.py" \
-      FUNCTION_WASM_MAX_MEMORY_PAGES=4096 \
+      FUNCTION_WASM_MAX_MEMORY_PAGES=8192 \
       FUNCTION_MAX_PROCS=1 \
-      FUNCTION_WORKER_SEND_TIMEOUT=30s \
+      FUNCTION_WORKER_SEND_TIMEOUT=120s \
       "${BIN}" serve --host "${HOST}" --port "${p}"
   ) >"${log}" 2>&1 &
   pid="$!"
@@ -150,30 +118,24 @@ run_plain_reactor() {
 }
 
 run_numpy_reactor() {
-  if [[ "$(uname -s)" != "Linux" ]]; then
-    echo
-    echo "==> NumPy route: examples/eval-numpy via reactor-python"
-    echo "    skipped: reactor-python backend is Linux-only in this branch"
-    echo "    run real reactor-python smoke with: ./scripts/smoke-python-reactor-handoff.sh docker"
-    return 0
-  fi
   local wasm p base log pid resp
   wasm="$(ensure_reactor_wasm)"
   p="$(port)"; base="http://${HOST}:${p}"; log="${LOG_DIR}/python-numpy.log"; rm -f "${log}"
   echo
-  echo "==> NumPy route: examples/eval-numpy via reactor-python"
+  echo "==> NumPy route: examples/eval-numpy via agent-python"
   echo '    sample: response="1,2,3.000001", answer="1,2,3", params={"rtol":0.00001}'
   (
     cd "${ROOT}"
     exec env \
       LOG_LEVEL=error \
       FUNCTION_INTERFACE=wasm \
-      FUNCTION_WASM_PROFILE=python-reactor \
+      FUNCTION_WASM_PROFILE=agent-python \
       FUNCTION_WASM_MODULE="${wasm}" \
+      FUNCTION_WASM_MANIFEST="${SHIMMY_REACTOR_MANIFEST_PATH}" \
       FUNCTION_WASM_PYTHON_SCRIPT="${ROOT}/examples/eval-numpy/eval.py" \
-      FUNCTION_WASM_MAX_MEMORY_PAGES=4096 \
+      FUNCTION_WASM_MAX_MEMORY_PAGES=8192 \
       FUNCTION_MAX_PROCS=1 \
-      FUNCTION_WORKER_SEND_TIMEOUT=30s \
+      FUNCTION_WORKER_SEND_TIMEOUT=120s \
       "${BIN}" serve --host "${HOST}" --port "${p}"
   ) >"${log}" 2>&1 &
   pid="$!"
@@ -231,7 +193,6 @@ main() {
     all|reactor-only|pyodide-only) ;;
     -h|--help)
       echo "usage: $0 [all|reactor-only|pyodide-only]" >&2
-      echo "set SHIMMY_DEMO_REACTOR_DOCKER=1 on macOS to run reactor-python examples in Docker" >&2
       exit 0
       ;;
     *)
@@ -243,11 +204,15 @@ main() {
   echo "==> Building shimmy demo binary"
   (cd "${ROOT}" && go build -trimpath -buildvcs=false -o "${BIN}" .)
 
+  if [[ "${mode}" != "pyodide-only" ]]; then
+    scripts/verify-python-reactor-artifact.sh
+  fi
+
   if [[ "${mode}" == "reactor-only" ]]; then
     run_plain_reactor
     run_numpy_reactor
     echo
-    echo "✅ Reactor-python example demos completed. Logs: ${LOG_DIR}"
+    echo "✅ Agent Python example demos completed. Logs: ${LOG_DIR}"
     return 0
   fi
 
@@ -258,12 +223,8 @@ main() {
     return 0
   fi
 
-  if [[ "$(uname -s)" != "Linux" && "${REACTOR_DOCKER}" == "1" ]]; then
-    run_reactor_examples_docker
-  else
-    run_plain_reactor
-    run_numpy_reactor
-  fi
+  run_plain_reactor
+  run_numpy_reactor
   run_scipy_pyodide
 
   echo

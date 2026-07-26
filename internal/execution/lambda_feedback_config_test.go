@@ -27,5 +27,4 @@ func TestReactorPythonLambdaFeedbackConfigUsesSimpleDefaults(t *testing.T) {
 	assert.Equal(t, "python3", cfg.Python)
 	assert.Empty(t, cfg.Out)
 	assert.Empty(t, cfg.IncludeRoots)
-	assert.Empty(t, cfg.SysPath)
 }

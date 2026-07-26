@@ -30,10 +30,9 @@ const (
 	// Use FUNCTION_PYODIDE_SCRIPT to specify the Python eval script path.
 	PyodideIO IOInterface = "pyodide"
 
-	// ReactorPythonIO describes execution of Python scripts via a reactor-mode
-	// python-reactor.wasm binary running inside wazero with snapshot/restore
-	// isolation. Provides true per-request interpreter isolation via memory
-	// snapshotting after py_init().
+	// ReactorPythonIO is the legacy interface name for Agent Python Runtime v1.
+	// It compiles the reactor artifact once and serves each request in a fresh,
+	// single-use wazero module instance.
 	ReactorPythonIO IOInterface = "reactor-python"
 )
 

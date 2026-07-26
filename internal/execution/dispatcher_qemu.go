@@ -92,13 +92,19 @@ func applyQEMUFallbackConfig(cfg supervisor.Config) (supervisor.Config, error) {
 	case "lazy":
 		cfg.WorkerLifecycle = supervisor.WorkerLifecycleInvocation
 	case "eager":
-		return supervisor.Config{}, fmt.Errorf(
-			"qemu: FUNCTION_QEMU_RESET_POLICY %q requires a post-response Lambda runtime loop, which is not enabled",
-			resetPolicy,
-		)
+		if cfg.IO.Interface != supervisor.RpcIO {
+			return supervisor.Config{}, fmt.Errorf("qemu: FUNCTION_QEMU_RESET_POLICY %q requires rpc interface", resetPolicy)
+		}
+		if strings.TrimSpace(os.Getenv("AWS_LAMBDA_RUNTIME_API")) != "" {
+			return supervisor.Config{}, fmt.Errorf(
+				"qemu: FUNCTION_QEMU_RESET_POLICY %q requires a post-response Lambda runtime loop, which is not enabled",
+				resetPolicy,
+			)
+		}
+		cfg.WorkerLifecycle = supervisor.WorkerLifecycleEager
 	default:
 		return supervisor.Config{}, fmt.Errorf(
-			"qemu: invalid FUNCTION_QEMU_RESET_POLICY %q; supported values are off, lazy",
+			"qemu: invalid FUNCTION_QEMU_RESET_POLICY %q; supported values are off, lazy, eager",
 			resetPolicy,
 		)
 	}

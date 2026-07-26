@@ -92,6 +92,18 @@ func TestSupervisor_Start_Persistent_AcquiresWorker(t *testing.T) {
 	assert.True(t, called)
 }
 
+func TestSupervisor_Start_RPCEagerPrebootsCleanWorker(t *testing.T) {
+	s, a, err := createSupervisorWithAdapterConfig(t, supervisor.Config{
+		IO:              supervisor.IOConfig{Interface: supervisor.RpcIO},
+		WorkerLifecycle: supervisor.WorkerLifecycleEager,
+	})
+	assert.NoError(t, err)
+
+	a.EXPECT().Start(mock.Anything, mock.Anything).Return(nil).Once()
+	assert.NoError(t, s.Start(context.Background()))
+	a.AssertNumberOfCalls(t, "Start", 1)
+}
+
 func TestSupervisor_Start_Persistent_StartsWorker(t *testing.T) {
 	s, a, err := createSupervisor(t, supervisor.RpcIO)
 	assert.NoError(t, err)
@@ -326,6 +338,149 @@ func TestSupervisor_Send_RPCInvocationLifecycleHoldsSlotUntilWorkerExit(t *testi
 	case <-time.After(time.Second):
 		t.Fatal("Send did not return after the old worker exited")
 	}
+}
+
+func TestSupervisor_Send_RPCEagerReleaseRefillsWithoutBlockingAndNextSendWaits(t *testing.T) {
+	s, a, err := createSupervisorWithAdapterConfig(t, supervisor.Config{
+		IO:              supervisor.IOConfig{Interface: supervisor.RpcIO},
+		WorkerLifecycle: supervisor.WorkerLifecycleEager,
+		StopParams:      supervisor.StopConfig{Timeout: time.Second},
+	})
+	assert.NoError(t, err)
+
+	stopStarted := make(chan struct{})
+	allowOldExit := make(chan struct{})
+	thirdStarted := make(chan struct{})
+	a.EXPECT().Start(mock.Anything, mock.Anything).Return(nil).Once()
+	a.EXPECT().Start(mock.Anything, mock.Anything).Return(nil).Once()
+	a.EXPECT().Start(mock.Anything, mock.Anything).Run(func(context.Context, supervisor.StartConfig) {
+		close(thirdStarted)
+	}).Return(nil).Once()
+	a.EXPECT().Send(mock.Anything, "test", mock.Anything, mock.Anything).Return(map[string]any{"ok": true}, nil).Twice()
+	a.EXPECT().Stop().Return(supervisor.ReleaseFunc(func(context.Context) error {
+		close(stopStarted)
+		<-allowOldExit
+		return nil
+	}), nil).Once()
+	a.EXPECT().Stop().Return(supervisor.ReleaseFunc(func(context.Context) error { return nil }), nil).Twice()
+
+	assert.NoError(t, s.Start(context.Background()))
+	first, sendErr := s.Send(context.Background(), "test", map[string]any{"sequence": 1})
+	assert.NoError(t, sendErr)
+	select {
+	case <-stopStarted:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("eager Send did not detach the served worker before releasing its send lock")
+	}
+	assert.NoError(t, first.Release(context.Background()))
+
+	secondReturned := make(chan *supervisor.Result, 1)
+	secondFailed := make(chan error, 1)
+	go func() {
+		result, err := s.Send(context.Background(), "test", map[string]any{"sequence": 2})
+		if err != nil {
+			secondFailed <- err
+			return
+		}
+		secondReturned <- result
+	}()
+	select {
+	case <-secondReturned:
+		t.Fatal("next eager Send used a worker before the old worker exited and refill completed")
+	case err := <-secondFailed:
+		t.Fatalf("next eager Send failed before refill: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(allowOldExit)
+	var second *supervisor.Result
+	select {
+	case second = <-secondReturned:
+	case err := <-secondFailed:
+		t.Fatalf("next eager Send failed after refill: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("next eager Send did not use the refilled worker")
+	}
+	assert.NotNil(t, second)
+	select {
+	case <-thirdStarted:
+	case <-time.After(time.Second):
+		t.Fatal("eager did not begin the next clean refill after the second request")
+	}
+	a.AssertNumberOfCalls(t, "Start", 3)
+
+	wait, shutdownErr := s.Shutdown(context.Background())
+	assert.NoError(t, shutdownErr)
+	assert.NoError(t, wait())
+}
+
+func TestSupervisor_Shutdown_RPCEagerWaitsForInFlightSend(t *testing.T) {
+	config := supervisor.Config{
+		IO:              supervisor.IOConfig{Interface: supervisor.RpcIO},
+		WorkerLifecycle: supervisor.WorkerLifecycleEager,
+		StopParams:      supervisor.StopConfig{Timeout: time.Second},
+	}
+	s, a, err := createSupervisorWithAdapterConfig(t, config)
+	assert.NoError(t, err)
+	sendStarted := make(chan struct{})
+	allowSend := make(chan struct{})
+	stopCalled := make(chan struct{})
+	a.EXPECT().Start(mock.Anything, mock.Anything).Return(nil).Once()
+	a.EXPECT().Send(mock.Anything, "test", mock.Anything, mock.Anything).RunAndReturn(
+		func(context.Context, string, map[string]any, time.Duration) (map[string]any, error) {
+			close(sendStarted)
+			<-allowSend
+			return map[string]any{"ok": true}, nil
+		},
+	).Once()
+	a.EXPECT().Stop().RunAndReturn(func() (supervisor.ReleaseFunc, error) {
+		close(stopCalled)
+		return func(context.Context) error { return nil }, nil
+	}).Once()
+
+	assert.NoError(t, s.Start(context.Background()))
+	sendDone := make(chan error, 1)
+	go func() {
+		result, sendErr := s.Send(context.Background(), "test", map[string]any{"sequence": 1})
+		if sendErr == nil {
+			sendErr = result.Release(context.Background())
+		}
+		sendDone <- sendErr
+	}()
+	<-sendStarted
+
+	shutdownDone := make(chan error, 1)
+	go func() {
+		wait, shutdownErr := s.Shutdown(context.Background())
+		if shutdownErr == nil {
+			shutdownErr = wait()
+		}
+		shutdownDone <- shutdownErr
+	}()
+	select {
+	case <-stopCalled:
+		t.Fatal("eager Shutdown stopped a worker while Send was in flight")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(allowSend)
+	assert.NoError(t, <-sendDone)
+	select {
+	case shutdownErr := <-shutdownDone:
+		assert.NoError(t, shutdownErr)
+	case <-time.After(time.Second):
+		t.Fatal("eager Shutdown did not complete after Send released the lock")
+	}
+}
+
+func TestSupervisor_Suspend_RPCEagerFailsClosed(t *testing.T) {
+	s, _, err := createSupervisorWithAdapterConfig(t, supervisor.Config{
+		IO:              supervisor.IOConfig{Interface: supervisor.RpcIO},
+		WorkerLifecycle: supervisor.WorkerLifecycleEager,
+	})
+	assert.NoError(t, err)
+	_, err = s.Suspend(context.Background())
+	assert.ErrorContains(t, err, "cannot be suspended")
 }
 
 func TestSupervisor_Send_SendsData(t *testing.T) {

@@ -122,8 +122,32 @@ func TestApplyQEMUFallbackConfigExplicitOffPreservesPersistentLambdaRPC(t *testi
 	assert.Equal(t, supervisor.WorkerLifecycleAutomatic, got.WorkerLifecycle)
 }
 
-func TestApplyQEMUFallbackConfigRejectsEagerWithoutPostResponseRuntimeLoop(t *testing.T) {
+func TestApplyQEMUFallbackConfigUsesEagerLifecycleOutsideLambda(t *testing.T) {
 	setValidQEMUEnvironment(t)
+	t.Setenv("AWS_LAMBDA_RUNTIME_API", "")
+	t.Setenv("FUNCTION_QEMU_RESET_POLICY", "eager")
+
+	got, err := applyQEMUFallbackConfig(representativeRPCConfig(supervisor.StdioTransport))
+	require.NoError(t, err)
+	assert.Equal(t, supervisor.WorkerLifecycleEager, got.WorkerLifecycle)
+}
+
+func TestApplyQEMUFallbackConfigRejectsEagerForFileInterface(t *testing.T) {
+	setValidQEMUEnvironment(t)
+	t.Setenv("AWS_LAMBDA_RUNTIME_API", "")
+	t.Setenv("FUNCTION_QEMU_RESET_POLICY", "eager")
+
+	_, err := applyQEMUFallbackConfig(supervisor.Config{
+		IO:          supervisor.IOConfig{Interface: supervisor.FileIO},
+		StartParams: supervisor.StartConfig{Cmd: "/opt/evaluator"},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requires rpc interface")
+}
+
+func TestApplyQEMUFallbackConfigRejectsEagerInLambdaWithoutPostResponseRuntimeLoop(t *testing.T) {
+	setValidQEMUEnvironment(t)
+	t.Setenv("AWS_LAMBDA_RUNTIME_API", "127.0.0.1:9001")
 	t.Setenv("FUNCTION_QEMU_RESET_POLICY", "eager")
 
 	_, err := applyQEMUFallbackConfig(representativeRPCConfig(supervisor.StdioTransport))

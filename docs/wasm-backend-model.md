@@ -77,12 +77,15 @@ loader.
 
 Generic snapshot modes cover WASM linear memory only. They do not reset globals,
 tables, Host/WASI state, descriptors, clocks, entropy, Go buffers, or external
-effects. Linux COW uses a dispatcher-scoped sealed image and fixed-size private
-mappings; it is not whole-instance cloning.
+effects. Generic Linux COW uses a dispatcher-scoped sealed image; Agent Python
+uses one sealed image per independently randomized prepared slot. Both use
+fixed-size private mappings and neither is whole-instance cloning.
 
-Agent Python uses a stronger and simpler lifecycle claim: fresh instance. A
-future prepared pool may retain only never-served, single-use initialized
-instances. It must not reintroduce memory restore or widen the reset claim.
+Agent Python exposes three explicit Host-owned lifecycle policies: post-prepare
+linear-memory `snapshot` restore (default), never-served `single-use` prepared
+candidates, and synchronous `fresh` instances. Timeout, trap, memory-size drift,
+or restore failure always discards the slot. These policies do not widen a
+linear-memory claim into whole-instance reset.
 
 ## Build recipes
 

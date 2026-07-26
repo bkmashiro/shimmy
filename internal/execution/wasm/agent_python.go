@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -26,9 +27,9 @@ const (
 )
 
 // AgentPythonDispatcher consumes the clean Agent Python Runtime v1 artifact.
-// It compiles once, but every request gets a freshly initialized, exclusively
-// owned module instance. Served instances are always closed, never restored or
-// returned to a pool.
+// The artifact is compiled once. Module ownership is selected explicitly by
+// PythonLifecycle: fresh, never-served single-use candidates, or prepared
+// linear-memory snapshot restore.
 type AgentPythonDispatcher struct {
 	cfg Config
 	log *zap.Logger
@@ -39,14 +40,57 @@ type AgentPythonDispatcher struct {
 	closedCh chan struct{}
 	pending  sync.WaitGroup
 
-	runtime  wazero.Runtime
-	compiled wazero.CompiledModule
-	cache    wazero.CompilationCache
-	artifact *AgentPythonArtifact
-	script   string
-	slots    chan struct{}
+	runtime          wazero.Runtime
+	compiled         wazero.CompiledModule
+	cache            wazero.CompilationCache
+	artifact         *AgentPythonArtifact
+	script           string
+	slots            chan struct{}
+	prepared         chan *agentPythonModuleSlot
+	snapshotSelected string
 
-	runCounter atomic.Uint64
+	refillCtx       context.Context
+	refillCancel    context.CancelFunc
+	refillMu        sync.Mutex
+	refillInFlight  int
+	refills         sync.WaitGroup
+	preparedHits    atomic.Uint64
+	preparedMisses  atomic.Uint64
+	preparedRefills atomic.Uint64
+
+	runCounter  atomic.Uint64
+	slotCounter atomic.Uint64
+}
+
+type agentPythonModuleSlot struct {
+	module           api.Module
+	diagnostic       *agentPythonDiagnosticBuffer
+	strategy         SnapshotStrategy
+	baselineSize     uint32
+	snapshotSelected string
+	cowSupport       *cowRuntimeSupport
+	cowImage         *cowImageCoordinator
+}
+
+func (slot *agentPythonModuleSlot) close(ctx context.Context) error {
+	if slot == nil {
+		return nil
+	}
+	var strategyErr, moduleErr, imageErr error
+	if slot.strategy != nil {
+		strategyErr = slot.strategy.Close()
+		slot.strategy = nil
+	}
+	if slot.module != nil {
+		moduleErr = slot.module.Close(ctx)
+		slot.module = nil
+	}
+	if slot.cowImage != nil {
+		imageErr = slot.cowImage.Close()
+		slot.cowImage = nil
+	}
+	slot.cowSupport = nil
+	return errors.Join(strategyErr, moduleErr, imageErr)
 }
 
 func NewAgentPythonDispatcher(cfg Config, log *zap.Logger) *AgentPythonDispatcher {
@@ -92,11 +136,17 @@ func (d *AgentPythonDispatcher) Start(ctx context.Context) error {
 	if d.cfg.PythonPreloadMode == "" {
 		d.cfg.PythonPreloadMode = "evaluator"
 	}
+	d.cfg.applyAgentPythonDefaults()
 	if err := d.cfg.validatePythonPreloadMode(); err != nil {
 		return fmt.Errorf("agent-python: %w", err)
 	}
-	if d.cfg.SnapshotMode != "" || d.cfg.UseUffd {
-		return errors.New("agent-python: snapshot modes are unsupported for the fresh-instance runtime; unset FUNCTION_WASM_SNAPSHOT_MODE and FUNCTION_WASM_USE_UFFD")
+	if err := d.cfg.validateAgentPythonLifecycle(); err != nil {
+		return fmt.Errorf("agent-python: %w", err)
+	}
+	if d.cfg.PythonLifecycle == "snapshot" {
+		if err := d.cfg.validateSnapshotMode(d.cfg.MaxInstances); err != nil {
+			return fmt.Errorf("agent-python: %w", err)
+		}
 	}
 	if len(d.cfg.AllowedPaths) != 0 {
 		return errors.New("agent-python does not expose Host filesystem paths; unset FUNCTION_WASM_ALLOWED_PATHS")
@@ -160,15 +210,44 @@ func (d *AgentPythonDispatcher) Start(ctx context.Context) error {
 	d.artifact = artifact
 	d.script = string(scriptBytes)
 	d.slots = make(chan struct{}, d.cfg.MaxInstances)
+	d.refillCtx, d.refillCancel = context.WithCancel(context.Background())
 
-	// Probe the exact artifact and trusted script before reporting readiness.
-	probe, diagnostic, err := d.newInitializedModule(ctx, true)
-	if probe != nil {
-		_ = probe.Close(context.Background())
-	}
-	if err != nil {
-		_ = d.closeRuntime(context.Background())
-		return withAgentPythonDiagnostic(err, diagnostic.String())
+	switch d.cfg.PythonLifecycle {
+	case "snapshot":
+		d.prepared = make(chan *agentPythonModuleSlot, d.cfg.MaxInstances)
+		for i := 0; i < d.cfg.MaxInstances; i++ {
+			slot, err := d.newPreparedModuleSlot(ctx, true)
+			if err != nil {
+				_ = d.closeRuntime(context.Background())
+				return err
+			}
+			if i == 0 {
+				d.snapshotSelected = slot.snapshotSelected
+			} else if slot.snapshotSelected != d.snapshotSelected {
+				_ = slot.close(context.Background())
+				_ = d.closeRuntime(context.Background())
+				return fmt.Errorf("agent-python: snapshot strategy selected inconsistently across slots: %q then %q", d.snapshotSelected, slot.snapshotSelected)
+			}
+			d.prepared <- slot
+		}
+	case "single-use":
+		d.prepared = make(chan *agentPythonModuleSlot, d.cfg.PythonPreparedCapacity)
+		for i := 0; i < d.cfg.PythonPreparedCapacity; i++ {
+			slot, err := d.newPreparedModuleSlot(ctx, false)
+			if err != nil {
+				_ = d.closeRuntime(context.Background())
+				return err
+			}
+			d.prepared <- slot
+		}
+	case "fresh":
+		// Probe the exact artifact and trusted script before reporting readiness.
+		slot, err := d.newPreparedModuleSlot(ctx, false)
+		if err != nil {
+			_ = d.closeRuntime(context.Background())
+			return err
+		}
+		_ = slot.close(context.Background())
 	}
 
 	d.started = true
@@ -177,7 +256,9 @@ func (d *AgentPythonDispatcher) Start(ctx context.Context) error {
 		zap.String("producer_commit", artifact.ProducerCommit),
 		zap.String("artifact_profile", artifact.Profile),
 		zap.Int("max_instances", d.cfg.MaxInstances),
-		zap.String("reset_mode", "fresh-instance"),
+		zap.String("lifecycle", d.cfg.PythonLifecycle),
+		zap.String("snapshot_mode", d.cfg.SnapshotMode),
+		zap.String("reset_mode", d.resetMode()),
 	)
 	return nil
 }
@@ -190,6 +271,7 @@ func (d *AgentPythonDispatcher) Send(ctx context.Context, method string, params 
 		if d.artifact != nil {
 			profile = d.artifact.Profile
 		}
+		preparedReady := len(d.prepared)
 		d.mu.Unlock()
 		if !ready {
 			return nil, errors.New("agent-python: dispatcher is not ready")
@@ -197,9 +279,16 @@ func (d *AgentPythonDispatcher) Send(ctx context.Context, method string, params 
 		return map[string]any{
 			"command": "healthcheck",
 			"result": map[string]any{
-				"status":     "ok",
-				"profile":    profile,
-				"reset_mode": "fresh-instance",
+				"status":            "ok",
+				"profile":           profile,
+				"lifecycle":         d.cfg.PythonLifecycle,
+				"snapshot_mode":     d.cfg.SnapshotMode,
+				"snapshot_selected": d.snapshotSelected,
+				"reset_mode":        d.resetMode(),
+				"prepared_ready":    preparedReady,
+				"prepared_hits":     d.preparedHits.Load(),
+				"prepared_misses":   d.preparedMisses.Load(),
+				"prepared_refills":  d.preparedRefills.Load(),
 			},
 		}, nil
 	}
@@ -229,24 +318,76 @@ func (d *AgentPythonDispatcher) Send(ctx context.Context, method string, params 
 
 	runContext, cancel := context.WithTimeout(ctx, d.cfg.Timeout)
 	defer cancel()
-	module, diagnostic, err := d.newInitializedModule(runContext, d.cfg.PythonPreloadMode != "off")
-	if err != nil {
-		return nil, withAgentPythonDiagnostic(err, diagnostic.String())
-	}
-	defer module.Close(context.Background())
 
-	payload, err := callAgentPythonExecute(runContext, module, request)
-	if err != nil {
-		if runContext.Err() != nil {
-			err = errors.Join(err, runContext.Err())
+	var slot *agentPythonModuleSlot
+	switch d.cfg.PythonLifecycle {
+	case "snapshot":
+		select {
+		case slot = <-d.prepared:
+		case <-d.closedCh:
+			return nil, errors.New("agent-python: dispatcher is shut down")
+		case <-ctx.Done():
+			return nil, fmt.Errorf("agent-python: acquire prepared module: %w", ctx.Err())
 		}
-		return nil, withAgentPythonDiagnostic(err, diagnostic.String())
+	case "single-use":
+		select {
+		case slot = <-d.prepared:
+			d.preparedHits.Add(1)
+		default:
+			d.preparedMisses.Add(1)
+		}
+		d.scheduleSingleUseRefill()
+		if slot == nil {
+			slot, err = d.newPreparedModuleSlot(runContext, false)
+			if err != nil {
+				return nil, err
+			}
+		}
+	case "fresh":
+		slot, err = d.newPreparedModuleSlot(runContext, false)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if d.cfg.PythonLifecycle != "snapshot" {
+		defer slot.close(context.Background())
+	}
+
+	payload, callErr := callAgentPythonExecute(runContext, slot.module, request)
+	if callErr != nil && runContext.Err() != nil {
+		callErr = errors.Join(callErr, runContext.Err())
+	}
+
+	if d.cfg.PythonLifecycle == "snapshot" {
+		restoreErr := restoreAgentPythonSnapshot(slot)
+		if callErr != nil || restoreErr != nil {
+			diagnostic := slot.diagnostic.String()
+			_ = slot.close(context.Background())
+			replacementErr := d.replaceSnapshotSlot()
+			return nil, withAgentPythonDiagnostic(errors.Join(callErr, restoreErr, replacementErr), diagnostic)
+		}
+		slot.diagnostic.Reset()
+		d.prepared <- slot
+	}
+	if callErr != nil {
+		return nil, withAgentPythonDiagnostic(callErr, slot.diagnostic.String())
 	}
 	result, err := decodeAgentPythonResponse(payload)
 	if err != nil {
 		return nil, err
 	}
 	return map[string]any{"command": method, "result": result}, nil
+}
+
+func (d *AgentPythonDispatcher) resetMode() string {
+	switch d.cfg.PythonLifecycle {
+	case "snapshot":
+		return "linear-memory-" + d.snapshotSelected
+	case "single-use":
+		return "single-use-prepared"
+	default:
+		return "fresh-instance"
+	}
 }
 
 func (d *AgentPythonDispatcher) tryBeginSend() bool {
@@ -259,10 +400,14 @@ func (d *AgentPythonDispatcher) tryBeginSend() bool {
 	return true
 }
 
-func (d *AgentPythonDispatcher) newInitializedModule(ctx context.Context, prepare bool) (api.Module, *agentPythonDiagnosticBuffer, error) {
+func (d *AgentPythonDispatcher) newInitializedModule(ctx context.Context, prepare bool, cowSupport *cowRuntimeSupport) (api.Module, *agentPythonDiagnosticBuffer, error) {
 	diagnostic := &agentPythonDiagnosticBuffer{}
+	instantiateContext := ctx
+	if cowSupport != nil {
+		instantiateContext = cowSupport.instantiateContext(ctx)
+	}
 	module, err := d.runtime.InstantiateModule(
-		ctx,
+		instantiateContext,
 		d.compiled,
 		wazero.NewModuleConfig().WithName("").WithRandSource(cryptorand.Reader).WithStderr(diagnostic),
 	)
@@ -291,6 +436,201 @@ func (d *AgentPythonDispatcher) newInitializedModule(ctx context.Context, prepar
 	return module, diagnostic, nil
 }
 
+func reserveAgentPythonSnapshotHeadroom(ctx context.Context, module api.Module, bytes uint64) (retErr error) {
+	if bytes == 0 {
+		return nil
+	}
+	if bytes > math.MaxUint32 {
+		return fmt.Errorf("agent-python: snapshot headroom %d exceeds wasm32 allocation limit", bytes)
+	}
+	allocate := module.ExportedFunction("alloc")
+	deallocate := module.ExportedFunction("dealloc")
+	if allocate == nil || deallocate == nil {
+		return errors.New("agent-python: snapshot headroom requires alloc and dealloc exports")
+	}
+
+	const chunkBytes = uint64(1024 * 1024)
+	pointers := make([]uint64, 0, (bytes+chunkBytes-1)/chunkBytes)
+	defer func() {
+		for i := len(pointers) - 1; i >= 0; i-- {
+			if _, err := deallocate.Call(context.Background(), pointers[i]); err != nil {
+				retErr = errors.Join(retErr, fmt.Errorf("agent-python: release snapshot headroom: %w", err))
+			}
+		}
+	}()
+
+	for remaining := bytes; remaining > 0; {
+		chunk := chunkBytes
+		if remaining < chunk {
+			chunk = remaining
+		}
+		result, err := allocate.Call(ctx, chunk)
+		if err != nil {
+			return fmt.Errorf("agent-python: reserve %d snapshot headroom bytes: %w", bytes, err)
+		}
+		if len(result) != 1 || result[0] == 0 {
+			return fmt.Errorf("agent-python: reserve %d snapshot headroom bytes: guest allocator returned no pointer", bytes)
+		}
+		pointers = append(pointers, result[0])
+		remaining -= chunk
+	}
+	return nil
+}
+
+func (d *AgentPythonDispatcher) newPreparedModuleSlot(ctx context.Context, takeSnapshot bool) (*agentPythonModuleSlot, error) {
+	var cowImage *cowImageCoordinator
+	var cowSupport *cowRuntimeSupport
+	if takeSnapshot && d.cfg.SnapshotMode == "cow" {
+		cowImage = newCowImageCoordinator()
+		cowSupport = newCowRuntimeSupport(
+			fmt.Sprintf("agent-python-slot-%d", d.slotCounter.Add(1)),
+			cowImage,
+		)
+		if cowSupport == nil {
+			_ = cowImage.Close()
+			cowImage = nil
+		}
+	}
+
+	module, diagnostic, err := d.newInitializedModule(ctx, d.cfg.PythonPreloadMode != "off", cowSupport)
+	if err != nil {
+		if cowImage != nil {
+			_ = cowImage.Close()
+		}
+		return nil, withAgentPythonDiagnostic(err, diagnostic.String())
+	}
+	slot := &agentPythonModuleSlot{
+		module:     module,
+		diagnostic: diagnostic,
+		cowSupport: cowSupport,
+		cowImage:   cowImage,
+	}
+	if !takeSnapshot {
+		return slot, nil
+	}
+	if err := reserveAgentPythonSnapshotHeadroom(ctx, module, d.cfg.PythonSnapshotHeadroomBytes); err != nil {
+		_ = slot.close(context.Background())
+		return nil, err
+	}
+	if cowSupport != nil {
+		slot.strategy = cowSupport.snapshotStrategy(module.Memory(), d.log)
+	} else {
+		slot.strategy = selectSnapshotStrategy(d.cfg.SnapshotMode, module.Memory(), d.log)
+	}
+	if err := slot.strategy.Take(module.Memory()); err != nil {
+		_ = slot.close(context.Background())
+		return nil, fmt.Errorf("agent-python: take prepared snapshot: %w", err)
+	}
+	slot.baselineSize = module.Memory().Size()
+	slot.snapshotSelected = agentPythonSnapshotStrategyName(slot.strategy)
+	return slot, nil
+}
+
+func restoreAgentPythonSnapshot(slot *agentPythonModuleSlot) error {
+	if slot == nil || slot.module == nil || slot.strategy == nil {
+		return errors.New("agent-python: prepared snapshot slot is incomplete")
+	}
+	memory := slot.module.Memory()
+	if memory == nil {
+		return errors.New("agent-python: prepared snapshot slot has no memory")
+	}
+	if memory.Size() != slot.baselineSize {
+		return fmt.Errorf("agent-python: memory size drift: got %d bytes, baseline %d", memory.Size(), slot.baselineSize)
+	}
+	return slot.strategy.Restore(memory)
+}
+
+func agentPythonSnapshotStrategyName(strategy SnapshotStrategy) string {
+	name := fmt.Sprintf("%T", strategy)
+	switch {
+	case strings.Contains(name, "CowSnapshotStrategy"):
+		return "cow"
+	case strings.Contains(name, "Uffd"):
+		return "uffd"
+	case strings.Contains(name, "SoftDirty"):
+		return "soft-dirty"
+	case strings.Contains(name, "Mprotect"):
+		return "mprotect"
+	default:
+		return "memcpy"
+	}
+}
+
+func (d *AgentPythonDispatcher) replaceSnapshotSlot() error {
+	d.mu.Lock()
+	closed := d.closed
+	d.mu.Unlock()
+	if closed {
+		return nil
+	}
+	timeout := d.cfg.Timeout
+	if timeout < 30*time.Second {
+		timeout = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	slot, err := d.newPreparedModuleSlot(ctx, true)
+	if err != nil {
+		return fmt.Errorf("agent-python: replace prepared snapshot slot: %w", err)
+	}
+	if slot.snapshotSelected != d.snapshotSelected {
+		_ = slot.close(context.Background())
+		return fmt.Errorf("agent-python: replacement selected snapshot strategy %q, want %q", slot.snapshotSelected, d.snapshotSelected)
+	}
+	d.mu.Lock()
+	closed = d.closed
+	d.mu.Unlock()
+	if closed {
+		return slot.close(context.Background())
+	}
+	d.prepared <- slot
+	return nil
+}
+
+func (d *AgentPythonDispatcher) scheduleSingleUseRefill() {
+	if d.refillCtx == nil || d.prepared == nil {
+		return
+	}
+	d.refillMu.Lock()
+	if len(d.prepared)+d.refillInFlight >= cap(d.prepared) {
+		d.refillMu.Unlock()
+		return
+	}
+	d.refillInFlight++
+	d.refills.Add(1)
+	refillCtx := d.refillCtx
+	d.refillMu.Unlock()
+
+	go func() {
+		defer d.refills.Done()
+		defer func() {
+			d.refillMu.Lock()
+			d.refillInFlight--
+			d.refillMu.Unlock()
+		}()
+
+		timeout := d.cfg.Timeout
+		if timeout < 30*time.Second {
+			timeout = 30 * time.Second
+		}
+		ctx, cancel := context.WithTimeout(refillCtx, timeout)
+		defer cancel()
+		slot, err := d.newPreparedModuleSlot(ctx, false)
+		if err != nil {
+			if refillCtx.Err() == nil {
+				d.log.Warn("agent-python single-use refill failed", zap.Error(err))
+			}
+			return
+		}
+		select {
+		case d.prepared <- slot:
+			d.preparedRefills.Add(1)
+		case <-refillCtx.Done():
+			_ = slot.close(context.Background())
+		}
+	}()
+}
+
 func (d *AgentPythonDispatcher) Shutdown(ctx context.Context) error {
 	d.mu.Lock()
 	if d.closed {
@@ -299,15 +639,38 @@ func (d *AgentPythonDispatcher) Shutdown(ctx context.Context) error {
 	}
 	d.closed = true
 	close(d.closedCh)
+	if d.refillCancel != nil {
+		d.refillCancel()
+	}
 	d.mu.Unlock()
 
 	d.pending.Wait()
+	d.refills.Wait()
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.closeRuntime(ctx)
 }
 
 func (d *AgentPythonDispatcher) closeRuntime(ctx context.Context) error {
+	if d.refillCancel != nil {
+		d.refillCancel()
+		d.refillCancel = nil
+	}
+	d.refillCtx = nil
+	var slotErr error
+	if d.prepared != nil {
+		for {
+			select {
+			case slot := <-d.prepared:
+				slotErr = errors.Join(slotErr, slot.close(ctx))
+			default:
+				d.prepared = nil
+				goto preparedClosed
+			}
+		}
+	}
+
+preparedClosed:
 	var compiledErr, runtimeErr, cacheErr error
 	if d.compiled != nil {
 		compiledErr = d.compiled.Close(ctx)
@@ -322,7 +685,7 @@ func (d *AgentPythonDispatcher) closeRuntime(ctx context.Context) error {
 		d.cache = nil
 	}
 	d.started = false
-	return errors.Join(compiledErr, runtimeErr, cacheErr)
+	return errors.Join(slotErr, compiledErr, runtimeErr, cacheErr)
 }
 
 func agentPythonDeniedHostCall(context.Context, api.Module, uint32, uint32, uint32, uint32) int32 {

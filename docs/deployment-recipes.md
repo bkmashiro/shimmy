@@ -9,7 +9,7 @@ extensions.
 | Scenario | Required configuration | Notes |
 |---|---|---|
 | Generic WASM | `FUNCTION_INTERFACE=wasm`; `FUNCTION_WASM_PROFILE=generic`; `FUNCTION_WASM_MODULE=/path/eval.wasm` | Guest exports Shimmy `alloc + evaluate` ABI. Generic snapshot modes remain available. |
-| Agent Python script | `FUNCTION_INTERFACE=wasm`; `FUNCTION_WASM_PROFILE=agent-python`; `FUNCTION_WASM_MODULE=/path/agent-python-runtime-numpy-core.wasm`; `FUNCTION_WASM_MANIFEST=/path/manifest.json`; `FUNCTION_WASM_PYTHON_SCRIPT=/path/eval.py` | CPython 3.14 + NumPy core. Fresh, single-use module per request. |
+| Agent Python script | `FUNCTION_INTERFACE=wasm`; `FUNCTION_WASM_PROFILE=agent-python`; `FUNCTION_WASM_MODULE=/path/agent-python-runtime-numpy-core.wasm`; `FUNCTION_WASM_MANIFEST=/path/manifest.json`; `FUNCTION_WASM_PYTHON_SCRIPT=/path/eval.py` | CPython 3.14 + NumPy core. Post-prepare snapshot/memcpy by default; explicit single-use and fresh modes remain available. |
 | Agent Python LF package | Agent Python artifact/manifest plus `FUNCTION_LF_ROOT=/path/package` | Shimmy bundles package modules and pure-Python include roots once at startup. |
 | Pyodide compatibility | `FUNCTION_INTERFACE=pyodide`; runner plus script or package-mode variables | Compatibility lane for SciPy/Pandas and Emscripten packages. |
 | RPC/file migration | `FUNCTION_INTERFACE=rpc` or `file`; `FUNCTION_COMMAND=...` | Existing subprocess protocols. |
@@ -45,6 +45,8 @@ FUNCTION_WASM_PROFILE=agent-python \
 FUNCTION_WASM_MODULE=build/python-reactor/artifacts/agent-python-runtime-numpy-core.wasm \
 FUNCTION_WASM_MANIFEST=build/python-reactor/artifacts/manifest.json \
 FUNCTION_WASM_PYTHON_SCRIPT=examples/eval-python/eval.py \
+FUNCTION_WASM_PYTHON_LIFECYCLE=snapshot \
+FUNCTION_WASM_SNAPSHOT_MODE=memcpy \
 FUNCTION_WASM_MAX_MEMORY_PAGES=8192 \
 FUNCTION_MAX_PROCS=1 \
 ./shimmy serve
@@ -54,9 +56,12 @@ FUNCTION_MAX_PROCS=1 \
 script through `runtime_prepare`. `off` remains accepted for compatibility and
 executes the trusted script inside each fresh request namespace.
 
-Do not set `FUNCTION_WASM_SNAPSHOT_MODE` or `FUNCTION_WASM_USE_UFFD` for Agent
-Python. The profile closes every served module and rejects snapshot settings
-rather than silently ignoring them.
+`FUNCTION_WASM_PYTHON_LIFECYCLE` accepts `snapshot` (default), `single-use`, or
+`fresh`. Snapshot mode accepts the same strategy names as generic WASM. On
+Linux, `FUNCTION_WASM_SNAPSHOT_MODE=cow` uses one sealed image per Agent Python
+slot; on other platforms it explicitly falls back to `memcpy`. Single-use uses
+`FUNCTION_WASM_PYTHON_PREPARED_CAPACITY=1..4` and never returns a served module
+to its ready pool.
 
 ### Lambda Feedback package
 
@@ -96,8 +101,9 @@ through `FUNCTION_WASM_SNAPSHOT_MODE`: `memcpy`, `soft-dirty`, `mprotect`,
 The Linux COW prototype uses a dispatcher-scoped sealed prepared-memory image
 and fixed-size private mappings. It covers linear memory only, not globals,
 tables, WASI/Host state, external effects, RNG, clocks, or descriptors. It must
-not be used to claim whole-instance freshness. The Agent Python profile does not
-use this mechanism.
+not be used to claim whole-instance freshness. Agent Python uses the same
+strategy implementations but gives each COW slot its own image because separate
+CPython initialization carries independently randomized state.
 
 ## QEMU full-Linux fallback
 

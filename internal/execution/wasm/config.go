@@ -87,6 +87,20 @@ type Config struct {
 	// trusted script in each fresh request namespace.
 	PythonPreloadMode string `conf:"wasm_python_preload"`
 
+	// PythonLifecycle selects whether Agent Python modules are initialized for
+	// every request, consumed once from a prepared pool, or restored to their
+	// prepared linear-memory snapshot and reused.
+	PythonLifecycle string `conf:"wasm_python_lifecycle"`
+
+	// PythonPreparedCapacity bounds never-served candidates retained by the
+	// single-use lifecycle. The current numpy-core artifact retains 128 MiB of
+	// Guest linear memory per candidate, so this surface is deliberately small.
+	PythonPreparedCapacity int `conf:"wasm_python_prepared_capacity"`
+
+	// PythonSnapshotHeadroomBytes reserves allocator capacity before Take so
+	// normal requests do not immediately grow memory beyond a restorable baseline.
+	PythonSnapshotHeadroomBytes uint64 `conf:"wasm_python_snapshot_headroom_bytes"`
+
 	// CompileCacheDir, if non-empty, enables wazero's on-disk compilation cache.
 	// Set via FUNCTION_WASM_COMPILE_CACHE env var. Shared across all runners and
 	// processes that point at the same directory, making cold starts much faster
@@ -122,6 +136,43 @@ func (c *Config) validatePythonPreloadMode() error {
 	default:
 		return fmt.Errorf("python preload mode %q is invalid; use \"evaluator\" or \"off\"", c.PythonPreloadMode)
 	}
+}
+
+func (c *Config) applyAgentPythonDefaults() {
+	if c.PythonLifecycle == "" {
+		c.PythonLifecycle = "snapshot"
+	}
+	if c.PythonPreparedCapacity == 0 {
+		c.PythonPreparedCapacity = 1
+	}
+	if c.PythonSnapshotHeadroomBytes == 0 {
+		c.PythonSnapshotHeadroomBytes = 8 * 1024 * 1024
+	}
+	if c.PythonLifecycle == "snapshot" && c.SnapshotMode == "" {
+		if c.UseUffd {
+			c.SnapshotMode = "uffd"
+		} else {
+			c.SnapshotMode = "memcpy"
+		}
+	}
+}
+
+func (c *Config) validateAgentPythonLifecycle() error {
+	switch c.PythonLifecycle {
+	case "fresh", "single-use", "snapshot":
+	default:
+		return fmt.Errorf("agent Python lifecycle %q is invalid; use \"fresh\", \"single-use\", or \"snapshot\"", c.PythonLifecycle)
+	}
+	if c.PythonPreparedCapacity < 1 || c.PythonPreparedCapacity > 4 {
+		return fmt.Errorf("agent Python prepared capacity %d is outside the supported range 1..4", c.PythonPreparedCapacity)
+	}
+	if c.MaxInstances > 4 {
+		return fmt.Errorf("agent Python max instances %d exceeds the supported limit 4", c.MaxInstances)
+	}
+	if c.PythonLifecycle != "snapshot" && (c.SnapshotMode != "" || c.UseUffd) {
+		return fmt.Errorf("snapshot strategy is only valid with lifecycle snapshot")
+	}
+	return nil
 }
 
 // validateSnapshotMode checks that the configured snapshot mode is known and
@@ -183,6 +234,19 @@ func (c *Config) applyEnv() {
 	}
 	if v := os.Getenv("FUNCTION_WASM_PYTHON_PRELOAD"); v != "" {
 		c.PythonPreloadMode = v
+	}
+	if v := os.Getenv("FUNCTION_WASM_PYTHON_LIFECYCLE"); v != "" {
+		c.PythonLifecycle = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("FUNCTION_WASM_PYTHON_PREPARED_CAPACITY"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.PythonPreparedCapacity = n
+		}
+	}
+	if v := os.Getenv("FUNCTION_WASM_PYTHON_SNAPSHOT_HEADROOM_BYTES"); v != "" {
+		if n, err := strconv.ParseUint(v, 10, 64); err == nil {
+			c.PythonSnapshotHeadroomBytes = n
+		}
 	}
 
 	if v := os.Getenv("FUNCTION_WASM_COMPILE_CACHE"); v != "" {

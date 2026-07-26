@@ -43,18 +43,28 @@ internal/execution/wasm/agent_python_protocol.go
 
 Lifecycle:
 
-1. compile the verified artifact once;
-2. instantiate a fresh, exclusively owned module for each request;
-3. call `_initialize`, `runtime_init`, and `runtime_prepare`;
-4. adapt Shimmy's existing `method + params` request to
+1. verify and compile the pinned artifact once;
+2. instantiate a module and call `_initialize`, `runtime_init`, and optional
+   `runtime_prepare` before it enters service;
+3. adapt Shimmy's existing `method + params` request to
    `{run_id, code, inputs}`;
-5. call `execute` and validate the length-prefixed ABI v1 response;
-6. close the served instance unconditionally.
+4. call `execute` and copy the length-prefixed ABI v1 response into Host memory;
+5. enforce the configured Host-owned lifecycle:
+   - `snapshot` (default): restore the post-prepare linear-memory baseline and
+     return the healthy slot to the pool;
+   - `single-use`: consume a never-served prepared candidate exactly once,
+     close it, and refill the bounded ready pool in the background;
+   - `fresh`: initialize and close one module synchronously per request;
+6. discard instead of reusing any module that times out, traps, grows beyond its
+   baseline, or fails restore.
 
-Served instances are never restored or returned to a pool. Snapshot/COW options
-are rejected for this profile rather than silently ignored. A future prepared
-pool may contain only never-served, single-use instances and must not widen the
-`fresh-instance` claim.
+`FUNCTION_WASM_SNAPSHOT_MODE` selects `memcpy`, `soft-dirty`, `mprotect`,
+`uffd`, or `cow` for the `snapshot` lifecycle. Linux COW owns one sealed image
+per Agent Python slot so independently randomized CPython baselines are never
+silently collapsed into one shared hash seed. Non-Linux COW requests explicitly
+fall back to full copy. Snapshot strategies restore WASM linear memory only;
+Shimmy keeps `agent_runtime_v1.host_call` denied, so this evaluator profile has
+no request-owned Host capability state to claim as restored.
 
 ## Compatibility surface
 
@@ -89,8 +99,9 @@ fail closed with a structured Python exception. The producer's transaction,
 credential, and network broker is not copied into Shimmy.
 
 Request, response, trusted-script, and diagnostic sizes are bounded. Context
-cancellation and timeout close the active module; the shared compiled runtime
-remains usable for the next fresh instance.
+cancellation and timeout close the active module; snapshot mode replaces the
+slot instead of returning a possibly poisoned instance, while single-use and
+fresh modes already close every served instance.
 
 ## Real acceptance gates
 
@@ -99,7 +110,10 @@ The `Python Runtime Routes` workflow pulls only the pinned LFS object and runs:
 - neutral evaluator compatibility;
 - preview compatibility;
 - structured Python exceptions;
-- repeated fresh-state checks;
+- repeated post-prepare `memcpy` restore checks against the real `numpy-core`
+  artifact;
+- Linux per-slot COW selection and repeated state-reset checks;
+- never-served single-use candidate checkout, refill, and repeated-state checks;
 - explicit Host capability denial;
 - timeout followed by a successful replacement request;
 - NumPy core operations;

@@ -48,7 +48,7 @@ if [[ "${MODE}" == "direct" ]]; then
   AGENT_PYTHON_RUNTIME_WASM="${SHIMMY_REACTOR_WASM}" \
   AGENT_PYTHON_RUNTIME_MANIFEST="${SHIMMY_REACTOR_MANIFEST_PATH}" \
     go test ./internal/execution/wasm \
-      -run='^TestAgentPythonDispatcher(RealNumPyArtifactCompatibility|TimeoutDoesNotPoisonRuntime|RealLambdaFeedbackBundle)$' \
+      -run='^TestAgentPythonDispatcher(RealNumPyArtifactCompatibility|RealNumPyCOWRestoresState|SingleUsePreparedRefillsNeverServedCandidates|TimeoutDoesNotPoisonRuntime|RealLambdaFeedbackBundle)$' \
       -count=1 -v -timeout=15m
 fi
 

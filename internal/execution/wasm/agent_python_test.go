@@ -14,6 +14,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tetratelabs/wazero"
 	"go.uber.org/zap"
 )
 
@@ -198,6 +199,8 @@ def preview_function(response, answer, params=None):
 		ModulePath:              wasmPath,
 		AgentPythonManifestPath: manifestPath,
 		PythonScriptPath:        scriptPath,
+		PythonLifecycle:         "snapshot",
+		SnapshotMode:            "memcpy",
 		MaxInstances:            1,
 		MaxMemoryPages:          8192,
 		Timeout:                 120 * time.Second,
@@ -211,6 +214,12 @@ def preview_function(response, answer, params=None):
 		_ = dispatcher.Shutdown(shutdownContext)
 	})
 
+	health, err := dispatcher.Send(context.Background(), "healthcheck", nil)
+	require.NoError(t, err)
+	assert.Equal(t, "snapshot", health["result"].(map[string]any)["lifecycle"])
+	assert.Equal(t, "memcpy", health["result"].(map[string]any)["snapshot_mode"])
+	assert.Equal(t, "linear-memory-memcpy", health["result"].(map[string]any)["reset_mode"])
+
 	first, err := dispatcher.Send(context.Background(), "eval", map[string]any{"response": "42", "answer": "42"})
 	require.NoError(t, err)
 	assert.Equal(t, true, first["result"].(map[string]any)["is_correct"])
@@ -218,7 +227,7 @@ def preview_function(response, answer, params=None):
 
 	second, err := dispatcher.Send(context.Background(), "eval", map[string]any{"response": "42", "answer": "42"})
 	require.NoError(t, err)
-	assert.Equal(t, float64(1), second["result"].(map[string]any)["counter"], "fresh instance must not retain globals")
+	assert.Equal(t, float64(1), second["result"].(map[string]any)["counter"], "snapshot restore must not retain globals")
 
 	preview, err := dispatcher.Send(context.Background(), "preview", map[string]any{"response": "3.14", "answer": "3.14"})
 	require.NoError(t, err)
@@ -241,6 +250,162 @@ def preview_function(response, answer, params=None):
 	assert.Equal(t, true, value["preserves_extra_precision"])
 	assert.Equal(t, true, value["narrows_to_double_one"])
 	assert.Equal(t, true, value["epsilon_is_narrower"])
+}
+
+func TestAgentPythonSnapshotStrategyName(t *testing.T) {
+	assert.Equal(t, "memcpy", agentPythonSnapshotStrategyName(NewFullMemcpyStrategy()))
+}
+
+func TestRestoreAgentPythonSnapshotRejectsMemoryGrowth(t *testing.T) {
+	ctx := context.Background()
+	rt, compiled := compileEchoModule(t, ctx, echoWasmBytes(t))
+	t.Cleanup(func() { require.NoError(t, rt.Close(ctx)) })
+	module, err := rt.InstantiateModule(ctx, compiled, wazero.NewModuleConfig())
+	require.NoError(t, err)
+
+	strategy := NewFullMemcpyStrategy()
+	require.NoError(t, strategy.Take(module.Memory()))
+	slot := &agentPythonModuleSlot{
+		module:       module,
+		strategy:     strategy,
+		baselineSize: module.Memory().Size(),
+	}
+	_, grew := module.Memory().Grow(1)
+	require.True(t, grew)
+
+	err = restoreAgentPythonSnapshot(slot)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "memory size drift")
+}
+
+func TestAgentPythonDispatcherRealNumPyCOWRestoresState(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("COW memory allocator is Linux-only")
+	}
+	wasmPath := os.Getenv("AGENT_PYTHON_RUNTIME_WASM")
+	manifestPath := os.Getenv("AGENT_PYTHON_RUNTIME_MANIFEST")
+	if wasmPath == "" || manifestPath == "" {
+		t.Skip("AGENT_PYTHON_RUNTIME_WASM and AGENT_PYTHON_RUNTIME_MANIFEST are required")
+	}
+
+	scriptPath := filepath.Join(t.TempDir(), "cow.py")
+	script := `
+_counter = 0
+
+def evaluation_function(response, answer, params=None):
+    global _counter
+    _counter += 1
+    return {"counter": _counter, "is_correct": response == answer}
+`
+	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o644))
+
+	dispatcher := NewAgentPythonDispatcher(Config{
+		ModulePath:              wasmPath,
+		AgentPythonManifestPath: manifestPath,
+		PythonScriptPath:        scriptPath,
+		PythonLifecycle:         "snapshot",
+		SnapshotMode:            "cow",
+		MaxInstances:            2,
+		MaxMemoryPages:          8192,
+		Timeout:                 120 * time.Second,
+	}, zap.NewNop())
+	startContext, startCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer startCancel()
+	require.NoError(t, dispatcher.Start(startContext))
+	t.Cleanup(func() {
+		shutdownContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = dispatcher.Shutdown(shutdownContext)
+	})
+
+	health, err := dispatcher.Send(context.Background(), "healthcheck", nil)
+	require.NoError(t, err)
+	assert.Equal(t, "cow", health["result"].(map[string]any)["snapshot_selected"])
+	assert.Equal(t, "linear-memory-cow", health["result"].(map[string]any)["reset_mode"])
+	assert.Equal(t, 2, health["result"].(map[string]any)["prepared_ready"])
+
+	for i := 0; i < 2; i++ {
+		result, err := dispatcher.Send(context.Background(), "eval", map[string]any{"response": "42", "answer": "42"})
+		require.NoError(t, err)
+		assert.Equal(t, float64(1), result["result"].(map[string]any)["counter"])
+	}
+}
+
+func TestAgentPythonDispatcherSingleUsePreparedRefillsNeverServedCandidates(t *testing.T) {
+	wasmPath := os.Getenv("AGENT_PYTHON_RUNTIME_WASM")
+	manifestPath := os.Getenv("AGENT_PYTHON_RUNTIME_MANIFEST")
+	if wasmPath == "" || manifestPath == "" {
+		t.Skip("AGENT_PYTHON_RUNTIME_WASM and AGENT_PYTHON_RUNTIME_MANIFEST are required")
+	}
+
+	scriptPath := filepath.Join(t.TempDir(), "single-use.py")
+	script := `
+_counter = 0
+
+def evaluation_function(response, answer, params=None):
+    global _counter
+    _counter += 1
+    return {"counter": _counter, "is_correct": response == answer}
+`
+	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o644))
+
+	dispatcher := NewAgentPythonDispatcher(Config{
+		ModulePath:              wasmPath,
+		AgentPythonManifestPath: manifestPath,
+		PythonScriptPath:        scriptPath,
+		PythonLifecycle:         "single-use",
+		PythonPreparedCapacity:  1,
+		MaxInstances:            1,
+		MaxMemoryPages:          8192,
+		Timeout:                 120 * time.Second,
+	}, zap.NewNop())
+	startContext, startCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer startCancel()
+	require.NoError(t, dispatcher.Start(startContext))
+	t.Cleanup(func() {
+		shutdownContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = dispatcher.Shutdown(shutdownContext)
+	})
+
+	health, err := dispatcher.Send(context.Background(), "healthcheck", nil)
+	require.NoError(t, err)
+	assert.Equal(t, "single-use", health["result"].(map[string]any)["lifecycle"])
+	assert.Equal(t, 1, health["result"].(map[string]any)["prepared_ready"])
+	assert.Equal(t, "single-use-prepared", health["result"].(map[string]any)["reset_mode"])
+
+	first, err := dispatcher.Send(context.Background(), "eval", map[string]any{"response": "42", "answer": "42"})
+	require.NoError(t, err)
+	assert.Equal(t, float64(1), first["result"].(map[string]any)["counter"])
+
+	// The hit starts a slow background refill. An immediate next request must not
+	// wait for it; it initializes one fresh single-use fallback synchronously.
+	second, err := dispatcher.Send(context.Background(), "eval", map[string]any{"response": "42", "answer": "42"})
+	require.NoError(t, err)
+	assert.Equal(t, float64(1), second["result"].(map[string]any)["counter"])
+
+	require.Eventually(t, func() bool {
+		health, err = dispatcher.Send(context.Background(), "healthcheck", nil)
+		if err != nil {
+			return false
+		}
+		state := health["result"].(map[string]any)
+		return state["prepared_ready"] == 1 && state["prepared_refills"] == uint64(1)
+	}, 2*time.Minute, 100*time.Millisecond)
+
+	health, err = dispatcher.Send(context.Background(), "healthcheck", nil)
+	require.NoError(t, err)
+	state := health["result"].(map[string]any)
+	assert.Equal(t, uint64(1), state["prepared_hits"])
+	assert.Equal(t, uint64(1), state["prepared_misses"])
+
+	third, err := dispatcher.Send(context.Background(), "eval", map[string]any{"response": "42", "answer": "42"})
+	require.NoError(t, err)
+	assert.Equal(t, float64(1), third["result"].(map[string]any)["counter"])
+
+	health, err = dispatcher.Send(context.Background(), "healthcheck", nil)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(2), health["result"].(map[string]any)["prepared_hits"])
 }
 
 func TestAgentPythonDispatcherTimeoutDoesNotPoisonRuntime(t *testing.T) {

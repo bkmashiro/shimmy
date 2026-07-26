@@ -7,6 +7,7 @@ on:
       - feat/wasm-backend
     paths:
       - "examples/eval-scipy/**"
+      - "examples/eval-python/**"
       - "examples/eval-pyodide/**"
       - "examples/lambda-feedback-adapter/**"
       - "examples/lambda-feedback-fixtures/**"
@@ -34,6 +35,7 @@ on:
   pull_request:
     paths:
       - "examples/eval-scipy/**"
+      - "examples/eval-python/**"
       - "examples/eval-pyodide/**"
       - "examples/lambda-feedback-adapter/**"
       - "examples/lambda-feedback-fixtures/**"
@@ -123,13 +125,13 @@ jobs:
           go-version-file: ./go.mod
           cache: true
 
-      - name: Run real compatibility, binary128, denial, and timeout recovery tests
+      - name: Run real snapshot, COW, single-use, binary128, denial, and timeout recovery tests
         env:
           AGENT_PYTHON_RUNTIME_WASM: ${{ github.workspace }}/build/python-reactor/artifacts/agent-python-runtime-numpy-core.wasm
           AGENT_PYTHON_RUNTIME_MANIFEST: ${{ github.workspace }}/build/python-reactor/artifacts/manifest.json
         run: |
           go test ./internal/execution/wasm \
-            -run='^TestAgentPythonDispatcher(RealNumPyArtifactCompatibility|TimeoutDoesNotPoisonRuntime|RealLambdaFeedbackBundle)$' \
+            -run='^TestAgentPythonDispatcher(RealNumPyArtifactCompatibility|RealNumPyCOWRestoresState|SingleUsePreparedRefillsNeverServedCandidates|TimeoutDoesNotPoisonRuntime|RealLambdaFeedbackBundle)$' \
             -count=1 -v -timeout=15m
 
   pyodide-compatibility:

@@ -225,6 +225,7 @@ def build_qemu_rpc_prewarm_report(
     if not isinstance(eager_responses, list) or len(eager_responses) != len(eager_later) + 2:
         raise ValueError("eager response count must equal first, immediate next, and later-ready samples")
     eager_boots = []
+    eager_invocation_counts = []
     for index, response in enumerate(eager_responses):
         result = result_object(response)
         if result.get("is_correct") is not True:
@@ -235,6 +236,7 @@ def build_qemu_rpc_prewarm_report(
         if result.get("guest_invocation_count") != 1:
             raise ValueError(f"eager response {index} must be the first invocation in a clean evaluator")
         eager_boots.append(boot_id)
+        eager_invocation_counts.append(result["guest_invocation_count"])
     if len(set(eager_boots)) != len(eager_boots):
         raise ValueError("eager boot IDs must be distinct for every served request")
     if eager.get("startup_interarrival_ns", 0) <= 0 or eager.get("later_interarrival_ns", 0) <= 0:
@@ -321,6 +323,10 @@ def build_qemu_rpc_prewarm_report(
                 "boot_identity": {
                     "per_request": eager_boots,
                     "all_distinct": True,
+                },
+                "guest_invocation_count": {
+                    "per_request": eager_invocation_counts,
+                    "all_one": True,
                 },
                 "response_batch_sha256": response_digest({"responses": eager_responses}),
             },

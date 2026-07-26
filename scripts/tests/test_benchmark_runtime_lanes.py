@@ -196,6 +196,8 @@ class QEMURPCPrewarmReportTests(unittest.TestCase):
         self.assertFalse(report["policies"]["lazy"]["prewarm_effective"])
         self.assertEqual(report["schema"], "shimmy-qemu-rpc-prewarm-benchmark/v3")
         self.assertTrue(report["policies"]["eager"]["fresh_state_proven"])
+        self.assertEqual(report["policies"]["eager"]["guest_invocation_count"]["per_request"], [1, 1, 1, 1, 1])
+        self.assertTrue(report["policies"]["eager"]["guest_invocation_count"]["all_one"])
         self.assertEqual(report["policies"]["eager"]["later_ready_requests"]["median_ns"], 9)
         self.assertTrue(report["response_parity"])
 

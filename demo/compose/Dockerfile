@@ -65,10 +65,13 @@ COPY examples/eval-pyodide/package.json examples/eval-pyodide/package-lock.json 
 RUN npm ci --omit=dev && npm cache clean --force
 RUN node -e "(async()=>{const {loadPyodide}=require('pyodide');const p=await loadPyodide();await p.loadPackage(['scipy']);})().catch((e)=>{console.error(e);process.exit(1)})"
 COPY --from=shimmy-build /out/shimmy /shimmy
-COPY examples/eval-pyodide/runner.js /opt/pyodide/runner.js
+COPY examples/eval-pyodide/runner.js examples/eval-pyodide/framed-stdio.js /opt/pyodide/
 COPY examples/eval-scipy/eval.py /opt/evaluators/eval.py
-RUN chmod 0755 /opt/evaluators && \
-    chmod 0644 /opt/pyodide/runner.js /opt/evaluators/eval.py
+RUN node --check /opt/pyodide/runner.js && \
+    node --check /opt/pyodide/framed-stdio.js && \
+    node -e "const f=require('/opt/pyodide/framed-stdio');if(typeof f.FramedReader!=='function'||typeof f.encodeFrame!=='function')process.exit(1)" && \
+    chmod 0755 /opt/evaluators && \
+    chmod 0644 /opt/pyodide/runner.js /opt/pyodide/framed-stdio.js /opt/evaluators/eval.py
 ENV LOG_LEVEL=error \
     FUNCTION_INTERFACE=pyodide \
     FUNCTION_PYODIDE_RUNNER=/opt/pyodide/runner.js \

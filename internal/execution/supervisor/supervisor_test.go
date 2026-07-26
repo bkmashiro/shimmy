@@ -426,6 +426,10 @@ func TestSupervisor_Shutdown_RPCEagerWaitsForInFlightSend(t *testing.T) {
 	allowSend := make(chan struct{})
 	stopCalled := make(chan struct{})
 	a.EXPECT().Start(mock.Anything, mock.Anything).Return(nil).Once()
+	// After Send schedules the refill, replacement boot may win or lose the
+	// race with Shutdown. At most one replacement is allowed, and either path
+	// must be cleaned before Shutdown completes.
+	a.EXPECT().Start(mock.Anything, mock.Anything).Return(nil).Maybe()
 	a.EXPECT().Send(mock.Anything, "test", mock.Anything, mock.Anything).RunAndReturn(
 		func(context.Context, string, map[string]any, time.Duration) (map[string]any, error) {
 			close(sendStarted)
@@ -437,6 +441,7 @@ func TestSupervisor_Shutdown_RPCEagerWaitsForInFlightSend(t *testing.T) {
 		close(stopCalled)
 		return func(context.Context) error { return nil }, nil
 	}).Once()
+	a.EXPECT().Stop().Return(supervisor.ReleaseFunc(func(context.Context) error { return nil }), nil).Maybe()
 
 	assert.NoError(t, s.Start(context.Background()))
 	sendDone := make(chan error, 1)

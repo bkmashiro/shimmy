@@ -142,7 +142,7 @@ jobs:
           REQUEST_COUNT: "3"
         run: experiments/qemu-fallback/benchmark-ci-file.sh
 
-      - name: Benchmark QEMU RPC persistent prewarm and lazy reset
+      - name: Benchmark QEMU RPC prewarm effectiveness and lazy reset
         run: |
           experiments/qemu-fallback/benchmark-ci-rpc-prewarm.py \
             --artifact-dir "${{ github.workspace }}/artifacts/qemu-fallback" \

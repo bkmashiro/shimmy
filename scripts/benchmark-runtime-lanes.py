@@ -218,18 +218,21 @@ def build_qemu_rpc_prewarm_report(
         raise ValueError("lazy boot IDs must be available and distinct")
 
     def phase(row: Dict[str, Any]) -> Dict[str, Any]:
-        ready_ns = row["ready_ns"]
+        liveness_ns = row["liveness_ns"]
+        prewarm_ns = row["prewarm_probe_ns"]
         first_ns = row["first_ns"]
         return {
-            "server_ready_ns": ready_ns,
-            "first_request_ns": first_ns,
-            "ready_plus_first_ns": ready_ns + first_ns,
+            "http_liveness_ns": liveness_ns,
+            "prewarm_probe_ns": prewarm_ns,
+            "liveness_plus_prewarm_ns": liveness_ns + prewarm_ns,
+            "first_request_after_prewarm_ns": first_ns,
+            "liveness_plus_prewarm_plus_first_ns": liveness_ns + prewarm_ns + first_ns,
             "repeated_requests": summarize_ns(row["repeated_ns"]),
             "response_batch_sha256": response_digest({"responses": row["responses"]}),
         }
 
     report = {
-        "schema": "shimmy-qemu-rpc-prewarm-benchmark/v1",
+        "schema": "shimmy-qemu-rpc-prewarm-benchmark/v2",
         "status": "PASS",
         "source_commit": source_commit,
         "accelerator": "tcg",
@@ -237,28 +240,41 @@ def build_qemu_rpc_prewarm_report(
         "transport": "stdio",
         "request_concurrency": 1,
         "response_parity": True,
+        "http_health_semantics": "process HTTP liveness only; it does not prove that the guest runtime is ready",
+        "prewarm_probe": "public HTTP request with Command: healthcheck routed through the selected evaluator",
         "manifest_digests": manifest_digests,
         "qemu_version": qemu_version,
         "native": {
             **phase(native),
-            "lifecycle": "persistent native RPC evaluator started before readiness",
+            "lifecycle": "persistent native RPC evaluator",
+            "prewarm_probe_semantics": "wait for the evaluator-level health response before timed evaluation",
         },
         "policies": {
             "off": {
                 **phase(persistent),
                 "reset_policy": "off",
-                "lifecycle": "persistent QEMU RPC VM booted before readiness and reused across requests",
-                "initialization_placement": "guest boot is charged to server readiness",
+                "lifecycle": "persistent QEMU RPC VM reused across requests",
+                "initialization_placement": "public /health is liveness only; guest boot is charged to the evaluator-level prewarm probe",
                 "repeated_request_semantics": "warm requests in the same guest VM",
-                "boot_identity": {"samples": persistent_boots, "same": True},
+                "prewarm_effective": True,
+                "boot_identity": {
+                    "prewarm_probe": persistent_boots[0],
+                    "post_request_probe": persistent_boots[1],
+                    "same": True,
+                },
             },
             "lazy": {
                 **phase(lazy),
                 "reset_policy": "lazy",
                 "lifecycle": "invocation-scoped QEMU RPC VM booted and destroyed for every request",
-                "initialization_placement": "guest boot is charged to every request, not server readiness",
+                "initialization_placement": "the evaluator-level prewarm probe boots a one-shot guest that is destroyed before the next request",
                 "repeated_request_semantics": "repeated fresh-VM requests; not a warm path",
-                "boot_identity": {"samples": lazy_boots, "distinct": True},
+                "prewarm_effective": False,
+                "boot_identity": {
+                    "prewarm_probe": lazy_boots[0],
+                    "post_request_probe": lazy_boots[1],
+                    "distinct": True,
+                },
             },
         },
         "unsupported_policies": {
@@ -267,7 +283,7 @@ def build_qemu_rpc_prewarm_report(
                 "reason": "requires a post-response Lambda runtime loop, which is not enabled",
             }
         },
-        "comparison_policy": "compare ready-plus-first for one-request instances and repeated requests separately; lazy repeated requests are fresh, not warm",
+        "comparison_policy": "compare explicit prewarm cost, first request after prewarm, and repeated requests separately; lazy prewarm is intentionally ineffective",
     }
     return report
 

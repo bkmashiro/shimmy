@@ -153,6 +153,12 @@ def guest_boot_id(port: int, timeout: float) -> str:
     return boot_id
 
 
+def timed_guest_boot_id(port: int, timeout: float) -> tuple[int, str]:
+    started = time.perf_counter_ns()
+    boot_id = guest_boot_id(port, timeout)
+    return time.perf_counter_ns() - started, boot_id
+
+
 def verify_manifest(artifact_dir: pathlib.Path) -> tuple[Dict[str, str], Dict[str, Any]]:
     manifest_path = artifact_dir / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
@@ -277,9 +283,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     started_at = dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
     servers = [native]
     try:
-        native_ready = native.start(30)
+        native_liveness = native.start(30)
+        native_prewarm_ns, _ = timed_guest_boot_id(args.native_port, 30)
         native_measurement = measure_requests(args.native_port, args.repeated_count, 30)
-        native_measurement["ready_ns"] = native_ready
+        native_measurement["liveness_ns"] = native_liveness
+        native_measurement["prewarm_probe_ns"] = native_prewarm_ns
 
         policies: Dict[str, Dict[str, Any]] = {}
         for policy, port in (("off", args.persistent_port), ("lazy", args.lazy_port)):
@@ -297,17 +305,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                 bin_dir / f"qemu-rpc-{policy}.log",
             )
             servers.append(active_qemu)
-            ready_ns = active_qemu.start(180)
+            liveness_ns = active_qemu.start(180)
+            prewarm_ns, prewarm_boot_id = timed_guest_boot_id(port, 180)
             measurement = measure_requests(port, args.repeated_count, 180)
-            measurement["ready_ns"] = ready_ns
-            measurement["boot_ids"] = [guest_boot_id(port, 180), guest_boot_id(port, 180)]
+            measurement["liveness_ns"] = liveness_ns
+            measurement["prewarm_probe_ns"] = prewarm_ns
+            measurement["boot_ids"] = [prewarm_boot_id, guest_boot_id(port, 180)]
             policies[policy] = measurement
             print(
                 json.dumps(
                     {
                         "policy": policy,
-                        "server_ready_ns": ready_ns,
-                        "first_request_ns": measurement["first_ns"],
+                        "http_liveness_ns": liveness_ns,
+                        "prewarm_probe_ns": prewarm_ns,
+                        "first_request_after_prewarm_ns": measurement["first_ns"],
                         "repeated_ns": measurement["repeated_ns"],
                         "boot_ids": measurement["boot_ids"],
                     },
@@ -338,9 +349,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "cpu": helper.cpu_model(),
                 },
                 "method": {
+                    "http_health_role": "process liveness only",
+                    "guest_prewarm_probe_count": 1,
                     "first_request_count": 1,
                     "repeated_request_count": args.repeated_count,
-                    "healthcheck_identity_samples": 2,
+                    "boot_identity_probes": "one prewarm probe and one post-request probe",
                 },
             }
         )

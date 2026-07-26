@@ -14,13 +14,19 @@ preview_function(response, answer, params) -> dict  [optional]
     If not defined, the runner falls back to evaluation_function.
     Should return a preview/hint without revealing the full solution.
 
-Both functions are called with a fresh exec() namespace per request,
-so global-variable mutations do not leak between requests.
+Shimmy's configured lifecycle must prevent global-variable mutations from
+leaking between requests. The invocation counter below is runtime-lane reset
+evidence, not application state.
 """
+
+
+_guest_invocation_count = 0
 
 
 def evaluation_function(response, answer, params=None):
     """Numeric equality check with configurable absolute tolerance."""
+    global _guest_invocation_count
+    _guest_invocation_count += 1
     params = params or {}
     tolerance = float(params.get("tolerance", 1e-9))
 
@@ -31,6 +37,7 @@ def evaluation_function(response, answer, params=None):
         return {
             "is_correct": False,
             "feedback": f"Error: Could not parse values as numbers: {e}",
+            "guest_invocation_count": _guest_invocation_count,
         }
 
     abs_err = abs(r - a)
@@ -41,6 +48,7 @@ def evaluation_function(response, answer, params=None):
             "is_correct": True,
             "feedback": f"Correct! {r} matches {a} within tolerance {tolerance}.",
             "absolute_error": abs_err,
+            "guest_invocation_count": _guest_invocation_count,
         }
     else:
         return {
@@ -50,6 +58,7 @@ def evaluation_function(response, answer, params=None):
                 f"Absolute error: {abs_err:.6e} (tolerance: {tolerance:.6e})."
             ),
             "absolute_error": abs_err,
+            "guest_invocation_count": _guest_invocation_count,
         }
 
 

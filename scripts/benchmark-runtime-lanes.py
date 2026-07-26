@@ -47,13 +47,13 @@ LANES: Dict[str, LaneSpec] = {
         initialization_placement="module compilation and pool startup occur before HTTP readiness",
         resource_limit="1 CPU / 256 MiB",
     ),
-    "agent-python-fresh": LaneSpec(
+    "agent-python-cow": LaneSpec(
         service="python-reactor",
         port=18082,
         payload={"response": "3.14159", "answer": "3.1416", "params": {"tolerance": 0.001}},
         workload="Python numeric-tolerance evaluator consumed through the pinned external runtime artifact",
-        lifecycle="persistent Shimmy server; compiled artifact reused, fresh Agent Python module initialized and closed per request",
-        initialization_placement="startup validates one initialized probe before HTTP readiness; every request repeats module _initialize/runtime_init",
+        lifecycle="persistent Shimmy server; one prepared Agent Python slot restored from its per-slot COW image after every request",
+        initialization_placement="module compilation, _initialize, runtime_init, runtime_prepare, headroom reservation, and COW snapshot occur before HTTP readiness",
         resource_limit="2 CPUs / 2 GiB",
     ),
     "pyodide-scipy": LaneSpec(
@@ -122,9 +122,15 @@ def assert_lane_response(lane: str, response: Dict[str, Any]) -> None:
         if result.get("snapshot_isolation_ok") is not True:
             raise ValueError("generic snapshot_isolation_ok must be true")
         return
-    if lane in {"agent-python-fresh", "dbi-lean"}:
+    if lane == "agent-python-cow":
         if result.get("is_correct") is not True:
-            raise ValueError(f"{lane} is_correct must be true")
+            raise ValueError("agent-python-cow is_correct must be true")
+        if result.get("guest_invocation_count") != 1:
+            raise ValueError("agent-python-cow guest_invocation_count must be 1")
+        return
+    if lane == "dbi-lean":
+        if result.get("is_correct") is not True:
+            raise ValueError("dbi-lean is_correct must be true")
         return
     if lane == "pyodide-scipy":
         if result.get("is_correct") is not True:
@@ -136,6 +142,15 @@ def assert_lane_response(lane: str, response: Dict[str, Any]) -> None:
             raise ValueError("pyodide-scipy p_value must be numeric")
         return
     raise ValueError(f"unknown lane: {lane}")
+
+
+def assert_lane_runtime_logs(lane: str, logs: str) -> str | None:
+    if lane != "agent-python-cow":
+        return None
+    selected = "linear-memory-cow"
+    if selected not in logs:
+        raise ValueError(f"agent-python-cow startup logs must select {selected}")
+    return selected
 
 
 def response_digest(response: Dict[str, Any]) -> str:
@@ -496,6 +511,13 @@ def benchmark_lane(
         )
         report["service"] = spec.service
         report["resource_limit"] = spec.resource_limit
+        runtime_logs = run(
+            [*prefix, "logs", "--no-color", "--tail=200", spec.service],
+            check=False,
+        ).stdout
+        selected_reset_mode = assert_lane_runtime_logs(lane, runtime_logs)
+        if selected_reset_mode is not None:
+            report["selected_reset_mode"] = selected_reset_mode
         if lane == "dbi-lean":
             marker = run([*prefix, "exec", "-T", spec.service, "cat", "/tmp/shimmy-dbi-client-init.marker"]).stdout.strip()
             if marker != "initialized":

@@ -144,16 +144,20 @@ def assert_lane_response(lane: str, response: Dict[str, Any]) -> None:
     raise ValueError(f"unknown lane: {lane}")
 
 
-def assert_lane_runtime_logs(lane: str, logs: str) -> str | None:
-    if lane != "agent-python-cow":
-        return None
-    selected = "linear-memory-cow"
-    if selected not in logs:
-        raise ValueError(
-            f"agent-python-cow startup logs must select {selected}; "
-            f"logs_tail={logs[-4000:]!r}"
-        )
-    return selected
+def assert_agent_python_cow_healthcheck(response: Dict[str, Any]) -> Dict[str, Any]:
+    result = result_object(response)
+    expected = {
+        "lifecycle": "snapshot",
+        "snapshot_selected": "cow",
+        "reset_mode": "linear-memory-cow",
+    }
+    for field, value in expected.items():
+        if result.get(field) != value:
+            raise ValueError(
+                f"agent-python-cow healthcheck {field} must be {value!r}, "
+                f"got {result.get(field)!r}"
+            )
+    return expected
 
 
 def response_digest(response: Dict[str, Any]) -> str:
@@ -402,11 +406,17 @@ def compose_prefix(compose_file: pathlib.Path) -> List[str]:
     return ["docker", "compose", "--profile", "dbi", "-f", str(compose_file)]
 
 
-def request_json(url: str, payload: Dict[str, Any], timeout: float) -> Dict[str, Any]:
+def request_json(
+    url: str,
+    payload: Dict[str, Any],
+    timeout: float,
+    *,
+    command: str = "eval",
+) -> Dict[str, Any]:
     request = urllib.request.Request(
         url,
         data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
-        headers={"Content-Type": "application/json", "Command": "eval"},
+        headers={"Content-Type": "application/json", "Command": command},
         method="POST",
     )
     try:
@@ -423,9 +433,15 @@ def request_json(url: str, payload: Dict[str, Any], timeout: float) -> Dict[str,
     return decoded
 
 
-def timed_request(url: str, payload: Dict[str, Any], timeout: float) -> tuple[int, Dict[str, Any]]:
+def timed_request(
+    url: str,
+    payload: Dict[str, Any],
+    timeout: float,
+    *,
+    command: str = "eval",
+) -> tuple[int, Dict[str, Any]]:
     started = time.perf_counter_ns()
-    response = request_json(url, payload, timeout)
+    response = request_json(url, payload, timeout, command=command)
     return time.perf_counter_ns() - started, response
 
 
@@ -490,6 +506,16 @@ def benchmark_lane(
         wait_for_health(base + "/health", ready_timeout)
         ready_ns = time.perf_counter_ns() - started
 
+        lifecycle_evidence = None
+        if lane == "agent-python-cow":
+            _, health_response = timed_request(
+                base + "/",
+                {},
+                request_timeout,
+                command="healthcheck",
+            )
+            lifecycle_evidence = assert_agent_python_cow_healthcheck(health_response)
+
         first_ns, response = timed_request(base + "/", spec.payload, request_timeout)
         assert_lane_response(lane, response)
 
@@ -518,15 +544,8 @@ def benchmark_lane(
         )
         report["service"] = spec.service
         report["resource_limit"] = spec.resource_limit
-        runtime_logs = command_output(
-            run(
-                [*prefix, "logs", "--no-color", "--tail=200", spec.service],
-                check=False,
-            )
-        )
-        selected_reset_mode = assert_lane_runtime_logs(lane, runtime_logs)
-        if selected_reset_mode is not None:
-            report["selected_reset_mode"] = selected_reset_mode
+        if lifecycle_evidence is not None:
+            report["lifecycle_evidence"] = lifecycle_evidence
         if lane == "dbi-lean":
             marker = run([*prefix, "exec", "-T", spec.service, "cat", "/tmp/shimmy-dbi-client-init.marker"]).stdout.strip()
             if marker != "initialized":

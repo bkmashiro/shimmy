@@ -62,16 +62,27 @@ class LaneAssertionTests(unittest.TestCase):
         self.assertIn("COW", spec.lifecycle)
         self.assertIn("runtime_prepare", spec.initialization_placement)
 
-    def test_agent_python_cow_requires_selected_cow_log(self):
-        self.assertEqual(
-            module.assert_lane_runtime_logs(
-                "agent-python-cow", '{"reset_mode":"linear-memory-cow"}'
-            ),
-            "linear-memory-cow",
+    def test_agent_python_cow_requires_selected_cow_healthcheck(self):
+        evidence = module.assert_agent_python_cow_healthcheck(
+            {
+                "command": "healthcheck",
+                "result": {
+                    "lifecycle": "snapshot",
+                    "snapshot_selected": "cow",
+                    "reset_mode": "linear-memory-cow",
+                },
+            }
         )
-        with self.assertRaisesRegex(ValueError, "linear-memory-cow"):
-            module.assert_lane_runtime_logs(
-                "agent-python-cow", '{"reset_mode":"linear-memory-memcpy"}'
+        self.assertEqual("linear-memory-cow", evidence["reset_mode"])
+        with self.assertRaisesRegex(ValueError, "snapshot_selected"):
+            module.assert_agent_python_cow_healthcheck(
+                {
+                    "result": {
+                        "lifecycle": "snapshot",
+                        "snapshot_selected": "memcpy",
+                        "reset_mode": "linear-memory-memcpy",
+                    }
+                }
             )
 
     def test_pyodide_requires_scipy_result_shape(self):
@@ -112,6 +123,29 @@ class OrchestrationTests(unittest.TestCase):
             stderr="err-line\n",
         )
         self.assertEqual("out-line\nerr-line\n", module.command_output(completed))
+
+    def test_request_json_sends_explicit_command_header(self):
+        class Response:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return b'{"result":{"status":"ok"}}'
+
+        with mock.patch.object(module.urllib.request, "urlopen", return_value=Response()) as opened:
+            module.request_json(
+                "http://127.0.0.1:18082/",
+                {},
+                1.0,
+                command="healthcheck",
+            )
+        request = opened.call_args.args[0]
+        self.assertEqual("healthcheck", request.get_header("Command"))
 
     def test_compose_starts_service_before_inspecting_its_image(self):
         commands = []

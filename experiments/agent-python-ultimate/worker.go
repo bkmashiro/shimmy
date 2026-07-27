@@ -363,7 +363,7 @@ func runWorkerRequest(
 			faultCtx, cancelFault = context.WithCancel(ctx)
 			cancelFault()
 		}
-		faultPayload := map[string]any{"response": faultResponse, "answer": faultResponse, "params": faultParams}
+		faultPayload := workerCallPayload(faultResponse, faultParams)
 		faultResult, faultErr := executeWorkerCall(faultCtx, dispatcher, faultPayload, httpServer, httpClient)
 		cancelFault()
 		expectFaultError := faultName != "memory-growth" || row.Lifecycle == LifecycleSnapshotMemcpy || row.Lifecycle == LifecycleSnapshotCow
@@ -379,7 +379,7 @@ func runWorkerRequest(
 			return sample
 		}
 	}
-	normalPayload := map[string]any{"response": response, "answer": response, "params": baseParams}
+	normalPayload := workerCallPayload(response, baseParams)
 	_, err := executeWorkerCall(ctx, dispatcher, normalPayload, httpServer, httpClient)
 	sample.Duration = time.Since(started)
 	if err != nil {
@@ -388,6 +388,10 @@ func runWorkerRequest(
 	}
 	sample.Outcome = "ok"
 	return sample
+}
+
+func workerCallPayload(response any, params map[string]any) map[string]any {
+	return map[string]any{"response": response, "answer": "expected", "params": params}
 }
 
 func cloneAnyMap(source map[string]any) map[string]any {

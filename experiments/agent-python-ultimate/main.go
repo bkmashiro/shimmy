@@ -376,13 +376,17 @@ func prewarmCompileCache(executable, artifact, manifest, cacheDir, outputDir str
 func runPlanWorkerProcess(executable, inputPath, resultPath, stdoutPath, stderrPath string, row PlanRow) error {
 	startedUTC := time.Now().UTC().Format(time.RFC3339Nano)
 	if err := runWorkerProcess(executable, inputPath, resultPath, stdoutPath, stderrPath); err != nil {
+		var exitError *exec.ExitError
+		if !errors.As(err, &exitError) || exitError.ProcessState == nil || exitError.ProcessState.ExitCode() != -1 {
+			return err
+		}
 		return writeJSON(resultPath, WorkerResult{
 			Schema:      workerResultSchema,
 			Row:         row,
 			Status:      "failed",
 			StartedUTC:  startedUTC,
 			FinishedUTC: time.Now().UTC().Format(time.RFC3339Nano),
-			Error:       fmt.Sprintf("worker process terminated: %v", err),
+			Error:       fmt.Sprintf("worker process terminated by signal: %v", err),
 		})
 	}
 	return nil

@@ -106,6 +106,8 @@ done
 srun --jobid="$job_id" --overlap -N1 -n1 test -d "/tmp/shimmy-agent-python-$job_id"
 sbcast --force --jobid="$job_id" "$root/input.tar.zst" "/tmp/shimmy-agent-python-$job_id/input.tar.zst"
 sbcast --force --jobid="$job_id" "$root/input.sha256" "/tmp/shimmy-agent-python-$job_id/input.sha256"
+srun --jobid="$job_id" --overlap -N1 -n1 test -s "/tmp/shimmy-agent-python-$job_id/input.tar.zst"
+srun --jobid="$job_id" --overlap -N1 -n1 test -s "/tmp/shimmy-agent-python-$job_id/input.sha256"
 REMOTE
 }
 
@@ -118,7 +120,7 @@ job_id="$1"
 squeue -j "$job_id" -o '%.18i %.12T %.20S %.20e %.8M %.9l %.6D %R'
 sacct -j "$job_id" --starttime now-7days -X -n -P -o JobID,State,Elapsed,Timelimit,NodeList,ExitCode 2>/dev/null || true
 if [[ "$(squeue -h -j "$job_id" -o '%T')" == RUNNING ]]; then
-  if srun --jobid="$job_id" --overlap -N1 -n1 test -f "/tmp/shimmy-agent-python-$job_id/RESULT.READY"; then
+  if srun --jobid="$job_id" --overlap -N1 -n1 test -f "/tmp/shimmy-agent-python-$job_id/RESULT.READY" 2>/dev/null; then
     printf 'RESULT_READY=yes\n'
   else
     printf 'RESULT_READY=no\n'

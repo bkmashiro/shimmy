@@ -96,20 +96,3 @@ Each run contains:
 
 Run `agent-python-ultimate validate --output RUN_DIR` after transport and compare
 the two reports before making any public performance claim.
-
-Generate the deterministic performance-analysis layer only from a complete,
-validated canonical report:
-
-```bash
-python3 scripts/analyze_agent_python_ultimate.py \
-  RUN_DIR/report.json \
-  --output RUN_DIR/performance-analysis.json
-```
-
-The analysis preserves raw evidence and derives request latency distributions,
-closed-window throughput, average in-flight work, Little's Law consistency, and
-checkout/execute/decode/restore phase distributions. A row needs at least 100
-successful requests before its p99 is marked claim-eligible. Requested
-`dirty_bps` is retained as logical workload input and is never relabelled as an
-observed physical dirty-page count. The comprehensive v2 extension matrix and
-capacity/reset formulas are frozen in [`BENCHMARK-V2.md`](BENCHMARK-V2.md).

@@ -24,6 +24,10 @@ import (
 
 const runReportSchema = "agent-python-ultimate-run-report/v1"
 
+// sourceCommit is injected from a verified clean worktree with
+// -ldflags "-X main.sourceCommit=<commit>".
+var sourceCommit string
+
 type RunMetadata struct {
 	StartedUTC     string `json:"started_utc"`
 	FinishedUTC    string `json:"finished_utc,omitempty"`
@@ -214,23 +218,33 @@ func runParent(configPath, artifactPath, manifestPath, outputDir string, limit i
 		GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, GoVersion: runtime.Version(),
 		ExecutableSHA: fileSHA256(executable), ArtifactSHA: fileSHA256(artifactPath),
 		ManifestSHA: fileSHA256(manifestPath), ConfigSHA: bytesSHA256(configRaw),
-		SlurmJobID: os.Getenv("SLURM_JOB_ID"), SlurmNode: os.Getenv("SLURMD_NODENAME"),
+		SourceCommit: sourceCommit,
+		SlurmJobID:   os.Getenv("SLURM_JOB_ID"), SlurmNode: os.Getenv("SLURMD_NODENAME"),
 		RowsPlanned: len(plan.Rows), OutlierPolicy: "no deletion; warmups are separately labelled",
 		TimingClock: "Go monotonic time embedded in time.Time", ObserverPolicy: "observer callback time excluded from each phase duration",
 	}
 	if info, ok := debug.ReadBuildInfo(); ok {
 		metadata.BuildInfo = info.String()
+		buildRevision := ""
 		for _, setting := range info.Settings {
 			switch setting.Key {
 			case "vcs.revision":
-				metadata.SourceCommit = setting.Value
+				buildRevision = setting.Value
 			case "vcs.modified":
 				metadata.SourceModified = setting.Value == "true"
 			}
 		}
+		if metadata.SourceCommit == "" {
+			metadata.SourceCommit = buildRevision
+		} else if buildRevision != "" && buildRevision != metadata.SourceCommit {
+			return fmt.Errorf("linker source commit %s disagrees with build VCS revision %s", metadata.SourceCommit, buildRevision)
+		}
 	}
-	if metadata.SourceCommit == "" {
+	if len(metadata.SourceCommit) != 40 {
 		return errors.New("benchmark executable is not bound to a source commit")
+	}
+	if _, err := hex.DecodeString(metadata.SourceCommit); err != nil {
+		return errors.New("benchmark executable source commit is not hexadecimal")
 	}
 	if metadata.SourceModified {
 		return errors.New("benchmark executable was built from a modified source tree")

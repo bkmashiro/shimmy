@@ -20,6 +20,14 @@ case "$run_root" in
     ;;
 esac
 
+cleanup_run_root() {
+  case "$run_root" in
+    /tmp/shimmy-agent-python-[0-9]*) rm -rf -- "$run_root" ;;
+    *) printf 'refusing cleanup of unsafe path: %q\n' "$run_root" >&2; return 2 ;;
+  esac
+}
+trap cleanup_run_root EXIT
+
 mkdir -m 0700 -- "$run_root"
 input_archive="$run_root/input.tar.zst"
 input_checksum="$run_root/input.sha256"
@@ -138,11 +146,6 @@ fi
 
 ack_rc=0
 wait_for_file "$run_root/ACK" 21600 || ack_rc=$?
-
-case "$run_root" in
-  /tmp/shimmy-agent-python-[0-9]*) rm -rf -- "$run_root" ;;
-  *) printf 'refusing cleanup of unsafe path: %q\n' "$run_root" >&2; exit 2 ;;
-esac
 
 if (( ack_rc != 0 )); then
   exit "$ack_rc"

@@ -335,39 +335,15 @@ func expectEOF(dec *json.Decoder) error {
 }
 
 func CanonicalRowID(row PlanRow, seq int) string {
-	parts := []string{
-		row.Campaign,
-		string(row.Lifecycle),
-		fmt.Sprintf("%02d", row.Pool),
-		fmt.Sprintf("%02d", row.PreparedCapacity),
-		fmt.Sprintf("r%d", seq),
+	row.ID = ""
+	encoded, err := json.Marshal(struct {
+		Sequence int     `json:"sequence"`
+		Row      PlanRow `json:"row"`
+	}{Sequence: seq, Row: row})
+	if err != nil {
+		panic(fmt.Sprintf("canonical row identity: %v", err))
 	}
-	if row.PayloadShape != "" {
-		parts = append(parts, "shape="+row.PayloadShape)
-	}
-	if row.CPUProfile != "" {
-		parts = append(parts, "cpu="+row.CPUProfile)
-	}
-	if row.Concurrency != nil {
-		parts = append(parts, fmt.Sprintf("conc=%d", *row.Concurrency))
-	}
-	if row.ArenaMiB != nil {
-		parts = append(parts, fmt.Sprintf("arena=%d", *row.ArenaMiB))
-	}
-	if row.DirtyBps != nil {
-		parts = append(parts, fmt.Sprintf("dirty=%d", *row.DirtyBps))
-	}
-	if row.InputBytes != nil {
-		parts = append(parts, fmt.Sprintf("in=%d", *row.InputBytes))
-	}
-	if row.OutputBytes != nil {
-		parts = append(parts, fmt.Sprintf("out=%d", *row.OutputBytes))
-	}
-	if row.SnapshotSelected != "" {
-		parts = append(parts, "sel="+row.SnapshotSelected)
-	}
-	joined := strings.Join(parts, "|")
-	h := sha1.Sum([]byte(joined))
+	h := sha1.Sum(encoded)
 	return strings.ToLower(fmt.Sprintf("%s-%s", row.Campaign, hex.EncodeToString(h[:4])))
 }
 

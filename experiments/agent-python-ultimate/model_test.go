@@ -218,3 +218,19 @@ func TestCanonicalRowIDIsStable(t *testing.T) {
 	id3 := CanonicalRowID(raw, 1)
 	assert.NotEqual(t, id1, id3)
 }
+
+func TestCanonicalRowIDIncludesBehaviorFields(t *testing.T) {
+	base := PlanRow{Campaign: "fault-recovery", Lifecycle: LifecycleFresh, Pool: 1, PreparedCapacity: 1, Repeat: 1, Surface: "direct", CacheState: "warm", Fault: "timeout"}
+	baseID := CanonicalRowID(base, 0)
+	for name, mutate := range map[string]func(*PlanRow){
+		"surface": func(row *PlanRow) { row.Surface = "http" },
+		"cache":   func(row *PlanRow) { row.CacheState = "cold" },
+		"fault":   func(row *PlanRow) { row.Fault = "cancel" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := base
+			mutate(&changed)
+			assert.NotEqual(t, baseID, CanonicalRowID(changed, 0))
+		})
+	}
+}

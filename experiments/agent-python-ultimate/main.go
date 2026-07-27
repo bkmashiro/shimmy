@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"runtime/debug"
 	"sort"
@@ -280,7 +281,7 @@ func runParent(configPath, artifactPath, manifestPath, outputDir string, limit i
 
 	for index, row := range plan.Rows {
 		resultPath := filepath.Join(outputDir, "rows", row.ID+".json")
-		if validWorkerResult(resultPath, row.ID) {
+		if validWorkerResult(resultPath, row, "ok", "unavailable", "unsupported") {
 			metadata.RowsResumed++
 			metadata.RowsCompleted++
 			continue
@@ -310,6 +311,9 @@ func runParent(configPath, artifactPath, manifestPath, outputDir string, limit i
 		info, err := os.Stat(resultPath)
 		if err != nil || info.Size() > 16<<20 {
 			return fmt.Errorf("worker %s result size invalid: size=%d err=%v", row.ID, sizeOrZero(info), err)
+		}
+		if !validWorkerResult(resultPath, row, "ok", "unavailable", "unsupported", "failed") {
+			return fmt.Errorf("worker %s did not produce a structurally valid exact-row result", row.ID)
 		}
 		metadata.RowsCompleted++
 		if err := appendCheckpoint(filepath.Join(outputDir, "checkpoint.jsonl"), row.ID); err != nil {
@@ -363,7 +367,7 @@ func prewarmCompileCache(executable, artifact, manifest, cacheDir, outputDir str
 	if err := runWorkerProcess(executable, inputPath, resultPath, filepath.Join(outputDir, "logs", "prewarm.stdout"), filepath.Join(outputDir, "logs", "prewarm.stderr")); err != nil {
 		return err
 	}
-	if !validWorkerResult(resultPath, row.ID) {
+	if !validWorkerResult(resultPath, row, "ok") {
 		return errors.New("prewarm worker did not produce a valid result")
 	}
 	return atomicWrite(marker, []byte(time.Now().UTC().Format(time.RFC3339Nano)+"\n"), 0o600)
@@ -499,13 +503,21 @@ func percentile(values []int64, probability float64) int64 {
 	return copyValues[index]
 }
 
-func validWorkerResult(path, rowID string) bool {
+func validWorkerResult(path string, expectedRow PlanRow, allowedStatuses ...string) bool {
 	raw, err := os.ReadFile(path)
 	if err != nil || len(raw) > 16<<20 {
 		return false
 	}
 	var result WorkerResult
-	return decodeStrictJSON(raw, &result) == nil && result.Schema == workerResultSchema && result.Row.ID == rowID
+	if decodeStrictJSON(raw, &result) != nil || result.Schema != workerResultSchema || !reflect.DeepEqual(result.Row, expectedRow) {
+		return false
+	}
+	for _, status := range allowedStatuses {
+		if result.Status == status {
+			return true
+		}
+	}
+	return false
 }
 
 func appendCheckpoint(path, rowID string) error {

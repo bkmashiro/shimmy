@@ -74,6 +74,7 @@ class AgentPythonDoCLauncherTests(unittest.TestCase):
         self.assertIn('/tmp/shimmy-agent-python-', text)
         self.assertIn("input checksum file must contain exactly", text)
         self.assertIn('$checksum_name" != "input.tar.zst', text)
+        self.assertIn("trap cleanup_run_root EXIT", text)
         self.assertNotIn("/vol/bitbucket", text)
 
 

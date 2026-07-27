@@ -16,9 +16,14 @@ TCP connection.
   selects `memcpy` is `unavailable`, never a COW result.
 - Raw row JSON is canonical. Summaries are rebuildable with `validate`; no
   outlier is deleted.
+- `metadata.complete` means every planned row has a structurally valid terminal
+  record; it is not a success verdict. Consumers must inspect per-row status and
+  the report's `ok` / `unavailable` / `failed` aggregates. Resume only reuses an
+  exact matching row with `ok`, `unavailable`, or `unsupported` status; failed
+  or behavior-drifted rows are executed again.
 - Remote input and output live under `/tmp/shimmy-agent-python-$SLURM_JOB_ID`.
-  The job deletes that directory only after the Mac streams and verifies the
-  result and sends `ACK`.
+  A successful result remains there until the Mac streams and verifies it and
+  sends `ACK`; all exit paths remove the exact guarded job directory.
 
 ## Matrix
 

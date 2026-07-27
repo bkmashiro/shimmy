@@ -106,6 +106,11 @@ type Config struct {
 	// processes that point at the same directory, making cold starts much faster
 	// after the first compile.
 	CompileCacheDir string `conf:"wasm_compile_cache"`
+
+	// AgentPythonObserver receives optional phase evidence. Callbacks may be
+	// concurrent during refill and must return promptly. It is never populated
+	// from operator configuration.
+	AgentPythonObserver func(AgentPythonPhaseEvent) `conf:"-"`
 }
 
 // applyDefaults fills in zero-value fields with sensible defaults.

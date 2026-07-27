@@ -104,8 +104,8 @@ for _ in $(seq 1 60); do
   sleep 1
 done
 srun --jobid="$job_id" --overlap -N1 -n1 test -d "/tmp/shimmy-agent-python-$job_id"
-sbcast --force --jobid="$job_id" "$root/input.tar.zst" "/tmp/shimmy-agent-python-$job_id/input.tar.zst"
-sbcast --force --jobid="$job_id" "$root/input.sha256" "/tmp/shimmy-agent-python-$job_id/input.sha256"
+sbcast --force --jobid="$job_id.batch" "$root/input.tar.zst" "/tmp/shimmy-agent-python-$job_id/input.tar.zst"
+sbcast --force --jobid="$job_id.batch" "$root/input.sha256" "/tmp/shimmy-agent-python-$job_id/input.sha256"
 srun --jobid="$job_id" --overlap -N1 -n1 test -s "/tmp/shimmy-agent-python-$job_id/input.tar.zst"
 srun --jobid="$job_id" --overlap -N1 -n1 test -s "/tmp/shimmy-agent-python-$job_id/input.sha256"
 REMOTE

@@ -160,7 +160,8 @@ func buildNumericArrayPayload(target int) ([]byte, error) {
 		for i := 0; i < n-1; i++ {
 			parts = append(parts, "1")
 		}
-		parts = append(parts, strings.Repeat("0", lastLen))
+		last := "1" + strings.Repeat("0", lastLen-1)
+		parts = append(parts, last)
 		b := append([]byte(prefix), []byte(strings.Join(parts, ","))...)
 		b = append(b, suffix...)
 		if len(b) == target {

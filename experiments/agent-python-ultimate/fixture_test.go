@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -22,6 +23,19 @@ func TestSyntheticPayloadHasExactTargetLength(t *testing.T) {
 			b, err := BuildOutputPayloadByShape(shape, target)
 			require.NoError(t, err)
 			require.Equal(t, target, len(b))
+		}
+	}
+}
+
+func TestSyntheticPayloadsAreValidJSON(t *testing.T) {
+	for _, targets := range [][]int{InputPayloadTargets, OutputPayloadTargets} {
+		for _, target := range targets {
+			for _, shape := range PayloadShapeValues {
+				payload, err := BuildSyntheticPayload(target, shape, 0)
+				require.NoError(t, err)
+				var decoded any
+				require.NoErrorf(t, json.Unmarshal(payload, &decoded), "shape=%s target=%d", shape, target)
+			}
 		}
 	}
 }

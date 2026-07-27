@@ -97,13 +97,7 @@ for _ in $(seq 1 600); do
   esac
 done
 [[ "${state-}" == RUNNING ]]
-for _ in $(seq 1 60); do
-  if srun --jobid="$job_id" --overlap -N1 -n1 test -d "/tmp/shimmy-agent-python-$job_id"; then
-    break
-  fi
-  sleep 1
-done
-srun --jobid="$job_id" --overlap -N1 -n1 test -d "/tmp/shimmy-agent-python-$job_id"
+sleep 5
 broadcast_output="$({
   sbcast -v --force --jobid="$job_id.batch" "$root/input.tar.zst" "/tmp/shimmy-agent-python-$job_id/input.tar.zst"
   sbcast -v --force --jobid="$job_id.batch" "$root/input.sha256" "/tmp/shimmy-agent-python-$job_id/input.sha256"
@@ -113,7 +107,7 @@ case "$broadcast_output" in
   *"jobid      = $job_id.batch"*) ;;
   *) printf 'sbcast did not confirm the batch step credential\n' >&2; exit 4 ;;
 esac
-sleep 2
+sleep 5
 srun --jobid="$job_id" --overlap -N1 -n1 test -s "/tmp/shimmy-agent-python-$job_id/input.tar.zst"
 srun --jobid="$job_id" --overlap -N1 -n1 test -s "/tmp/shimmy-agent-python-$job_id/input.sha256"
 REMOTE

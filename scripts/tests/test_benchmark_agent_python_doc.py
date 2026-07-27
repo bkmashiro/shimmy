@@ -58,6 +58,9 @@ class AgentPythonDoCLauncherTests(unittest.TestCase):
         launcher_text = LAUNCHER.read_text(encoding="utf-8")
         self.assertIn('sbcast -v --force --jobid="$job_id.batch"', launcher_text)
         self.assertIn("sbcast did not confirm the batch step credential", launcher_text)
+        stage_body = launcher_text.split("stage_job() {", 1)[1].split("job_status() {", 1)[0]
+        self.assertNotIn('test -d "/tmp/shimmy-agent-python-$job_id"', stage_body)
+        self.assertIn("sleep 5\nbroadcast_output=", stage_body)
 
     def test_slurm_job_uses_tmp_checksum_pull_ack_protocol(self) -> None:
         text = JOB_SCRIPT.read_text(encoding="utf-8")

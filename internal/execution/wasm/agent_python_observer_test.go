@@ -1,6 +1,9 @@
 package wasm
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -61,4 +64,28 @@ func TestAgentPythonObserverPanicDoesNotAffectRuntime(t *testing.T) {
 			Err:     assert.AnError,
 		})
 	})
+}
+
+func TestAgentPythonStartupObserverMayShutdownDispatcher(t *testing.T) {
+	scriptPath := filepath.Join(t.TempDir(), "eval.py")
+	require.NoError(t, os.WriteFile(scriptPath, []byte("def evaluation_function(response, answer, params=None):\n    return {}\n"), 0o600))
+
+	var dispatcher *AgentPythonDispatcher
+	dispatcher = NewAgentPythonDispatcher(Config{
+		ModulePath:              filepath.Join(t.TempDir(), "missing.wasm"),
+		AgentPythonManifestPath: filepath.Join(t.TempDir(), "missing-manifest.json"),
+		PythonScriptPath:        scriptPath,
+		AgentPythonObserver: func(AgentPythonPhaseEvent) {
+			_ = dispatcher.Shutdown(context.Background())
+		},
+	}, zap.NewNop())
+	done := make(chan error, 1)
+	go func() { done <- dispatcher.Start(context.Background()) }()
+
+	select {
+	case err := <-done:
+		require.Error(t, err)
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("startup observer deadlocked while calling Shutdown")
+	}
 }

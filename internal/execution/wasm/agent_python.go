@@ -107,7 +107,24 @@ func NewAgentPythonDispatcher(cfg Config, log *zap.Logger) *AgentPythonDispatche
 
 func (d *AgentPythonDispatcher) Start(ctx context.Context) error {
 	d.mu.Lock()
-	defer d.mu.Unlock()
+	startupObserver := d.cfg.AgentPythonObserver
+	var startupEvents []AgentPythonPhaseEvent
+	if startupObserver != nil {
+		// Start serializes dispatcher state under d.mu, but external observers must
+		// never run in that lock domain: they may synchronously inspect or shut down
+		// the dispatcher. Capture already-timed immutable events and flush them in
+		// order after releasing the lock.
+		d.cfg.AgentPythonObserver = func(event AgentPythonPhaseEvent) {
+			startupEvents = append(startupEvents, event)
+		}
+	}
+	defer func() {
+		d.cfg.AgentPythonObserver = startupObserver
+		d.mu.Unlock()
+		for _, event := range startupEvents {
+			d.emitAgentPythonPhaseEvent(startupObserver, event)
+		}
+	}()
 	if d.closed {
 		return errors.New("agent-python: dispatcher is shut down")
 	}

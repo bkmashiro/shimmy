@@ -104,6 +104,13 @@ func (d *AgentPythonDispatcher) observeAgentPythonPhase(observation AgentPythonP
 	if observation.Err != nil {
 		event.Error = observation.Err.Error()
 	}
+	d.emitAgentPythonPhaseEvent(observer, event)
+}
+
+func (d *AgentPythonDispatcher) emitAgentPythonPhaseEvent(observer func(AgentPythonPhaseEvent), event AgentPythonPhaseEvent) {
+	if observer == nil {
+		return
+	}
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			d.log.Warn("agent-python observer panicked")

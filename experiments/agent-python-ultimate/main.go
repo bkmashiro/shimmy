@@ -35,6 +35,8 @@ type RunMetadata struct {
 	ArtifactSHA    string `json:"artifact_sha256"`
 	ManifestSHA    string `json:"manifest_sha256"`
 	ConfigSHA      string `json:"config_sha256"`
+	SourceCommit   string `json:"source_commit"`
+	SourceModified bool   `json:"source_modified"`
 	BuildInfo      string `json:"build_info,omitempty"`
 	SlurmJobID     string `json:"slurm_job_id,omitempty"`
 	SlurmNode      string `json:"slurm_node,omitempty"`
@@ -218,6 +220,20 @@ func runParent(configPath, artifactPath, manifestPath, outputDir string, limit i
 	}
 	if info, ok := debug.ReadBuildInfo(); ok {
 		metadata.BuildInfo = info.String()
+		for _, setting := range info.Settings {
+			switch setting.Key {
+			case "vcs.revision":
+				metadata.SourceCommit = setting.Value
+			case "vcs.modified":
+				metadata.SourceModified = setting.Value == "true"
+			}
+		}
+	}
+	if metadata.SourceCommit == "" {
+		return errors.New("benchmark executable is not bound to a source commit")
+	}
+	if metadata.SourceModified {
+		return errors.New("benchmark executable was built from a modified source tree")
 	}
 	if err := writeJSON(filepath.Join(outputDir, "metadata.json"), metadata); err != nil {
 		return err

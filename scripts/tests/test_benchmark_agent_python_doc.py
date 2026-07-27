@@ -81,6 +81,14 @@ class AgentPythonDoCLauncherTests(unittest.TestCase):
         self.assertIn('wait_for_file "$run_root/ACK" 172800', text)
         self.assertNotIn("/vol/bitbucket", text)
 
+    def test_pull_and_ack_are_separate_validation_phases(self) -> None:
+        text = LAUNCHER.read_text(encoding="utf-8")
+        pull_body = text.split("pull_result() {", 1)[1].split("ack_result() {", 1)[0]
+        self.assertNotIn('/ACK', pull_body)
+        self.assertIn("ack_result() {", text)
+        self.assertIn('touch "$1/ACK"', text)
+        self.assertIn('ack) [[ $# -eq 2 ]] || usage; ack_result "$2"', text)
+
 
 if __name__ == "__main__":
     unittest.main()

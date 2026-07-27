@@ -156,8 +156,13 @@ pull_result() {
     fi
     sha256sum -c result.sha256
   )
+}
+
+ack_result() {
+  local job_id="$1"
+  validate_job_id "$job_id"
   "${SSH[@]}" srun --jobid="$job_id" --overlap -N1 -n1 \
-    touch "/tmp/shimmy-agent-python-$job_id/ACK"
+    sh -c 'test -f "$1/RESULT.READY" && touch "$1/ACK"' sh "/tmp/shimmy-agent-python-$job_id"
 }
 
 cleanup_controller() {
@@ -172,7 +177,7 @@ REMOTE
 }
 
 usage() {
-  printf 'usage: %s COMMAND ...\ncommands: validate-run-id RUN_ID | render-sbatch RUN_ID | submit RUN_ID | stage RUN_ID JOB_ID | status JOB_ID | pull JOB_ID LOCAL_DIR | cleanup-controller RUN_ID\n' "$0" >&2
+  printf 'usage: %s COMMAND ...\ncommands: validate-run-id RUN_ID | render-sbatch RUN_ID | submit RUN_ID | stage RUN_ID JOB_ID | status JOB_ID | pull JOB_ID LOCAL_DIR | ack JOB_ID | cleanup-controller RUN_ID\n' "$0" >&2
   exit 2
 }
 
@@ -184,6 +189,7 @@ case "$command_name" in
   stage) [[ $# -eq 3 ]] || usage; stage_job "$2" "$3" ;;
   status) [[ $# -eq 2 ]] || usage; job_status "$2" ;;
   pull) [[ $# -eq 3 ]] || usage; pull_result "$2" "$3" ;;
+  ack) [[ $# -eq 2 ]] || usage; ack_result "$2" ;;
   cleanup-controller) [[ $# -eq 2 ]] || usage; cleanup_controller "$2" ;;
   *) usage ;;
 esac

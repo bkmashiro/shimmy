@@ -23,7 +23,8 @@ TCP connection.
   or behavior-drifted rows are executed again.
 - Remote input and output live under `/tmp/shimmy-agent-python-$SLURM_JOB_ID`.
   A successful result remains there for up to 48 hours until the Mac streams
-  and verifies it and sends `ACK`; all exit paths remove the exact guarded job
+  and verifies the archive, extracts it, validates the exact-source raw report,
+  and only then sends `ACK`; all exit paths remove the exact guarded job
   directory.
 
 ## Matrix

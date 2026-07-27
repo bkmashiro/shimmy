@@ -78,6 +78,7 @@ class AgentPythonDoCLauncherTests(unittest.TestCase):
         self.assertIn("input checksum file must contain exactly", text)
         self.assertIn('$checksum_name" != "input.tar.zst', text)
         self.assertIn("trap cleanup_run_root EXIT", text)
+        self.assertIn('wait_for_file "$run_root/ACK" 172800', text)
         self.assertNotIn("/vol/bitbucket", text)
 
 

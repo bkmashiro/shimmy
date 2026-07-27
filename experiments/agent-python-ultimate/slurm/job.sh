@@ -145,7 +145,7 @@ fi
 : >"$run_root/RESULT.READY"
 
 ack_rc=0
-wait_for_file "$run_root/ACK" 21600 || ack_rc=$?
+wait_for_file "$run_root/ACK" 172800 || ack_rc=$?
 
 if (( ack_rc != 0 )); then
   exit "$ack_rc"

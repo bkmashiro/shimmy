@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "agent-python-ultimate Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "rows"],
+  "properties": {
+    "schema": {
+      "const": "agent-python-ultimate-report/v1"
+    },
+    "rows": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/row"
+      }
+    }
+  },
+  "definitions": {
+    "row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["row_id", "campaign", "lifecycle", "raw_entries", "summary"],
+      "properties": {
+        "row_id": {
+          "type": "string"
+        },
+        "campaign": {
+          "type": "string"
+        },
+        "lifecycle": {
+          "type": "string",
+          "enum": ["fresh", "single-use", "snapshot/memcpy", "snapshot/cow"]
+        },
+        "snapshot_requested": {
+          "type": "string"
+        },
+        "snapshot_selected": {
+          "type": "string"
+        },
+        "snapshot_fallback": {
+          "type": "boolean"
+        },
+        "raw_entries": {
+          "type": "array"
+        },
+        "summary": {
+          "type": "object",
+          "required": ["raw_count"],
+          "additionalProperties": false,
+          "properties": {
+            "raw_count": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "lifecycle": {"enum": ["snapshot/memcpy", "snapshot/cow"]}
+            },
+            "required": ["lifecycle"]
+          },
+          "then": {
+            "required": ["snapshot_selected", "snapshot_fallback"]
+          }
+        },
+        {
+          "if": {
+            "not": {
+              "properties": {
+                "lifecycle": {
+                  "enum": ["snapshot/memcpy", "snapshot/cow"]
+                }
+              },
+              "required": ["lifecycle"]
+            }
+          },
+          "then": {
+            "not": {
+              "required": ["snapshot_selected", "snapshot_requested", "snapshot_fallback"]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

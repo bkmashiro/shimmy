@@ -1,0 +1,22 @@
+{
+  "schema": "agent-python-ultimate-config/v1",
+  "seed": 20260727,
+  "allow_large_plan": true,
+  "max_rows": 1401,
+  "campaigns": {
+    "capability": {"enabled": true},
+    "direct-startup": {"enabled": true},
+    "http-full-boot": {"enabled": true},
+    "input-payload": {"enabled": true},
+    "output-payload": {"enabled": true},
+    "payload-shape": {"enabled": true},
+    "dirty-sparse": {"enabled": true},
+    "dirty-pattern": {"enabled": true},
+    "cpu": {"enabled": true},
+    "interaction-corners": {"enabled": true},
+    "concurrency": {"enabled": true},
+    "single-use-saturation": {"enabled": true},
+    "density": {"enabled": true},
+    "fault-recovery": {"enabled": true}
+  }
+}

@@ -1,0 +1,120 @@
+import hashlib
+import json
+
+ARENA_BYTES = {{ .ArenaMiB }} * 1024 * 1024
+PREPARED_SENTINEL = {{ .Sentinel }}
+CPU_PROFILE = "{{ .CPUProfile }}"
+RANDOM_SEED = {{ .Seed }}
+
+# The Agent Python runtime executes this trusted script during runtime_prepare.
+# Therefore these allocations are part of the prepared baseline and are restored
+# by snapshot lifecycles between calls.
+arena = bytearray(ARENA_BYTES)
+for _page in range(0, len(arena), 4096):
+    arena[_page] = PREPARED_SENTINEL
+guest_invocation_count = 0
+
+
+def _digest(data):
+    h = hashlib.sha256()
+    h.update(data)
+    return h.hexdigest()
+
+
+def _canonical_bytes(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
+def _touch_pages(pattern, dirty_bps, seed):
+    if not arena or dirty_bps <= 0:
+        return []
+    total_pages = max(1, len(arena) // 4096)
+    dirty_pages = max(1, (total_pages * dirty_bps + 9999) // 10000)
+    dirty_pages = min(dirty_pages, total_pages)
+    if pattern == "contiguous":
+        touched = list(range(dirty_pages))
+    elif pattern == "sparse":
+        if dirty_pages >= total_pages:
+            touched = list(range(total_pages))
+        else:
+            step = max(1, (total_pages + dirty_pages - 1) // dirty_pages)
+            touched = list(range(0, step * dirty_pages, step))[:dirty_pages]
+    elif pattern == "fixed-seed-random":
+        # Small deterministic xorshift/Fisher-Yates avoids importing random.
+        touched = list(range(total_pages))
+        state = seed & 0xFFFFFFFF
+        for idx in range(total_pages - 1, 0, -1):
+            state ^= (state << 13) & 0xFFFFFFFF
+            state ^= state >> 17
+            state ^= (state << 5) & 0xFFFFFFFF
+            other = state % (idx + 1)
+            touched[idx], touched[other] = touched[other], touched[idx]
+        touched = touched[:dirty_pages]
+    else:
+        raise ValueError("unknown dirty pattern: %s" % pattern)
+    for idx in touched:
+        arena[idx * 4096] = (PREPARED_SENTINEL + 1) & 0xFF
+    return touched
+
+
+def _run_cpu(profile):
+    if not profile or profile == "none":
+        return "none"
+    if profile.startswith("python-"):
+        count_text = profile.split("-", 1)[1]
+        scale = 1000 if count_text.endswith("k") else 1000000 if count_text.endswith("m") else 1
+        iterations = int(count_text[:-1]) * scale if scale != 1 else int(count_text)
+        state = RANDOM_SEED & 0xFFFFFFFF
+        for idx in range(iterations):
+            state = ((state * 1664525) + 1013904223 + idx) & 0xFFFFFFFF
+        return "%08x" % state
+    import numpy as np
+    if profile == "numpy-matmul-64":
+        left = np.arange(4096, dtype=np.float64).reshape((64, 64))
+        result = left @ left.T
+        return "%.6f" % float(result[0, 0] + result[63, 63])
+    count_text = profile.split("-", 1)[1]
+    count = int(count_text[:-1]) * 1000 if count_text.endswith("k") else int(count_text[:-1]) * 1000000
+    values = np.arange(count, dtype=np.float64)
+    result = np.sin(values * 0.0001) + np.sqrt(values + 1.0)
+    return "%.6f" % float(result.sum())
+
+
+def _arena_sample_digest():
+    if not arena:
+        return _digest(b"empty")
+    sample = bytes(arena[:4096]) + bytes(arena[-4096:]) + str(len(arena)).encode("ascii")
+    return _digest(sample)
+
+
+def evaluation_function(response, answer, params=None):
+    global guest_invocation_count
+    guest_invocation_count += 1
+    params = params or {}
+
+    if arena and arena[0] != PREPARED_SENTINEL:
+        raise RuntimeError("prepared-sentinel-mismatch")
+    if params.get("fault") == "exception":
+        raise RuntimeError("synthetic-exception")
+    if params.get("fault") == "memory-growth":
+        arena.extend(bytearray(int(params.get("growth_bytes", 8 * 1024 * 1024))))
+
+    dirty_pages = _touch_pages(
+        params.get("dirty_pattern", "contiguous"),
+        int(params.get("dirty_bps", 0)),
+        int(params.get("seed", RANDOM_SEED)),
+    )
+    cpu_checksum = _run_cpu(params.get("cpu_profile", CPU_PROFILE))
+    output_bytes = int(params.get("output_bytes", 0))
+    output_payload = "x" * output_bytes
+    return {
+        "is_correct": response == answer,
+        "guest_invocation_count": guest_invocation_count,
+        "arena_bytes": len(arena),
+        "arena_digest": _arena_sample_digest(),
+        "input_digest": _digest(_canonical_bytes(response)),
+        "output_digest": _digest(output_payload.encode("utf-8")),
+        "output_payload": output_payload,
+        "dirty_pages": dirty_pages,
+        "cpu_checksum": cpu_checksum,
+    }

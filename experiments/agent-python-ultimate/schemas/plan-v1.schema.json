@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "agent-python-ultimate Plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "rows"],
+  "properties": {
+    "schema": {
+      "const": "agent-python-ultimate-plan/v1"
+    },
+    "rows": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/row"
+      }
+    }
+  },
+  "definitions": {
+    "row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["row_id", "campaign", "lifecycle", "pool", "prepared_capacity", "repeat"],
+      "properties": {
+        "row_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{1,120}$"
+        },
+        "campaign": {
+          "type": "string"
+        },
+        "lifecycle": {
+          "type": "string",
+          "enum": ["fresh", "single-use", "snapshot/memcpy", "snapshot/cow"]
+        },
+        "pool": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4
+        },
+        "prepared_capacity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4
+        },
+        "repeat": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "input_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048576
+        },
+        "output_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048576
+        },
+        "payload_shape": {
+          "type": "string",
+          "enum": ["flat-ascii", "nested", "numeric-array", "utf8"]
+        },
+        "arena_mib": {
+          "type": "integer",
+          "enum": [0, 8, 32, 64, 128]
+        },
+        "dirty_bps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "dirty_pattern": {
+          "type": "string"
+        },
+        "cpu_profile": {
+          "type": "string"
+        },
+        "concurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "cache_state": {
+          "type": "string",
+          "enum": ["cold", "warm"]
+        },
+        "surface": {
+          "type": "string",
+          "enum": ["direct", "http"]
+        },
+        "fault": {
+          "type": "string",
+          "enum": ["exception", "timeout", "cancel", "memory-growth", "oversized-input", "oversized-output", "recovery"]
+        },
+        "snapshot_selected": {
+          "type": "string"
+        },
+        "snapshot_fallback": {
+          "type": "boolean"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "lifecycle": {"const": "snapshot/memcpy"}
+            },
+            "required": ["lifecycle"]
+          },
+          "then": {
+            "required": ["snapshot_selected"],
+            "properties": {
+              "snapshot_selected": {"const": "memcpy"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "lifecycle": {"const": "snapshot/cow"}
+            },
+            "required": ["lifecycle"]
+          },
+          "then": {
+            "required": ["snapshot_selected"],
+            "properties": {
+              "snapshot_selected": {"const": "cow"}
+            }
+          }
+        },
+        {
+          "if": {
+            "not": {
+              "properties": {
+                "lifecycle": {
+                  "enum": ["snapshot/memcpy", "snapshot/cow"]
+                }
+              },
+              "required": ["lifecycle"]
+            }
+          },
+          "then": {
+            "not": {
+              "required": ["snapshot_selected", "snapshot_fallback"]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

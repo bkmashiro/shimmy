@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -376,8 +377,7 @@ func prewarmCompileCache(executable, artifact, manifest, cacheDir, outputDir str
 func runPlanWorkerProcess(executable, inputPath, resultPath, stdoutPath, stderrPath string, row PlanRow) error {
 	startedUTC := time.Now().UTC().Format(time.RFC3339Nano)
 	if err := runWorkerProcess(executable, inputPath, resultPath, stdoutPath, stderrPath); err != nil {
-		var exitError *exec.ExitError
-		if !errors.As(err, &exitError) || exitError.ProcessState == nil || exitError.ProcessState.ExitCode() != -1 {
+		if !workerProcessCrashed(err, stderrPath) {
 			return err
 		}
 		return writeJSON(resultPath, WorkerResult{
@@ -386,10 +386,32 @@ func runPlanWorkerProcess(executable, inputPath, resultPath, stdoutPath, stderrP
 			Status:      "failed",
 			StartedUTC:  startedUTC,
 			FinishedUTC: time.Now().UTC().Format(time.RFC3339Nano),
-			Error:       fmt.Sprintf("worker process terminated by signal: %v", err),
+			Error:       fmt.Sprintf("worker process crashed: %v", err),
 		})
 	}
 	return nil
+}
+
+func workerProcessCrashed(err error, stderrPath string) bool {
+	var exitError *exec.ExitError
+	if !errors.As(err, &exitError) || exitError.ProcessState == nil {
+		return false
+	}
+	if exitError.ProcessState.ExitCode() == -1 {
+		return true
+	}
+	if code := exitError.ExitCode(); code != 2 && code != 4 {
+		return false
+	}
+	info, statErr := os.Stat(stderrPath)
+	if statErr != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > 1<<20 {
+		return false
+	}
+	stderr, readErr := os.ReadFile(stderrPath)
+	if readErr != nil {
+		return false
+	}
+	return bytes.Contains(stderr, []byte("fatal error:")) && bytes.Contains(stderr, []byte("[signal SIG"))
 }
 
 func runWorkerProcess(executable, inputPath, resultPath, stdoutPath, stderrPath string) error {

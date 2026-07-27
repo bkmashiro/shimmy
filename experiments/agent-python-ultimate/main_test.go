@@ -74,3 +74,28 @@ func TestRunPlanWorkerProcessPropagatesOrdinaryWorkerExit(t *testing.T) {
 	_, statErr := os.Stat(resultPath)
 	assert.ErrorIs(t, statErr, os.ErrNotExist)
 }
+
+func TestRunPlanWorkerProcessRecordsGoFatalSignalExitAsFailedRow(t *testing.T) {
+	dir := t.TempDir()
+	executable := filepath.Join(dir, "go-fatal-worker.sh")
+	require.NoError(t, os.WriteFile(executable, []byte("#!/bin/sh\nprintf 'fatal error: fault\\n[signal SIGSEGV: segmentation violation]\\n' >&2\nexit 4\n"), 0o700))
+	resultPath := filepath.Join(dir, "result.json")
+	row := PlanRow{ID: "fault-row"}
+
+	require.NoError(t, runPlanWorkerProcess(
+		executable,
+		filepath.Join(dir, "input.json"),
+		resultPath,
+		filepath.Join(dir, "stdout"),
+		filepath.Join(dir, "stderr"),
+		row,
+	))
+
+	raw, err := os.ReadFile(resultPath)
+	require.NoError(t, err)
+	var result WorkerResult
+	require.NoError(t, decodeStrictJSON(raw, &result))
+	assert.Equal(t, row, result.Row)
+	assert.Equal(t, "failed", result.Status)
+	assert.Contains(t, result.Error, "exit status 4")
+}

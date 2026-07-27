@@ -56,7 +56,8 @@ class AgentPythonDoCLauncherTests(unittest.TestCase):
         self.assertNotIn("--exclusive", rendered)
         self.assertNotIn(".github", rendered)
         launcher_text = LAUNCHER.read_text(encoding="utf-8")
-        self.assertIn('sbcast --force --jobid="$job_id.batch"', launcher_text)
+        self.assertIn('sbcast -v --force --jobid="$job_id.batch"', launcher_text)
+        self.assertIn("sbcast did not confirm the batch step credential", launcher_text)
 
     def test_slurm_job_uses_tmp_checksum_pull_ack_protocol(self) -> None:
         text = JOB_SCRIPT.read_text(encoding="utf-8")

@@ -305,7 +305,7 @@ func runParent(configPath, artifactPath, manifestPath, outputDir string, limit i
 		}
 		stdoutPath := filepath.Join(outputDir, "logs", row.ID+".stdout")
 		stderrPath := filepath.Join(outputDir, "logs", row.ID+".stderr")
-		if err := runWorkerProcess(executable, inputPath, resultPath, stdoutPath, stderrPath); err != nil {
+		if err := runPlanWorkerProcess(executable, inputPath, resultPath, stdoutPath, stderrPath, row); err != nil {
 			return fmt.Errorf("worker %s: %w", row.ID, err)
 		}
 		info, err := os.Stat(resultPath)
@@ -371,6 +371,21 @@ func prewarmCompileCache(executable, artifact, manifest, cacheDir, outputDir str
 		return errors.New("prewarm worker did not produce a valid result")
 	}
 	return atomicWrite(marker, []byte(time.Now().UTC().Format(time.RFC3339Nano)+"\n"), 0o600)
+}
+
+func runPlanWorkerProcess(executable, inputPath, resultPath, stdoutPath, stderrPath string, row PlanRow) error {
+	startedUTC := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := runWorkerProcess(executable, inputPath, resultPath, stdoutPath, stderrPath); err != nil {
+		return writeJSON(resultPath, WorkerResult{
+			Schema:      workerResultSchema,
+			Row:         row,
+			Status:      "failed",
+			StartedUTC:  startedUTC,
+			FinishedUTC: time.Now().UTC().Format(time.RFC3339Nano),
+			Error:       fmt.Sprintf("worker process terminated: %v", err),
+		})
+	}
+	return nil
 }
 
 func runWorkerProcess(executable, inputPath, resultPath, stdoutPath, stderrPath string) error {

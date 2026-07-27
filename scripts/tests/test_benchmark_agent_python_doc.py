@@ -84,9 +84,12 @@ class AgentPythonDoCLauncherTests(unittest.TestCase):
     def test_pull_and_ack_are_separate_validation_phases(self) -> None:
         text = LAUNCHER.read_text(encoding="utf-8")
         pull_body = text.split("pull_result() {", 1)[1].split("ack_result() {", 1)[0]
+        ack_body = text.split("ack_result() {", 1)[1].split("cleanup_controller() {", 1)[0]
         self.assertNotIn('/ACK', pull_body)
         self.assertIn("ack_result() {", text)
-        self.assertIn('touch "$1/ACK"', text)
+        self.assertNotIn("sh -c", ack_body)
+        self.assertIn('test -f "/tmp/shimmy-agent-python-$job_id/RESULT.READY"', ack_body)
+        self.assertIn('touch "/tmp/shimmy-agent-python-$job_id/ACK"', ack_body)
         self.assertIn('ack) [[ $# -eq 2 ]] || usage; ack_result "$2"', text)
 
 

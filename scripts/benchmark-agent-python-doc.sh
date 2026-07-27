@@ -162,7 +162,9 @@ ack_result() {
   local job_id="$1"
   validate_job_id "$job_id"
   "${SSH[@]}" srun --jobid="$job_id" --overlap -N1 -n1 \
-    sh -c 'test -f "$1/RESULT.READY" && touch "$1/ACK"' sh "/tmp/shimmy-agent-python-$job_id"
+    test -f "/tmp/shimmy-agent-python-$job_id/RESULT.READY"
+  "${SSH[@]}" srun --jobid="$job_id" --overlap -N1 -n1 \
+    touch "/tmp/shimmy-agent-python-$job_id/ACK"
 }
 
 cleanup_controller() {

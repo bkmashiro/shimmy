@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -24,7 +23,12 @@ import (
 	"time"
 )
 
-const runReportSchema = "agent-python-ultimate-run-report/v1"
+const (
+	runReportSchema = "agent-python-ultimate-run-report/v1"
+	// workerProtocolExitCode is reserved for worker CLI/input/output protocol failures.
+	// Row-level evaluator/runtime crashes must never intentionally use this code.
+	workerProtocolExitCode = 90
+)
 
 // sourceCommit is injected from a verified clean worktree with
 // -ldflags "-X main.sourceCommit=<commit>".
@@ -80,25 +84,36 @@ type RunReport struct {
 }
 
 func main() {
-	if len(os.Args) < 2 {
-		fatalf("usage: %s plan|worker|run|validate ...", os.Args[0])
+	os.Exit(runMain(os.Args, os.Stderr))
+}
+
+func runMain(args []string, stderr io.Writer) int {
+	if len(args) < 2 {
+		fmt.Fprintf(stderr, "usage: %s plan|worker|run|validate ...\n", args[0])
+		return 1
 	}
+	command := args[1]
 	var err error
-	switch os.Args[1] {
+	switch command {
 	case "plan":
-		err = commandPlan(os.Args[2:])
+		err = commandPlan(args[2:])
 	case "worker":
-		err = commandWorker(os.Args[2:])
+		err = commandWorker(args[2:])
 	case "run":
-		err = commandRun(os.Args[2:])
+		err = commandRun(args[2:])
 	case "validate":
-		err = commandValidate(os.Args[2:])
+		err = commandValidate(args[2:])
 	default:
-		err = fmt.Errorf("unknown command %q", os.Args[1])
+		err = fmt.Errorf("unknown command %q", command)
 	}
-	if err != nil {
-		fatalf("%v", err)
+	if err == nil {
+		return 0
 	}
+	fmt.Fprintln(stderr, strings.TrimSpace(err.Error()))
+	if command == "worker" {
+		return workerProtocolExitCode
+	}
+	return 1
 }
 
 func commandPlan(args []string) error {
@@ -377,7 +392,7 @@ func prewarmCompileCache(executable, artifact, manifest, cacheDir, outputDir str
 func runPlanWorkerProcess(executable, inputPath, resultPath, stdoutPath, stderrPath string, row PlanRow) error {
 	startedUTC := time.Now().UTC().Format(time.RFC3339Nano)
 	if err := runWorkerProcess(executable, inputPath, resultPath, stdoutPath, stderrPath); err != nil {
-		if !workerProcessCrashed(err, stderrPath) {
+		if !workerProcessCrashed(err) {
 			return err
 		}
 		return writeJSON(resultPath, WorkerResult{
@@ -392,26 +407,12 @@ func runPlanWorkerProcess(executable, inputPath, resultPath, stdoutPath, stderrP
 	return nil
 }
 
-func workerProcessCrashed(err error, stderrPath string) bool {
+func workerProcessCrashed(err error) bool {
 	var exitError *exec.ExitError
 	if !errors.As(err, &exitError) || exitError.ProcessState == nil {
 		return false
 	}
-	if exitError.ProcessState.ExitCode() == -1 {
-		return true
-	}
-	if code := exitError.ExitCode(); code != 2 && code != 4 {
-		return false
-	}
-	info, statErr := os.Stat(stderrPath)
-	if statErr != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > 1<<20 {
-		return false
-	}
-	stderr, readErr := os.ReadFile(stderrPath)
-	if readErr != nil {
-		return false
-	}
-	return bytes.Contains(stderr, []byte("fatal error:")) && bytes.Contains(stderr, []byte("[signal SIG"))
+	return exitError.ExitCode() != workerProtocolExitCode
 }
 
 func runWorkerProcess(executable, inputPath, resultPath, stdoutPath, stderrPath string) error {
@@ -639,11 +640,4 @@ func sizeOrZero(info os.FileInfo) int64 {
 		return 0
 	}
 	return info.Size()
-}
-
-func fatalf(format string, values ...any) {
-	message := fmt.Sprintf(format, values...)
-	message = strings.TrimSpace(message)
-	fmt.Fprintln(os.Stderr, message)
-	os.Exit(1)
 }

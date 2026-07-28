@@ -3,6 +3,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 SCRIPT = pathlib.Path(__file__).parents[1] / "benchmark-runtime-comparison-bridge.py"
@@ -98,6 +99,78 @@ class BridgeContractTests(unittest.TestCase):
         runner = (SCRIPT.parents[1] / "examples" / "eval-pyodide" / "runner.js").read_text()
         self.assertIn("Fresh namespace — state isolation", runner)
         self.assertIn("_ns = {}", runner)
+
+    def test_exact_python_strategy_lanes_are_declared(self):
+        expected = {
+            "python-agent-cow": ("snapshot", "linear-memory-cow"),
+            "python-agent-memcpy": ("snapshot", "linear-memory-memcpy"),
+            "python-agent-single-use": ("single-use", "single-use-prepared"),
+            "python-agent-fresh": ("fresh", "fresh-module"),
+        }
+        for lane_name, (lifecycle, reset_mode) in expected.items():
+            lane = module.LANES[lane_name]
+            self.assertEqual(lane.family, "python")
+            self.assertEqual(lane.lifecycle_class, "clean")
+            self.assertEqual(
+                module.AGENT_LIFECYCLE_EXPECTATIONS[lane_name]["lifecycle"],
+                lifecycle,
+            )
+            self.assertEqual(
+                module.AGENT_LIFECYCLE_EXPECTATIONS[lane_name]["reset_mode"],
+                reset_mode,
+            )
+
+    def test_agent_strategy_images_compose_and_workflow_are_wired(self):
+        repo_root = SCRIPT.parents[1]
+        dockerfile = (repo_root / "demo" / "compose" / "Dockerfile").read_text()
+        compose = (
+            repo_root / "experiments" / "runtime-comparison-bridge" / "compose.yaml"
+        ).read_text()
+        workflow = (repo_root / ".github" / "workflows" / "bench-runtime-lanes.yml").read_text()
+        for suffix in ("cow", "memcpy", "single-use", "fresh"):
+            target = f"bridge-python-agent-{suffix}"
+            self.assertIn(f"AS {target}", dockerfile)
+            self.assertIn(f"{target}:", compose)
+            self.assertIn(target, workflow)
+
+    def test_single_use_policy_evidence_requires_ready_hit_then_miss(self):
+        evidence = module.validate_single_use_policy_evidence(
+            {
+                "prepared_ready_before_hit": 1,
+                "prepared_ready_after_hit": 0,
+                "ready_hit_ns": 2_000_000,
+                "immediate_miss_ns": 4_000_000_000,
+                "refill_ready_wait_ns": 4_100_000_000,
+            }
+        )
+        self.assertEqual(evidence["policy"], "single-use-prepared-hit-and-refill")
+        with self.assertRaisesRegex(ValueError, "prepared_ready_after_hit"):
+            module.validate_single_use_policy_evidence(
+                {
+                    "prepared_ready_before_hit": 1,
+                    "prepared_ready_after_hit": 1,
+                    "ready_hit_ns": 2_000_000,
+                    "immediate_miss_ns": 4_000_000_000,
+                    "refill_ready_wait_ns": 4_100_000_000,
+                }
+            )
+
+    def test_agent_lifecycle_healthcheck_uses_lane_specific_contract(self):
+        for lane_name, expected in module.AGENT_LIFECYCLE_EXPECTATIONS.items():
+            result = {**expected, "prepared_ready": 1, "status": "ok"}
+            with mock.patch.object(
+                module,
+                "request_json",
+                return_value={
+                    "command": "healthcheck",
+                    "result": result,
+                },
+            ):
+                observed = module.agent_lifecycle_evidence(
+                    module.LANES[lane_name], "http://test", 1.0
+                )
+                for key, value in expected.items():
+                    self.assertEqual(observed[key], value)
 
     def test_persistent_lane_requires_monotonic_counter(self):
         samples = [

@@ -99,6 +99,57 @@ services:
       retries: 36
       start_period: 120s
 
+  bridge-python-agent-memcpy:
+    <<: *common
+    image: "${SHIMMY_BRIDGE_IMAGE_PREFIX:-shimmy-bridge}-python-agent-memcpy:${SHIMMY_BRIDGE_TAG:-dev}"
+    build:
+      <<: *build
+      target: bridge-python-agent-memcpy
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    ports:
+      - "127.0.0.1:${SHIMMY_BRIDGE_PYTHON_AGENT_MEMCPY_PORT:-18588}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 36
+      start_period: 120s
+
+  bridge-python-agent-single-use:
+    <<: *common
+    image: "${SHIMMY_BRIDGE_IMAGE_PREFIX:-shimmy-bridge}-python-agent-single-use:${SHIMMY_BRIDGE_TAG:-dev}"
+    build:
+      <<: *build
+      target: bridge-python-agent-single-use
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    ports:
+      - "127.0.0.1:${SHIMMY_BRIDGE_PYTHON_AGENT_SINGLE_USE_PORT:-18589}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 36
+      start_period: 120s
+
+  bridge-python-agent-fresh:
+    <<: *common
+    image: "${SHIMMY_BRIDGE_IMAGE_PREFIX:-shimmy-bridge}-python-agent-fresh:${SHIMMY_BRIDGE_TAG:-dev}"
+    build:
+      <<: *build
+      target: bridge-python-agent-fresh
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    ports:
+      - "127.0.0.1:${SHIMMY_BRIDGE_PYTHON_AGENT_FRESH_PORT:-18590}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 36
+      start_period: 120s
+
   bridge-python-pyodide-persistent:
     <<: *common
     image: "${SHIMMY_BRIDGE_IMAGE_PREFIX:-shimmy-bridge}-python-pyodide-persistent:${SHIMMY_BRIDGE_TAG:-dev}"

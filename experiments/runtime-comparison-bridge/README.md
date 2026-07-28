@@ -10,8 +10,8 @@ and a bounded claim.
 |---|---|---|
 | `system-native-vs-wasm-semantic` | fresh native file process ↔ generic WASM restore | same fixed equality semantics, public HTTP payload, clean-state evidence, runner, and limits; implementation source differs |
 | native ↔ DBI (downstream evidence) | native Lean evaluator ↔ the identical evaluator under DynamoRIO | existing exact pair; this bridge does not force the Go runtime through the DBI clone-denying policy |
-| `python-warm` | persistent CPython ↔ Agent Python COW ↔ loaded Pyodide runtime | exact same `python/eval.py`, payload, runner, and limits; state mechanisms still differ |
-| `python-clean` | fresh CPython ↔ Agent Python COW ↔ Pyodide fresh namespace | exact same Python source and verified invocation count one; process, memory, and namespace isolation are not equivalent |
+| `python-warm` | persistent CPython ↔ Agent COW/memcpy/single-use ↔ loaded Pyodide runtime | exact same `python/eval.py`, payload, runner, and limits; state mechanisms still differ |
+| `python-clean` | fresh CPython ↔ Agent fresh/COW/memcpy/single-use ↔ Pyodide fresh namespace | exact same Python source and verified invocation count one; process, module, memory, single-use, and namespace isolation are not equivalent |
 | native ↔ QEMU fresh | host native file process ↔ byte-identical binary in a fresh TCG VM | produced by the QEMU job and joined downstream by fixture ID |
 
 DBI and QEMU are wrappers around a native evaluator, not peer guest languages.
@@ -47,6 +47,7 @@ The report keeps these phases separate:
 - container/public-server readiness;
 - first evaluator request;
 - warmed steady samples;
+- Agent single-use prepared ready hit, immediate replacement miss, and refill-to-ready wait;
 - clean-state versus mutable persistent counters.
 
 Prepared single-use/eager refill costs remain separate evidence and are not

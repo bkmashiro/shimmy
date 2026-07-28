@@ -227,8 +227,20 @@ ENV FUNCTION_INTERFACE=rpc \
     FUNCTION_RPC_TRANSPORT=stdio \
     FUNCTION_COMMAND=/opt/evaluators/rpc_evaluator.py
 
-FROM python-reactor AS bridge-python-agent-cow
+FROM python-reactor AS bridge-python-agent-base
 COPY experiments/runtime-comparison-bridge/python/eval.py /opt/evaluators/eval.py
+
+FROM bridge-python-agent-base AS bridge-python-agent-cow
+
+FROM bridge-python-agent-base AS bridge-python-agent-memcpy
+ENV FUNCTION_WASM_SNAPSHOT_MODE=memcpy
+
+FROM bridge-python-agent-base AS bridge-python-agent-single-use
+ENV FUNCTION_WASM_PYTHON_LIFECYCLE=single-use \
+    FUNCTION_WASM_PYTHON_PREPARED_CAPACITY=1
+
+FROM bridge-python-agent-base AS bridge-python-agent-fresh
+ENV FUNCTION_WASM_PYTHON_LIFECYCLE=fresh
 
 FROM pyodide-scipy AS bridge-python-pyodide-persistent
 COPY experiments/runtime-comparison-bridge/python/eval.py /opt/evaluators/eval.py

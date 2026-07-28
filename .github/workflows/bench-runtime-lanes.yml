@@ -30,7 +30,7 @@ concurrency:
 
 jobs:
   compose-lanes:
-    name: Generic / Agent Python COW / Pyodide / DBI
+    name: Generic / Agent Python strategies / Pyodide / DBI
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
@@ -89,7 +89,9 @@ jobs:
           docker compose --profile dbi -f experiments/runtime-comparison-bridge/compose.yaml build \
             bridge-system-native bridge-system-generic \
             bridge-python-native-fresh bridge-python-native-persistent \
-            bridge-python-agent-cow bridge-python-pyodide-persistent
+            bridge-python-agent-cow bridge-python-agent-memcpy \
+            bridge-python-agent-single-use bridge-python-agent-fresh \
+            bridge-python-pyodide-persistent
 
       - name: Benchmark public HTTP lifecycle phases
         run: |

@@ -103,6 +103,39 @@ LANES: Dict[str, LaneSpec] = {
             "the exact same shared pure-Python eval.py",
         ),
         LaneSpec(
+            "python-agent-memcpy",
+            "bridge-python-agent-memcpy",
+            18588,
+            "python",
+            "clean",
+            "Agent Python snapshot lifecycle with full linear-memory memcpy reset",
+            "runtime_prepare is pre-snapshot; full-memory restore is request-visible",
+            "verified linear-memory reset; guest invocation count must be one",
+            "the exact same shared pure-Python eval.py",
+        ),
+        LaneSpec(
+            "python-agent-single-use",
+            "bridge-python-agent-single-use",
+            18589,
+            "python",
+            "clean",
+            "Agent Python never-served prepared instance consumed once",
+            "initial preparation and replacement refill are outside a ready hit but visible on an immediate miss",
+            "single-use initialized instance; guest invocation count must be one",
+            "the exact same shared pure-Python eval.py",
+        ),
+        LaneSpec(
+            "python-agent-fresh",
+            "bridge-python-agent-fresh",
+            18590,
+            "python",
+            "clean",
+            "Agent Python fresh module and runtime initialization per request",
+            "module instantiate, runtime_init and runtime_prepare are request-visible",
+            "fresh module; guest invocation count must be one",
+            "the exact same shared pure-Python eval.py",
+        ),
+        LaneSpec(
             "python-pyodide-clean-namespace",
             "bridge-python-pyodide-persistent",
             18587,
@@ -114,6 +147,27 @@ LANES: Dict[str, LaneSpec] = {
             "the exact same shared pure-Python eval.py",
         ),
     )
+}
+
+AGENT_LIFECYCLE_EXPECTATIONS: Dict[str, Dict[str, str]] = {
+    "python-agent-cow": {
+        "lifecycle": "snapshot",
+        "snapshot_selected": "cow",
+        "reset_mode": "linear-memory-cow",
+    },
+    "python-agent-memcpy": {
+        "lifecycle": "snapshot",
+        "snapshot_selected": "memcpy",
+        "reset_mode": "linear-memory-memcpy",
+    },
+    "python-agent-single-use": {
+        "lifecycle": "single-use",
+        "reset_mode": "single-use-prepared",
+    },
+    "python-agent-fresh": {
+        "lifecycle": "fresh",
+        "reset_mode": "fresh-module",
+    },
 }
 
 WORKLOADS: Dict[str, Dict[str, int]] = {
@@ -131,15 +185,28 @@ EDGE_DEFINITIONS = (
 
     {
         "id": "python-warm",
-        "lanes": ["python-native-persistent", "python-agent-cow", "python-pyodide-clean-namespace"],
+        "lanes": [
+            "python-native-persistent",
+            "python-agent-cow",
+            "python-agent-memcpy",
+            "python-agent-single-use",
+            "python-pyodide-clean-namespace",
+        ],
         "basis": "exact same Python file and public HTTP payload on one runner with equal resource limits",
-        "claim_boundary": "loaded-runtime application E2E only; native CPython preserves globals, Agent restores linear memory, and Pyodide recreates the script namespace",
+        "claim_boundary": "loaded-runtime application E2E only; native CPython preserves globals, Agent strategies restore or replace at different boundaries, and Pyodide recreates the script namespace",
     },
     {
         "id": "python-clean",
-        "lanes": ["python-native-fresh", "python-agent-cow", "python-pyodide-clean-namespace"],
+        "lanes": [
+            "python-native-fresh",
+            "python-agent-fresh",
+            "python-agent-cow",
+            "python-agent-memcpy",
+            "python-agent-single-use",
+            "python-pyodide-clean-namespace",
+        ],
         "basis": "exact same Python file, public HTTP payload, verified invocation count one, runner and resource limits",
-        "claim_boundary": "clean Python application state only; fresh process, linear-memory restore, and fresh namespace are not isolation-equivalent",
+        "claim_boundary": "clean Python application state only; fresh process/module, single-use instance, linear-memory restore, and fresh namespace are not isolation-equivalent",
     },
 )
 
@@ -229,6 +296,28 @@ def validate_counter_sequence(lifecycle_class: str, observations: Sequence[Mappi
             raise ValueError(f"persistent counters must be monotonic consecutive values: {counters}")
         return
     raise ValueError(f"unknown lifecycle class: {lifecycle_class}")
+
+
+def validate_single_use_policy_evidence(evidence: Mapping[str, Any]) -> Dict[str, Any]:
+    required_positive = ("ready_hit_ns", "immediate_miss_ns", "refill_ready_wait_ns")
+    if evidence.get("prepared_ready_before_hit") != 1:
+        raise ValueError("single-use prepared_ready_before_hit must equal one")
+    if evidence.get("prepared_ready_after_hit") != 0:
+        raise ValueError("single-use prepared_ready_after_hit must equal zero")
+    for key in required_positive:
+        value = evidence.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"single-use {key} must be a positive integer")
+    if evidence["immediate_miss_ns"] <= evidence["ready_hit_ns"]:
+        raise ValueError("single-use immediate miss must exceed the ready hit")
+    return {
+        **dict(evidence),
+        "policy": "single-use-prepared-hit-and-refill",
+        "claim_boundary": (
+            "ready hit consumes a never-served initialized instance; immediate miss waits "
+            "for replacement; refill wait is health-poll bounded"
+        ),
+    }
 
 
 def run(
@@ -338,18 +427,72 @@ def source_manifest(repo_root: pathlib.Path) -> Dict[str, str]:
     return result
 
 
-def agent_lifecycle_evidence(base: str, timeout: float) -> Dict[str, Any]:
+def agent_health_result(spec: LaneSpec, base: str, timeout: float) -> Dict[str, Any]:
     response = request_json(base + "/", {}, timeout, command="healthcheck")
     result = result_object(response)
-    expected = {
-        "lifecycle": "snapshot",
-        "snapshot_selected": "cow",
-        "reset_mode": "linear-memory-cow",
-    }
+    expected = AGENT_LIFECYCLE_EXPECTATIONS.get(spec.lane)
+    if expected is None:
+        raise ValueError(f"no Agent Python lifecycle contract for {spec.lane}")
     for key, value in expected.items():
         if result.get(key) != value:
-            raise ValueError(f"Agent Python healthcheck {key} = {result.get(key)!r}, want {value!r}")
-    return {key: result[key] for key in expected}
+            raise ValueError(
+                f"Agent Python {spec.lane} healthcheck {key} = "
+                f"{result.get(key)!r}, want {value!r}"
+            )
+    return result
+
+
+def agent_lifecycle_evidence(spec: LaneSpec, base: str, timeout: float) -> Dict[str, Any]:
+    result = agent_health_result(spec, base, timeout)
+    expected = AGENT_LIFECYCLE_EXPECTATIONS[spec.lane]
+    evidence = {key: result[key] for key in expected}
+    prepared_ready = result.get("prepared_ready")
+    if isinstance(prepared_ready, int) and not isinstance(prepared_ready, bool):
+        evidence["prepared_ready"] = prepared_ready
+    return evidence
+
+
+def wait_agent_prepared_ready(
+    spec: LaneSpec, base: str, timeout: float
+) -> tuple[int, Dict[str, Any]]:
+    started = time.perf_counter_ns()
+    deadline = time.monotonic() + timeout
+    last_ready: Any = None
+    while time.monotonic() < deadline:
+        result = agent_health_result(spec, base, min(timeout, 5.0))
+        last_ready = result.get("prepared_ready")
+        if isinstance(last_ready, int) and not isinstance(last_ready, bool) and last_ready >= 1:
+            return time.perf_counter_ns() - started, result
+        time.sleep(0.05)
+    raise TimeoutError(
+        f"Agent Python {spec.lane} prepared slot not ready after {timeout}s: {last_ready!r}"
+    )
+
+
+def benchmark_single_use_policy(
+    spec: LaneSpec,
+    base: str,
+    payload: Dict[str, Any],
+    checksum: str,
+    timeout: float,
+) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    _, before = wait_agent_prepared_ready(spec, base, timeout)
+    ready_hit_ns, ready_response = timed_request(base + "/", payload, timeout)
+    ready_result = validate_response(ready_response, expected_checksum=checksum)
+    after_hit = agent_health_result(spec, base, timeout)
+    immediate_miss_ns, miss_response = timed_request(base + "/", payload, timeout)
+    miss_result = validate_response(miss_response, expected_checksum=checksum)
+    refill_ready_wait_ns, _ = wait_agent_prepared_ready(spec, base, timeout)
+    evidence = validate_single_use_policy_evidence(
+        {
+            "prepared_ready_before_hit": before.get("prepared_ready"),
+            "prepared_ready_after_hit": after_hit.get("prepared_ready"),
+            "ready_hit_ns": ready_hit_ns,
+            "immediate_miss_ns": immediate_miss_ns,
+            "refill_ready_wait_ns": refill_ready_wait_ns,
+        }
+    )
+    return evidence, [ready_result, miss_result]
 
 
 def benchmark_lane(
@@ -372,8 +515,8 @@ def benchmark_lane(
         ready_ns = time.perf_counter_ns() - started
 
         lifecycle_evidence = None
-        if spec.lane == "python-agent-cow":
-            lifecycle_evidence = agent_lifecycle_evidence(base, request_timeout)
+        if spec.lane in AGENT_LIFECYCLE_EXPECTATIONS:
+            lifecycle_evidence = agent_lifecycle_evidence(spec, base, request_timeout)
 
         if spec.family == "python":
             fixture_path = "/opt/evaluators/eval.py"
@@ -382,6 +525,12 @@ def benchmark_lane(
         else:
             fixture_path = "/opt/evaluators/runtime-bridge-native"
         fixture_sha256 = container_sha256(prefix, spec.service, fixture_path)
+
+        single_use_policy_evidence = None
+        def measured_request(payload: Dict[str, Any]) -> tuple[int, Dict[str, Any]]:
+            if spec.lane == "python-agent-single-use":
+                wait_agent_prepared_ready(spec, base, request_timeout)
+            return timed_request(base + "/", payload, request_timeout)
 
         workload_reports: Dict[str, Any] = {}
         selected_workloads = {
@@ -392,7 +541,7 @@ def benchmark_lane(
         for profile, workload in selected_workloads.items():
             checksum = expected_checksum(workload["iterations"], workload["seed"])
             payload = {"response": "42", "answer": "42", "params": dict(workload)}
-            entry_ns, response = timed_request(base + "/", payload, request_timeout)
+            entry_ns, response = measured_request(payload)
             entry_result = validate_response(
                 response, expected_checksum=checksum, require_checksum=spec.reports_checksum
             )
@@ -400,7 +549,7 @@ def benchmark_lane(
 
             warmup_ns = []
             for _ in range(warmups):
-                elapsed, response = timed_request(base + "/", payload, request_timeout)
+                elapsed, response = measured_request(payload)
                 warmup_ns.append(elapsed)
                 all_results.append(
                     validate_response(
@@ -410,7 +559,7 @@ def benchmark_lane(
 
             steady_ns = []
             for _ in range(samples):
-                elapsed, response = timed_request(base + "/", payload, request_timeout)
+                elapsed, response = measured_request(payload)
                 steady_ns.append(elapsed)
                 all_results.append(
                     validate_response(
@@ -431,6 +580,19 @@ def benchmark_lane(
                 "steady_samples_ns": steady_ns,
                 "steady": summarize_ns(steady_ns),
             }
+
+        if spec.lane == "python-agent-single-use":
+            fixed = WORKLOADS["fixed"]
+            fixed_checksum = expected_checksum(fixed["iterations"], fixed["seed"])
+            fixed_payload = {
+                "response": "42",
+                "answer": "42",
+                "params": dict(fixed),
+            }
+            single_use_policy_evidence, policy_results = benchmark_single_use_policy(
+                spec, base, fixed_payload, fixed_checksum, request_timeout
+            )
+            all_results.extend(policy_results)
 
         validate_counter_sequence(spec.lifecycle_class, all_results)
         counters = [row["guest_invocation_count"] for row in all_results]
@@ -469,6 +631,8 @@ def benchmark_lane(
         }
         if lifecycle_evidence is not None:
             report["lifecycle_evidence"] = lifecycle_evidence
+        if single_use_policy_evidence is not None:
+            report["single_use_policy_evidence"] = single_use_policy_evidence
 
         if pyodide_packages is not None:
             report["pyodide_optional_packages"] = []

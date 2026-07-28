@@ -4,17 +4,20 @@ This experiment creates a comparison graph, not a universal runtime ranking.
 Every edge has an explicit semantic or artifact identity, lifecycle evidence,
 and a bounded claim.
 
-## Declared edges
+## Comparison graph inputs
 
 | Edge | Paths | Comparison basis |
 |---|---|---|
 | `system-native-vs-wasm-semantic` | fresh native file process ↔ generic WASM restore | same fixed equality semantics, public HTTP payload, clean-state evidence, runner, and limits; implementation source differs |
-| `system-native-vs-dbi` | native file process ↔ the identical binary under DynamoRIO | identical binary and fresh file lifecycle |
+| native ↔ DBI (downstream evidence) | native Lean evaluator ↔ the identical evaluator under DynamoRIO | existing exact pair; this bridge does not force the Go runtime through the DBI clone-denying policy |
 | `python-warm` | persistent CPython ↔ Agent Python COW ↔ persistent Pyodide | exact same `python/eval.py`, payload, runner, and limits; state guarantees still differ |
 | `python-clean` | fresh CPython ↔ Agent Python COW | exact same Python source and verified invocation count one |
 | native ↔ QEMU fresh | host native file process ↔ byte-identical binary in a fresh TCG VM | produced by the QEMU job and joined downstream by fixture ID |
 
 DBI and QEMU are wrappers around a native evaluator, not peer guest languages.
+The docs join the DBI edge from the existing exact Lean pair and the QEMU edge
+from the exact-binary file job; neither is fabricated from the Python or generic
+WASM bridge.
 Pyodide is intentionally absent from the clean-state edge because the current
 persistent lane has no qualified per-request reset. The removed legacy
 `ReactorPythonDispatcher` is historical evidence, not a current competitor;

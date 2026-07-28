@@ -87,7 +87,7 @@ jobs:
       - name: Build declared comparison bridge images
         run: |
           docker compose --profile dbi -f experiments/runtime-comparison-bridge/compose.yaml build \
-            bridge-system-native bridge-system-generic bridge-system-dbi \
+            bridge-system-native bridge-system-generic \
             bridge-python-native-fresh bridge-python-native-persistent \
             bridge-python-agent-cow bridge-python-pyodide-persistent
 

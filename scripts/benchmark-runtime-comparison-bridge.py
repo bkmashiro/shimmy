@@ -68,17 +68,7 @@ LANES: Dict[str, LaneSpec] = {
             False,
             False,
         ),
-        LaneSpec(
-            "system-dbi-fresh",
-            "bridge-system-dbi",
-            18583,
-            "system-language",
-            "clean",
-            "fresh native process per request under DynamoRIO client",
-            "DBI process and client initialization are request-visible",
-            "fresh process; guest invocation count must be one",
-            "same native bridge binary as system-native-fresh",
-        ),
+
         LaneSpec(
             "python-native-fresh",
             "bridge-python-native-fresh",
@@ -138,12 +128,7 @@ EDGE_DEFINITIONS = (
         "basis": "same fixed equality semantics, public HTTP payload, verified invocation count one, runner and resource limits",
         "claim_boundary": "fixed-cost application E2E only; implementations and mechanisms differ, so this is not an intrinsic runtime score",
     },
-    {
-        "id": "system-native-vs-dbi",
-        "lanes": ["system-native-fresh", "system-dbi-fresh"],
-        "basis": "same native binary, file interface, public HTTP payload, clean-state lifecycle, runner and resource limits",
-        "claim_boundary": "pairwise DynamoRIO wrapper tax; not a universal DBI score",
-    },
+
     {
         "id": "python-warm",
         "lanes": ["python-native-persistent", "python-agent-cow", "python-pyodide-persistent"],
@@ -449,13 +434,6 @@ def benchmark_lane(
 
         validate_counter_sequence(spec.lifecycle_class, all_results)
         counters = [row["guest_invocation_count"] for row in all_results]
-        dbi_client_marker = None
-        if spec.lane == "system-dbi-fresh":
-            dbi_client_marker = run(
-                [*prefix, "exec", "-T", spec.service, "cat", "/tmp/shimmy-dbi-client-init.marker"]
-            ).stdout.strip()
-            if dbi_client_marker != "initialized":
-                raise ValueError(f"DBI client marker mismatch: {dbi_client_marker!r}")
 
         pyodide_packages = None
         if spec.lane == "python-pyodide-persistent":
@@ -491,8 +469,7 @@ def benchmark_lane(
         }
         if lifecycle_evidence is not None:
             report["lifecycle_evidence"] = lifecycle_evidence
-        if dbi_client_marker is not None:
-            report["dbi_client_marker"] = dbi_client_marker
+
         if pyodide_packages is not None:
             report["pyodide_optional_packages"] = []
         return report
@@ -517,12 +494,6 @@ def build_report(
     warmups: int,
     samples: int,
 ) -> Dict[str, Any]:
-    by_lane = {row["lane"]: row for row in rows}
-    if {"system-native-fresh", "system-dbi-fresh"}.issubset(by_lane):
-        native_sha = by_lane["system-native-fresh"]["fixture_file"]["sha256"]
-        dbi_sha = by_lane["system-dbi-fresh"]["fixture_file"]["sha256"]
-        if native_sha != dbi_sha:
-            raise ValueError(f"native/DBI fixture binary mismatch: {native_sha} != {dbi_sha}")
 
     python_lanes = [row for row in rows if row.get("family") == "python"]
     if python_lanes:

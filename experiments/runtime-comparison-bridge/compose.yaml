@@ -47,26 +47,6 @@ services:
       retries: 30
       start_period: 10s
 
-  bridge-system-dbi:
-    <<: *common
-    profiles: ["dbi"]
-    platform: linux/amd64
-    image: "${SHIMMY_BRIDGE_IMAGE_PREFIX:-shimmy-bridge}-system-dbi:${SHIMMY_BRIDGE_TAG:-dev}"
-    build:
-      <<: *build
-      target: bridge-system-dbi
-      platforms:
-        - linux/amd64
-    tmpfs:
-      - /tmp:size=256m,mode=1777
-    ports:
-      - "127.0.0.1:${SHIMMY_BRIDGE_SYSTEM_DBI_PORT:-18583}:8080"
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-      start_period: 30s
 
   bridge-python-native-fresh:
     <<: *common

@@ -234,8 +234,3 @@ FROM pyodide-scipy AS bridge-python-pyodide-persistent
 COPY experiments/runtime-comparison-bridge/python/eval.py /opt/evaluators/eval.py
 ENV FUNCTION_PYODIDE_SCRIPT=/opt/evaluators/eval.py \
     FUNCTION_PYODIDE_PACKAGES=""
-
-FROM dbi-lean AS bridge-system-dbi
-COPY --from=shimmy-build /out/runtime-bridge-native /opt/evaluators/runtime-bridge-native
-ENV FUNCTION_COMMAND=/opt/evaluators/runtime-bridge-native \
-    FUNCTION_WORKING_DIR=/opt/evaluators

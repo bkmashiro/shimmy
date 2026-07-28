@@ -97,23 +97,22 @@ class BridgeContractTests(unittest.TestCase):
             edge_ids,
             {
                 "system-native-vs-wasm-semantic",
-                "system-native-vs-dbi",
                 "python-warm",
                 "python-clean",
             },
         )
 
     def test_report_rejects_fixture_identity_drift(self):
-        base = {
-            "family": "system-language",
-            "lifecycle_class": "clean",
-            "workloads": {},
-        }
         rows = [
-            {**base, "lane": "system-native-fresh", "fixture_file": {"sha256": "a" * 64}},
-            {**base, "lane": "system-dbi-fresh", "fixture_file": {"sha256": "b" * 64}},
+            {
+                "lane": "python-native-fresh",
+                "family": "python",
+                "lifecycle_class": "clean",
+                "workloads": {},
+                "fixture_file": {"sha256": "b" * 64},
+            },
         ]
-        with self.assertRaisesRegex(ValueError, "native/DBI fixture binary mismatch"):
+        with self.assertRaisesRegex(ValueError, "Python fixture SHA-256 mismatch"):
             module.build_report(
                 rows=rows,
                 source_commit="a" * 40,
@@ -121,7 +120,9 @@ class BridgeContractTests(unittest.TestCase):
                 started_at="2026-07-28T00:00:00Z",
                 completed_at="2026-07-28T00:01:00Z",
                 environment={},
-                source_manifest={},
+                source_manifest={
+                    "experiments/runtime-comparison-bridge/python/eval.py": "a" * 64,
+                },
                 warmups=0,
                 samples=1,
             )

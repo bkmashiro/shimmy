@@ -3,10 +3,11 @@ package contract
 import "testing"
 
 func TestEvaluateDeterministicWorkload(t *testing.T) {
-	result, err := Evaluate("42", "42", Workload{Iterations: 100_000, Seed: 7}, 1)
-	if err != nil {
-		t.Fatalf("Evaluate: %v", err)
+	workload := Workload{Iterations: 100_000, Seed: 7}
+	if !Valid(workload, 1) {
+		t.Fatal("expected workload to be valid")
 	}
+	result := Evaluate("42", "42", workload, 1)
 	if !result.IsCorrect {
 		t.Fatal("expected exact response to be correct")
 	}
@@ -19,10 +20,7 @@ func TestEvaluateDeterministicWorkload(t *testing.T) {
 }
 
 func TestEvaluateZeroWorkAndMismatch(t *testing.T) {
-	result, err := Evaluate("41", "42", Workload{Iterations: 0, Seed: 7}, 3)
-	if err != nil {
-		t.Fatalf("Evaluate: %v", err)
-	}
+	result := Evaluate("41", "42", Workload{Iterations: 0, Seed: 7}, 3)
 	if result.IsCorrect {
 		t.Fatal("expected mismatch to be incorrect")
 	}
@@ -34,10 +32,13 @@ func TestEvaluateZeroWorkAndMismatch(t *testing.T) {
 	}
 }
 
-func TestEvaluateRejectsUnboundedWork(t *testing.T) {
+func TestValidRejectsUnboundedWorkAndZeroInvocation(t *testing.T) {
 	for _, iterations := range []int{-1, MaxIterations + 1} {
-		if _, err := Evaluate("42", "42", Workload{Iterations: iterations, Seed: 7}, 1); err == nil {
-			t.Fatalf("iterations %d should fail", iterations)
+		if Valid(Workload{Iterations: iterations, Seed: 7}, 1) {
+			t.Fatalf("iterations %d should be invalid", iterations)
 		}
+	}
+	if Valid(Workload{}, 0) {
+		t.Fatal("zero invocation count should be invalid")
 	}
 }

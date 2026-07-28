@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the bounded, same-fixture runtime comparison bridge in GitHub Actions."""
+"""Run the bounded, declared-edge runtime comparison bridge in GitHub Actions."""
 
 from __future__ import annotations
 
@@ -37,6 +37,8 @@ class LaneSpec:
     initialization_placement: str
     state_guarantee: str
     fixture_source: str
+    reports_checksum: bool = True
+    supports_cpu_workload: bool = True
 
 
 LANES: Dict[str, LaneSpec] = {
@@ -62,7 +64,9 @@ LANES: Dict[str, LaneSpec] = {
             "prepared generic WASM instance restored after every request",
             "module preparation is lazy; linear-memory restore is request-visible",
             "verified linear-memory reset; guest invocation count must be one",
-            "same shared Go contract compiled to WASI",
+            "verified demo-stateful equality fixture compiled to WASI",
+            False,
+            False,
         ),
         LaneSpec(
             "system-dbi-fresh",
@@ -129,10 +133,10 @@ WORKLOADS: Dict[str, Dict[str, int]] = {
 
 EDGE_DEFINITIONS = (
     {
-        "id": "system-native-vs-wasm",
+        "id": "system-native-vs-wasm-semantic",
         "lanes": ["system-native-fresh", "system-generic-restore"],
-        "basis": "same Go contract source, public HTTP payload, output checksum, clean-state semantics, runner and resource limits",
-        "claim_boundary": "application-level clean-request E2E; process start and WASM restore are intentionally different mechanisms",
+        "basis": "same fixed equality semantics, public HTTP payload, verified invocation count one, runner and resource limits",
+        "claim_boundary": "fixed-cost application E2E only; implementations and mechanisms differ, so this is not an intrinsic runtime score",
     },
     {
         "id": "system-native-vs-dbi",
@@ -156,7 +160,7 @@ EDGE_DEFINITIONS = (
 
 SOURCE_PATHS = (
     "experiments/runtime-comparison-bridge/contract/contract.go",
-    "experiments/runtime-comparison-bridge/generic-wasm/main.go",
+    "examples/demo-stateful/main.go",
     "experiments/runtime-comparison-bridge/native-file/main.go",
     "experiments/runtime-comparison-bridge/python/eval.py",
     "experiments/runtime-comparison-bridge/python/file_evaluator.py",
@@ -203,13 +207,15 @@ def result_object(response: Mapping[str, Any]) -> Dict[str, Any]:
     return dict(result)
 
 
-def validate_response(response: Mapping[str, Any], *, expected_checksum: str) -> Dict[str, Any]:
+def validate_response(
+    response: Mapping[str, Any], *, expected_checksum: str, require_checksum: bool = True
+) -> Dict[str, Any]:
     if response.get("command") != "eval":
         raise ValueError(f"response command must be eval: {response}")
     result = result_object(response)
     if result.get("is_correct") is not True:
         raise ValueError(f"is_correct must be true: {result}")
-    if result.get("work_checksum") != expected_checksum:
+    if require_checksum and result.get("work_checksum") != expected_checksum:
         raise ValueError(
             f"work checksum mismatch: got {result.get('work_checksum')!r}, want {expected_checksum!r}"
         )
@@ -393,28 +399,43 @@ def benchmark_lane(
         fixture_sha256 = container_sha256(prefix, spec.service, fixture_path)
 
         workload_reports: Dict[str, Any] = {}
-        for profile, workload in WORKLOADS.items():
+        selected_workloads = {
+            profile: workload
+            for profile, workload in WORKLOADS.items()
+            if spec.supports_cpu_workload or profile == "fixed"
+        }
+        for profile, workload in selected_workloads.items():
             checksum = expected_checksum(workload["iterations"], workload["seed"])
             payload = {"response": "42", "answer": "42", "params": dict(workload)}
             entry_ns, response = timed_request(base + "/", payload, request_timeout)
-            entry_result = validate_response(response, expected_checksum=checksum)
+            entry_result = validate_response(
+                response, expected_checksum=checksum, require_checksum=spec.reports_checksum
+            )
             all_results.append(entry_result)
 
             warmup_ns = []
             for _ in range(warmups):
                 elapsed, response = timed_request(base + "/", payload, request_timeout)
                 warmup_ns.append(elapsed)
-                all_results.append(validate_response(response, expected_checksum=checksum))
+                all_results.append(
+                    validate_response(
+                        response, expected_checksum=checksum, require_checksum=spec.reports_checksum
+                    )
+                )
 
             steady_ns = []
             for _ in range(samples):
                 elapsed, response = timed_request(base + "/", payload, request_timeout)
                 steady_ns.append(elapsed)
-                all_results.append(validate_response(response, expected_checksum=checksum))
+                all_results.append(
+                    validate_response(
+                        response, expected_checksum=checksum, require_checksum=spec.reports_checksum
+                    )
+                )
 
             workload_reports[profile] = {
                 "payload": payload,
-                "expected_work_checksum": checksum,
+                "expected_work_checksum": checksum if spec.reports_checksum else None,
                 "entry_request_ns": entry_ns,
                 "entry_request_semantics": (
                     "first evaluator request after public server readiness"
@@ -522,7 +543,7 @@ def build_report(
     return {
         "schema": "shimmy-runtime-comparison-bridge/v1",
         "status": "PASS",
-        "benchmark_kind": "same-fixture-public-http-comparison-graph",
+        "benchmark_kind": "declared-edge-public-http-comparison-graph",
         "started_at": started_at,
         "completed_at": completed_at,
         "source_commit": source_commit,

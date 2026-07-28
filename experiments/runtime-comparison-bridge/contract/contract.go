@@ -1,10 +1,5 @@
 package contract
 
-import (
-	"errors"
-	"fmt"
-)
-
 const MaxIterations = 5_000_000
 
 const (
@@ -23,21 +18,28 @@ type Result struct {
 	GuestInvocationCount uint64 `json:"guest_invocation_count"`
 }
 
-func Evaluate(response, answer string, workload Workload, invocationCount uint64) (Result, error) {
-	if workload.Iterations < 0 || workload.Iterations > MaxIterations {
-		return Result{}, fmt.Errorf("iterations must be in [0,%d]", MaxIterations)
-	}
-	if invocationCount == 0 {
-		return Result{}, errors.New("invocation count must be positive")
-	}
+func Valid(workload Workload, invocationCount uint64) bool {
+	return workload.Iterations >= 0 && workload.Iterations <= MaxIterations && invocationCount > 0
+}
 
+func Evaluate(response, answer string, workload Workload, invocationCount uint64) Result {
 	value := workload.Seed
 	for index := 0; index < workload.Iterations; index++ {
 		value = value*multiplier + increment + uint64(index)
 	}
 	return Result{
 		IsCorrect:            response == answer,
-		WorkChecksum:         fmt.Sprintf("%016x", value),
+		WorkChecksum:         hex16(value),
 		GuestInvocationCount: invocationCount,
-	}, nil
+	}
+}
+
+func hex16(value uint64) string {
+	const digits = "0123456789abcdef"
+	var encoded [16]byte
+	for index := len(encoded) - 1; index >= 0; index-- {
+		encoded[index] = digits[value&0xf]
+		value >>= 4
+	}
+	return string(encoded[:])
 }

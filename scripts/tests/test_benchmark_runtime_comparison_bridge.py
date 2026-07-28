@@ -34,6 +34,21 @@ class BridgeContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "clean lane"):
             module.validate_counter_sequence("clean", [observed, bad])
 
+    def test_semantic_fixture_may_omit_contract_checksum(self):
+        response = {
+            "command": "eval",
+            "result": {"is_correct": True, "guest_invocation_count": 1},
+        }
+        observed = module.validate_response(
+            response,
+            expected_checksum="not-used-for-this-edge",
+            require_checksum=False,
+        )
+        self.assertEqual(observed["guest_invocation_count"], 1)
+        generic = module.LANES["system-generic-restore"]
+        self.assertFalse(generic.reports_checksum)
+        self.assertFalse(generic.supports_cpu_workload)
+
     def test_persistent_lane_requires_monotonic_counter(self):
         samples = [
             {"guest_invocation_count": 1},
@@ -80,7 +95,12 @@ class BridgeContractTests(unittest.TestCase):
         edge_ids = {edge["id"] for edge in report["comparison_edges"]}
         self.assertEqual(
             edge_ids,
-            {"system-native-vs-wasm", "system-native-vs-dbi", "python-warm", "python-clean"},
+            {
+                "system-native-vs-wasm-semantic",
+                "system-native-vs-dbi",
+                "python-warm",
+                "python-clean",
+            },
         )
 
     def test_report_rejects_fixture_identity_drift(self):
@@ -105,6 +125,16 @@ class BridgeContractTests(unittest.TestCase):
                 warmups=0,
                 samples=1,
             )
+    def test_qemu_fixture_provenance_uses_sidecar_not_runtime_manifest(self):
+        repo_root = SCRIPT.parents[1]
+        build_script = (repo_root / "experiments" / "qemu-fallback" / "build-image.sh").read_text()
+        runtime_manifest = build_script.split('cat >"$OUTPUT_DIR/manifest.json" <<MANIFEST', 1)[1].split(
+            "\nMANIFEST\n", 1
+        )[0]
+        self.assertNotIn("file_evaluator", runtime_manifest)
+        self.assertIn('cat >"$OUTPUT_DIR/file-evaluator-manifest.json" <<MANIFEST', build_script)
+        benchmark_script = (repo_root / "experiments" / "qemu-fallback" / "benchmark-ci-file.sh").read_text()
+        self.assertIn('file-evaluator-manifest.json', benchmark_script)
 
 
 if __name__ == "__main__":

@@ -32,7 +32,7 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false \
 sudo mkdir -p "$EVALUATOR_DIR"
 sudo install -m 0755 "$BIN_DIR/file-evaluator" "$EVALUATOR_PATH"
 
-for path in "$ARTIFACT_DIR/manifest.json" "$ARTIFACT_DIR/vmlinuz" "$ARTIFACT_DIR/initramfs.img" "$ARTIFACT_DIR/evaluator.squashfs"; do
+for path in "$ARTIFACT_DIR/manifest.json" "$ARTIFACT_DIR/file-evaluator-manifest.json" "$ARTIFACT_DIR/vmlinuz" "$ARTIFACT_DIR/initramfs.img" "$ARTIFACT_DIR/evaluator.squashfs"; do
   if [[ ! -f "$path" ]]; then
     printf 'missing QEMU benchmark artifact: %s\n' "$path" >&2
     exit 1
@@ -179,7 +179,7 @@ for index in range(count):
 
 manifest = json.loads((pathlib.Path(os.environ["ARTIFACT_DIR"]) / "manifest.json").read_text())
 native_binary_sha = hashlib.sha256(pathlib.Path(os.environ["BIN_DIR"]).joinpath("file-evaluator").read_bytes()).hexdigest()
-manifest_fixture = manifest.get("file_evaluator")
+manifest_fixture = json.loads((pathlib.Path(os.environ["ARTIFACT_DIR"]) / "file-evaluator-manifest.json").read_text())
 if not isinstance(manifest_fixture, dict) or manifest_fixture.get("sha256") != native_binary_sha:
     raise SystemExit(f"host/guest evaluator binary mismatch: host={native_binary_sha}, manifest={manifest_fixture}")
 report = module.build_qemu_report(

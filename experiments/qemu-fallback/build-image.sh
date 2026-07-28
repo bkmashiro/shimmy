@@ -207,10 +207,17 @@ cat >"$OUTPUT_DIR/manifest.json" <<MANIFEST
   "schema_version": 1,
   "architecture": "x86_64",
   "source_lock_sha256": "$source_lock_sha",
-  "file_evaluator": {"id": "$FILE_EVALUATOR_ID", "package": "$FILE_EVALUATOR_PACKAGE", "sha256": "$evaluator_sha"},
   "kernel": {"path": "vmlinuz", "sha256": "$kernel_sha"},
   "initrd": {"path": "initramfs.img", "sha256": "$initrd_sha"},
   "rootfs": {"path": "evaluator.squashfs", "sha256": "$rootfs_sha", "format": "raw"}
+}
+MANIFEST
+cat >"$OUTPUT_DIR/file-evaluator-manifest.json" <<MANIFEST
+{
+  "schema": "shimmy-qemu-file-evaluator-fixture/v1",
+  "id": "$FILE_EVALUATOR_ID",
+  "package": "$FILE_EVALUATOR_PACKAGE",
+  "sha256": "$evaluator_sha"
 }
 MANIFEST
 

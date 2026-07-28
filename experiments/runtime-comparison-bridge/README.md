@@ -1,14 +1,14 @@
 # Runtime comparison bridge
 
 This experiment creates a comparison graph, not a universal runtime ranking.
-Every edge has a shared fixture, a result checksum, an explicit lifecycle, and a
-bounded claim.
+Every edge has an explicit semantic or artifact identity, lifecycle evidence,
+and a bounded claim.
 
 ## Declared edges
 
 | Edge | Paths | Comparison basis |
 |---|---|---|
-| `system-native-vs-wasm` | fresh native file process ↔ generic WASM restore | shared Go contract source, public HTTP payload, clean-state evidence, equal limits |
+| `system-native-vs-wasm-semantic` | fresh native file process ↔ generic WASM restore | same fixed equality semantics, public HTTP payload, clean-state evidence, runner, and limits; implementation source differs |
 | `system-native-vs-dbi` | native file process ↔ the identical binary under DynamoRIO | identical binary and fresh file lifecycle |
 | `python-warm` | persistent CPython ↔ Agent Python COW ↔ persistent Pyodide | exact same `python/eval.py`, payload, runner, and limits; state guarantees still differ |
 | `python-clean` | fresh CPython ↔ Agent Python COW | exact same Python source and verified invocation count one |
@@ -22,15 +22,19 @@ persistent lane has no qualified per-request reset. The removed legacy
 
 ## Workloads
 
-Both fixture families expose the same deterministic profiles:
+The Python family and exact-native wrapper paths expose both deterministic
+profiles:
 
 - `fixed`: JSON/HTTP/runtime fixed cost with zero loop iterations;
 - `cpu-100k`: 100,000 iterations of a deterministic unsigned 64-bit recurrence.
 
-System paths share the Go contract package. Python paths execute the exact same
-Python file. Each response carries `is_correct`, `work_checksum`, and
-`guest_invocation_count`. The benchmark fails closed on a checksum or lifecycle
-mismatch.
+The generic WASM edge uses only `fixed`, reusing the repository's already
+qualified `demo-stateful` module. It is a same-semantics application E2E edge,
+not a same-source runtime score. Native/DBI and native/QEMU retain exact binary
+identity. Python paths execute the exact same Python file. Every response carries
+`is_correct` and `guest_invocation_count`; contract-based paths additionally
+carry `work_checksum`. The benchmark fails closed on the evidence each edge
+declares.
 
 ## Cost placement
 
@@ -65,4 +69,6 @@ FILE_EVALUATOR_PACKAGE=./experiments/runtime-comparison-bridge/native-file
 FILE_EVALUATOR_ID=system-bridge-v1
 ```
 
-The rootfs manifest and host report must contain the same evaluator binary SHA-256.
+The strict QEMU runtime `manifest.json` remains unchanged. A separate
+`file-evaluator-manifest.json` sidecar and the host report must contain the same
+evaluator binary SHA-256.

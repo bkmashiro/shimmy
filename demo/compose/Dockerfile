@@ -32,9 +32,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       -o /out/runtime-bridge-native ./experiments/runtime-comparison-bridge/native-file
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
+    cd examples/demo-stateful && \
     GOOS=wasip1 GOARCH=wasm go build -trimpath -buildvcs=false \
-      -buildmode=c-shared -o /out/runtime-bridge-generic.wasm \
-      ./experiments/runtime-comparison-bridge/generic-wasm
+      -buildmode=c-shared -o /out/runtime-bridge-generic.wasm .
 
 FROM busybox:1.37.0-musl AS generic
 COPY --from=shimmy-build /out/shimmy /shimmy

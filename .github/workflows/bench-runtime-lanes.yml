@@ -84,7 +84,7 @@ jobs:
           docker compose --profile dbi -f demo/compose/compose.yaml build \
             generic python-reactor pyodide-scipy dbi-lean
 
-      - name: Build same-fixture comparison bridge images
+      - name: Build declared comparison bridge images
         run: |
           docker compose --profile dbi -f experiments/runtime-comparison-bridge/compose.yaml build \
             bridge-system-native bridge-system-generic bridge-system-dbi \
@@ -99,7 +99,7 @@ jobs:
             --samples 10 \
             --output artifacts/runtime-lane-bench/compose-lanes.json
 
-      - name: Benchmark declared same-fixture comparison edges
+      - name: Benchmark declared comparison edges
         run: |
           python3 scripts/benchmark-runtime-comparison-bridge.py \
             --compose-file experiments/runtime-comparison-bridge/compose.yaml \
@@ -158,6 +158,7 @@ jobs:
         run: |
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest \
             scripts.tests.test_benchmark_runtime_lanes \
+            scripts.tests.test_benchmark_runtime_comparison_bridge \
             scripts.tests.test_benchmark_qemu_rpc_hot_reset -v
           bash -n experiments/qemu-fallback/benchmark-ci-file.sh
 
@@ -207,6 +208,7 @@ jobs:
           path: |
             artifacts/runtime-lane-bench/
             artifacts/qemu-fallback/manifest.json
+            artifacts/qemu-fallback/file-evaluator-manifest.json
             ${{ runner.temp }}/qemu-runtime-lane-bench/*.log
           if-no-files-found: error
           retention-days: 90

@@ -31,10 +31,10 @@ func evaluate(request []byte) ([]byte, error) {
 	if envelope.Command != "eval" {
 		return nil, fmt.Errorf("unsupported command %q", envelope.Command)
 	}
-	result, err := contract.Evaluate(envelope.Params.Response, envelope.Params.Answer, envelope.Params.Params, 1)
-	if err != nil {
-		return nil, err
+	if !contract.Valid(envelope.Params.Params, 1) {
+		return nil, errors.New("invalid runtime bridge workload")
 	}
+	result := contract.Evaluate(envelope.Params.Response, envelope.Params.Answer, envelope.Params.Params, 1)
 	return json.Marshal(responseEnvelope{Command: "eval", Result: result})
 }
 

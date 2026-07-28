@@ -1,6 +1,7 @@
 import importlib.util
 import pathlib
 import sys
+import tempfile
 import unittest
 
 
@@ -14,6 +15,48 @@ SPEC.loader.exec_module(module)
 
 
 class BridgeContractTests(unittest.TestCase):
+    def load_qemu_fixture_validator(self):
+        validator_path = SCRIPT.parents[1] / "experiments" / "qemu-fallback" / "validate-evaluator-fixture.py"
+        spec = importlib.util.spec_from_file_location("validate_evaluator_fixture", validator_path)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"cannot load QEMU fixture validator: {validator_path}")
+        validator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(validator)
+        return validator
+
+    def test_qemu_fixture_validator_rejects_workspace_escape(self):
+        validator = self.load_qemu_fixture_validator()
+        repo_root = SCRIPT.parents[1]
+        with self.assertRaisesRegex(ValueError, "repository-relative"):
+            validator.validate(repo_root, "/tmp/pkg", "fixture-v1")
+        with self.assertRaisesRegex(ValueError, "parent traversal"):
+            validator.validate(repo_root, "./experiments/../qemu-fallback", "fixture-v1")
+        with tempfile.TemporaryDirectory() as outside, tempfile.TemporaryDirectory(dir=repo_root) as inside:
+            link = pathlib.Path(inside) / "escape"
+            link.symlink_to(outside, target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, "escapes repository root"):
+                validator.validate(repo_root, f"./{link.relative_to(repo_root)}", "fixture-v1")
+
+    def test_qemu_fixture_validator_accepts_default_and_rejects_path_like_id(self):
+        validator = self.load_qemu_fixture_validator()
+        repo_root = SCRIPT.parents[1]
+        validator.validate(
+            repo_root,
+            "./experiments/qemu-fallback/file-evaluator",
+            "qemu-file-evaluator-v1",
+        )
+        with self.assertRaisesRegex(ValueError, "evaluator id"):
+            validator.validate(repo_root, "./experiments/qemu-fallback/file-evaluator", "nested/id")
+
+    def test_qemu_build_and_benchmark_share_fixture_validator(self):
+        repo_root = SCRIPT.parents[1]
+        for relative in (
+            "experiments/qemu-fallback/build-image.sh",
+            "experiments/qemu-fallback/benchmark-ci-file.sh",
+        ):
+            script = (repo_root / relative).read_text()
+            self.assertIn('validate-evaluator-fixture.py', script)
+
     def test_expected_checksum_matches_golden_cases(self):
         self.assertEqual(module.expected_checksum(0, 7), "0000000000000007")
         self.assertEqual(module.expected_checksum(100_000, 7), "5e7135fac6225d57")

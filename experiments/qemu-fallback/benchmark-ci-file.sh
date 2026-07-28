@@ -23,6 +23,8 @@ if [[ ! "$REQUEST_COUNT" =~ ^[1-9][0-9]*$ || "$REQUEST_COUNT" -gt 10 ]]; then
   echo "REQUEST_COUNT must be in [1,10]" >&2
   exit 1
 fi
+python3 "$SCRIPT_DIR/validate-evaluator-fixture.py" \
+  "$REPO_ROOT" "$FILE_EVALUATOR_PACKAGE" "$FILE_EVALUATOR_ID"
 
 mkdir -p "$BIN_DIR" "$(dirname "$OUTPUT")"
 go build -trimpath -buildvcs=false -o "$BIN_DIR/shimmy" .

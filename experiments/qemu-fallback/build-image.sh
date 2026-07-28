@@ -34,10 +34,8 @@ fi
 require_file "$KERNEL_PATH"
 require_file "$BUSYBOX_BINARY"
 require_file "$LOCK_FILE"
-if [[ ! "$FILE_EVALUATOR_PACKAGE" =~ ^[A-Za-z0-9._/-]+$ || ! "$FILE_EVALUATOR_ID" =~ ^[A-Za-z0-9._/-]+$ ]]; then
-  printf 'unsafe file evaluator package or id\n' >&2
-  exit 1
-fi
+python3 "$SCRIPT_DIR/validate-evaluator-fixture.py" \
+  "$REPO_ROOT" "$FILE_EVALUATOR_PACKAGE" "$FILE_EVALUATOR_ID"
 
 readarray -t lock_values < <(python3 - "$LOCK_FILE" <<'PY'
 import json

@@ -49,6 +49,13 @@ class BridgeContractTests(unittest.TestCase):
         self.assertFalse(generic.reports_checksum)
         self.assertFalse(generic.supports_cpu_workload)
 
+    def test_pyodide_legacy_mode_qualifies_clean_namespace_only(self):
+        lane = module.LANES["python-pyodide-clean-namespace"]
+        self.assertEqual(lane.lifecycle_class, "clean")
+        runner = (SCRIPT.parents[1] / "examples" / "eval-pyodide" / "runner.js").read_text()
+        self.assertIn("Fresh namespace — state isolation", runner)
+        self.assertIn("_ns = {}", runner)
+
     def test_persistent_lane_requires_monotonic_counter(self):
         samples = [
             {"guest_invocation_count": 1},

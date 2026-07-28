@@ -103,14 +103,14 @@ LANES: Dict[str, LaneSpec] = {
             "the exact same shared pure-Python eval.py",
         ),
         LaneSpec(
-            "python-pyodide-persistent",
+            "python-pyodide-clean-namespace",
             "bridge-python-pyodide-persistent",
             18587,
             "python",
-            "persistent",
-            "persistent Pyodide worker with no optional package preload",
-            "Pyodide startup and script import are lazy first-request costs",
-            "mutable Python globals persist and counters must increase monotonically",
+            "clean",
+            "persistent Pyodide runtime with a fresh legacy-script namespace per request",
+            "Pyodide startup is a lazy first-request cost; script exec remains request-visible",
+            "fresh Python namespace; guest invocation count must be one",
             "the exact same shared pure-Python eval.py",
         ),
     )
@@ -131,15 +131,15 @@ EDGE_DEFINITIONS = (
 
     {
         "id": "python-warm",
-        "lanes": ["python-native-persistent", "python-agent-cow", "python-pyodide-persistent"],
+        "lanes": ["python-native-persistent", "python-agent-cow", "python-pyodide-clean-namespace"],
         "basis": "exact same Python file and public HTTP payload on one runner with equal resource limits",
-        "claim_boundary": "warm application E2E only; Agent resets linear memory while native CPython and Pyodide preserve mutable globals",
+        "claim_boundary": "loaded-runtime application E2E only; native CPython preserves globals, Agent restores linear memory, and Pyodide recreates the script namespace",
     },
     {
         "id": "python-clean",
-        "lanes": ["python-native-fresh", "python-agent-cow"],
+        "lanes": ["python-native-fresh", "python-agent-cow", "python-pyodide-clean-namespace"],
         "basis": "exact same Python file, public HTTP payload, verified invocation count one, runner and resource limits",
-        "claim_boundary": "clean-request pair; Pyodide is absent because the current lane has no qualified per-request reset",
+        "claim_boundary": "clean Python application state only; fresh process, linear-memory restore, and fresh namespace are not isolation-equivalent",
     },
 )
 
@@ -436,7 +436,7 @@ def benchmark_lane(
         counters = [row["guest_invocation_count"] for row in all_results]
 
         pyodide_packages = None
-        if spec.lane == "python-pyodide-persistent":
+        if spec.lane == "python-pyodide-clean-namespace":
             pyodide_packages = run(
                 [*prefix, "exec", "-T", spec.service, "printenv", "FUNCTION_PYODIDE_PACKAGES"]
             ).stdout.strip()
@@ -535,7 +535,7 @@ def build_report(
         "non_edges": [
             "system-language lanes versus Python lanes",
             "DBI versus Python or Pyodide",
-            "persistent Pyodide versus clean-request lanes as an isolation-equivalent score",
+            "Pyodide namespace reset versus Agent linear-memory restore as an isolation-equivalent score",
             "legacy ReactorPythonDispatcher versus current AgentPythonDispatcher",
         ],
         "lanes": list(rows),

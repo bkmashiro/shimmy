@@ -25,6 +25,16 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     cd examples/demo-stateful && \
     GOOS=wasip1 GOARCH=wasm go build -trimpath -buildvcs=false \
       -buildmode=c-shared -o /out/generic-evaluator.wasm .
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+      go build -trimpath -buildvcs=false \
+      -o /out/runtime-bridge-native ./experiments/runtime-comparison-bridge/native-file
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    GOOS=wasip1 GOARCH=wasm go build -trimpath -buildvcs=false \
+      -buildmode=c-shared -o /out/runtime-bridge-generic.wasm \
+      ./experiments/runtime-comparison-bridge/generic-wasm
 
 FROM busybox:1.37.0-musl AS generic
 COPY --from=shimmy-build /out/shimmy /shimmy
@@ -67,10 +77,11 @@ COPY examples/eval-pyodide/package.json examples/eval-pyodide/package-lock.json 
 RUN npm ci --omit=dev && npm cache clean --force
 RUN node -e "(async()=>{const {loadPyodide}=require('pyodide');const p=await loadPyodide();await p.loadPackage(['scipy']);})().catch((e)=>{console.error(e);process.exit(1)})"
 COPY --from=shimmy-build /out/shimmy /shimmy
-COPY examples/eval-pyodide/runner.js examples/eval-pyodide/framed-stdio.js /opt/pyodide/
+COPY examples/eval-pyodide/runner.js examples/eval-pyodide/framed-stdio.js examples/eval-pyodide/package-config.js /opt/pyodide/
 COPY examples/eval-scipy/eval.py /opt/evaluators/eval.py
 RUN node --check /opt/pyodide/runner.js && \
     node --check /opt/pyodide/framed-stdio.js && \
+    node --check /opt/pyodide/package-config.js && \
     node -e "const f=require('/opt/pyodide/framed-stdio');if(typeof f.FramedReader!=='function'||typeof f.encodeFrame!=='function')process.exit(1)" && \
     chmod 0755 /opt/evaluators && \
     chmod 0644 /opt/pyodide/runner.js /opt/pyodide/framed-stdio.js /opt/evaluators/eval.py
@@ -161,3 +172,70 @@ ENV LOG_LEVEL=error \
 EXPOSE 8080
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["serve", "--host", "0.0.0.0", "--port", "8080"]
+
+FROM busybox:1.37.0-musl AS bridge-system-native
+COPY --from=shimmy-build /out/shimmy /shimmy
+COPY --from=shimmy-build /out/runtime-bridge-native /opt/evaluators/runtime-bridge-native
+ENV LOG_LEVEL=error \
+    FUNCTION_INTERFACE=file \
+    FUNCTION_COMMAND=/opt/evaluators/runtime-bridge-native \
+    FUNCTION_WORKING_DIR=/opt/evaluators \
+    FUNCTION_MAX_PROCS=1 \
+    FUNCTION_WORKER_SEND_TIMEOUT=180s \
+    FUNCTION_TIMEOUT=180s
+USER 65532:65532
+EXPOSE 8080
+ENTRYPOINT ["/shimmy"]
+CMD ["serve", "--host", "0.0.0.0", "--port", "8080"]
+
+FROM busybox:1.37.0-musl AS bridge-system-generic
+COPY --from=shimmy-build /out/shimmy /shimmy
+COPY --from=shimmy-build /out/runtime-bridge-generic.wasm /opt/evaluators/runtime-bridge-generic.wasm
+ENV LOG_LEVEL=error \
+    FUNCTION_INTERFACE=wasm \
+    FUNCTION_WASM_PROFILE=generic \
+    FUNCTION_WASM_MODULE=/opt/evaluators/runtime-bridge-generic.wasm \
+    FUNCTION_MAX_PROCS=1 \
+    FUNCTION_WORKER_SEND_TIMEOUT=180s \
+    FUNCTION_TIMEOUT=180s
+USER 65532:65532
+EXPOSE 8080
+ENTRYPOINT ["/shimmy"]
+CMD ["serve", "--host", "0.0.0.0", "--port", "8080"]
+
+FROM python:3.13-slim AS bridge-python-native-base
+COPY --from=shimmy-build /out/shimmy /shimmy
+COPY experiments/runtime-comparison-bridge/python/ /opt/evaluators/
+RUN chmod 0755 /opt/evaluators/file_evaluator.py /opt/evaluators/rpc_evaluator.py && \
+    chmod 0644 /opt/evaluators/eval.py
+ENV LOG_LEVEL=error \
+    FUNCTION_WORKING_DIR=/opt/evaluators \
+    FUNCTION_MAX_PROCS=1 \
+    FUNCTION_WORKER_SEND_TIMEOUT=180s \
+    FUNCTION_TIMEOUT=180s
+USER 65532:65532
+EXPOSE 8080
+ENTRYPOINT ["/shimmy"]
+CMD ["serve", "--host", "0.0.0.0", "--port", "8080"]
+
+FROM bridge-python-native-base AS bridge-python-native-fresh
+ENV FUNCTION_INTERFACE=file \
+    FUNCTION_COMMAND=/opt/evaluators/file_evaluator.py
+
+FROM bridge-python-native-base AS bridge-python-native-persistent
+ENV FUNCTION_INTERFACE=rpc \
+    FUNCTION_RPC_TRANSPORT=stdio \
+    FUNCTION_COMMAND=/opt/evaluators/rpc_evaluator.py
+
+FROM python-reactor AS bridge-python-agent-cow
+COPY experiments/runtime-comparison-bridge/python/eval.py /opt/evaluators/eval.py
+
+FROM pyodide-scipy AS bridge-python-pyodide-persistent
+COPY experiments/runtime-comparison-bridge/python/eval.py /opt/evaluators/eval.py
+ENV FUNCTION_PYODIDE_SCRIPT=/opt/evaluators/eval.py \
+    FUNCTION_PYODIDE_PACKAGES=""
+
+FROM dbi-lean AS bridge-system-dbi
+COPY --from=shimmy-build /out/runtime-bridge-native /opt/evaluators/runtime-bridge-native
+ENV FUNCTION_COMMAND=/opt/evaluators/runtime-bridge-native \
+    FUNCTION_WORKING_DIR=/opt/evaluators

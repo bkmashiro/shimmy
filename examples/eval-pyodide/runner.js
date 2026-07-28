@@ -40,6 +40,7 @@ const {
   FramedReader,
   encodeFrame,
 } = require("./framed-stdio");
+const { parsePackages } = require("./package-config");
 
 const VFS_ROOT = "/__evaluator_root__";
 const ADAPTER_VFS_ROOT = "/__lf_adapter_root__";
@@ -61,20 +62,6 @@ const legacyMode = Boolean(legacyScriptPath) && !packageMode;
 function errorAndExit(message, code = 1) {
   process.stderr.write(`${message}\n`);
   process.exit(code);
-}
-
-function parsePackages(raw, defaultPackages = []) {
-  const packages = [];
-
-  if (raw) {
-    for (const p of raw.split(",")) {
-      const normalized = p.trim();
-      if (normalized) packages.push(normalized);
-    }
-    return packages;
-  }
-
-  return defaultPackages.slice();
 }
 
 if (!legacyMode && !packageMode) {
@@ -120,7 +107,10 @@ if (packageMode) {
 }
 
 const defaultPackages = legacyMode ? ["scipy"] : [];
-const pyodidePackages = parsePackages(process.env.FUNCTION_PYODIDE_PACKAGES, defaultPackages);
+const packagesValue = Object.prototype.hasOwnProperty.call(process.env, "FUNCTION_PYODIDE_PACKAGES")
+  ? process.env.FUNCTION_PYODIDE_PACKAGES
+  : undefined;
+const pyodidePackages = parsePackages(packagesValue, defaultPackages);
 
 // ---------------------------------------------------------------------------
 // LSP-framed stdio transport

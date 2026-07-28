@@ -1,0 +1,68 @@
+# Runtime comparison bridge
+
+This experiment creates a comparison graph, not a universal runtime ranking.
+Every edge has a shared fixture, a result checksum, an explicit lifecycle, and a
+bounded claim.
+
+## Declared edges
+
+| Edge | Paths | Comparison basis |
+|---|---|---|
+| `system-native-vs-wasm` | fresh native file process ↔ generic WASM restore | shared Go contract source, public HTTP payload, clean-state evidence, equal limits |
+| `system-native-vs-dbi` | native file process ↔ the identical binary under DynamoRIO | identical binary and fresh file lifecycle |
+| `python-warm` | persistent CPython ↔ Agent Python COW ↔ persistent Pyodide | exact same `python/eval.py`, payload, runner, and limits; state guarantees still differ |
+| `python-clean` | fresh CPython ↔ Agent Python COW | exact same Python source and verified invocation count one |
+| native ↔ QEMU fresh | host native file process ↔ byte-identical binary in a fresh TCG VM | produced by the QEMU job and joined downstream by fixture ID |
+
+DBI and QEMU are wrappers around a native evaluator, not peer guest languages.
+Pyodide is intentionally absent from the clean-state edge because the current
+persistent lane has no qualified per-request reset. The removed legacy
+`ReactorPythonDispatcher` is historical evidence, not a current competitor;
+`python-reactor` now selects `AgentPythonDispatcher`.
+
+## Workloads
+
+Both fixture families expose the same deterministic profiles:
+
+- `fixed`: JSON/HTTP/runtime fixed cost with zero loop iterations;
+- `cpu-100k`: 100,000 iterations of a deterministic unsigned 64-bit recurrence.
+
+System paths share the Go contract package. Python paths execute the exact same
+Python file. Each response carries `is_correct`, `work_checksum`, and
+`guest_invocation_count`. The benchmark fails closed on a checksum or lifecycle
+mismatch.
+
+## Cost placement
+
+The report keeps these phases separate:
+
+- container/public-server readiness;
+- first evaluator request;
+- warmed steady samples;
+- clean-state versus mutable persistent counters.
+
+Prepared single-use/eager refill costs remain separate evidence and are not
+silently added to or removed from request latency.
+
+## Run
+
+The benchmark is wired into the existing manual/runtime-lane GitHub Actions
+workflow. It refuses local execution unless `--allow-local` is explicitly set.
+The CI command is:
+
+```bash
+python3 scripts/benchmark-runtime-comparison-bridge.py \
+  --compose-file experiments/runtime-comparison-bridge/compose.yaml \
+  --warmups 2 \
+  --samples 10 \
+  --output artifacts/runtime-lane-bench/comparison-bridge.json
+```
+
+The QEMU file benchmark uses:
+
+```bash
+FILE_EVALUATOR_PACKAGE=./experiments/runtime-comparison-bridge/native-file
+FILE_EVALUATOR_ID=system-bridge-v1
+```
+
+The rootfs manifest and host report must contain the same evaluator binary SHA-256.

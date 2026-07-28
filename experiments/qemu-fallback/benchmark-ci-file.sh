@@ -16,6 +16,8 @@ NATIVE_PORT=${NATIVE_PORT:-18380}
 QEMU_PORT=${QEMU_PORT:-18381}
 EVALUATOR_DIR=/opt/evaluator
 EVALUATOR_PATH="$EVALUATOR_DIR/file-evaluator"
+FILE_EVALUATOR_PACKAGE=${FILE_EVALUATOR_PACKAGE:-./experiments/qemu-fallback/file-evaluator}
+FILE_EVALUATOR_ID=${FILE_EVALUATOR_ID:-qemu-file-evaluator-v1}
 
 if [[ ! "$REQUEST_COUNT" =~ ^[1-9][0-9]*$ || "$REQUEST_COUNT" -gt 10 ]]; then
   echo "REQUEST_COUNT must be in [1,10]" >&2
@@ -25,7 +27,8 @@ fi
 mkdir -p "$BIN_DIR" "$(dirname "$OUTPUT")"
 go build -trimpath -buildvcs=false -o "$BIN_DIR/shimmy" .
 go build -trimpath -buildvcs=false -o "$BIN_DIR/shimmy-qemu-runner" ./cmd/shimmy-qemu-runner
-go build -trimpath -buildvcs=false -o "$BIN_DIR/file-evaluator" ./experiments/qemu-fallback/file-evaluator
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false \
+  -ldflags='-s -w -buildid=' -o "$BIN_DIR/file-evaluator" "$FILE_EVALUATOR_PACKAGE"
 sudo mkdir -p "$EVALUATOR_DIR"
 sudo install -m 0755 "$BIN_DIR/file-evaluator" "$EVALUATOR_PATH"
 
@@ -114,13 +117,17 @@ wait_for_health "$QEMU_PORT" "$qemu_pid" "$qemu_log"
 
 REPO_ROOT="$REPO_ROOT" \
 ARTIFACT_DIR="$ARTIFACT_DIR" \
+BIN_DIR="$BIN_DIR" \
 OUTPUT="$OUTPUT" \
 REQUEST_COUNT="$REQUEST_COUNT" \
 NATIVE_PORT="$NATIVE_PORT" \
 QEMU_PORT="$QEMU_PORT" \
 QEMU_BINARY="$QEMU_BINARY" \
+FILE_EVALUATOR_PACKAGE="$FILE_EVALUATOR_PACKAGE" \
+FILE_EVALUATOR_ID="$FILE_EVALUATOR_ID" \
 python3 - <<'PY'
 import datetime as dt
+import hashlib
 import importlib.util
 import json
 import os
@@ -171,6 +178,10 @@ for index in range(count):
     print(json.dumps({"sample": index + 1, "native_ns": native_times[-1], "qemu_ns": qemu_times[-1]}), flush=True)
 
 manifest = json.loads((pathlib.Path(os.environ["ARTIFACT_DIR"]) / "manifest.json").read_text())
+native_binary_sha = hashlib.sha256(pathlib.Path(os.environ["BIN_DIR"]).joinpath("file-evaluator").read_bytes()).hexdigest()
+manifest_fixture = manifest.get("file_evaluator")
+if not isinstance(manifest_fixture, dict) or manifest_fixture.get("sha256") != native_binary_sha:
+    raise SystemExit(f"host/guest evaluator binary mismatch: host={native_binary_sha}, manifest={manifest_fixture}")
 report = module.build_qemu_report(
     native_samples_ns=native_times,
     qemu_samples_ns=qemu_times,
@@ -190,6 +201,13 @@ report.update({
         "cpu": module.cpu_model(),
     },
     "comparison_policy": "QEMU TCG full-boot samples are a compatibility-cost profile and are not ranked against persistent warm runtime lanes",
+    "fixture": {
+        "id": os.environ["FILE_EVALUATOR_ID"],
+        "package": os.environ["FILE_EVALUATOR_PACKAGE"],
+        "native_binary_sha256": native_binary_sha,
+        "manifest": manifest_fixture,
+        "host_guest_binary_identical": True,
+    },
 })
 output = pathlib.Path(os.environ["OUTPUT"])
 output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")

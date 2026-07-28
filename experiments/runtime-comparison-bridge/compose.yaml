@@ -1,0 +1,137 @@
+name: shimmy-runtime-comparison-bridge
+
+x-common: &common
+  read_only: true
+  mem_limit: 2g
+  cpus: 2.0
+
+x-build: &build
+  context: ../..
+  dockerfile: demo/compose/Dockerfile
+  args:
+    VERSION: "${SHIMMY_BRIDGE_VERSION:-bridge}"
+    COMMIT: "${SHIMMY_BRIDGE_COMMIT:-local}"
+
+services:
+  bridge-system-native:
+    <<: *common
+    image: "${SHIMMY_BRIDGE_IMAGE_PREFIX:-shimmy-bridge}-system-native:${SHIMMY_BRIDGE_TAG:-dev}"
+    build:
+      <<: *build
+      target: bridge-system-native
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    ports:
+      - "127.0.0.1:${SHIMMY_BRIDGE_SYSTEM_NATIVE_PORT:-18581}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  bridge-system-generic:
+    <<: *common
+    image: "${SHIMMY_BRIDGE_IMAGE_PREFIX:-shimmy-bridge}-system-generic:${SHIMMY_BRIDGE_TAG:-dev}"
+    build:
+      <<: *build
+      target: bridge-system-generic
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    ports:
+      - "127.0.0.1:${SHIMMY_BRIDGE_SYSTEM_GENERIC_PORT:-18582}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  bridge-system-dbi:
+    <<: *common
+    profiles: ["dbi"]
+    platform: linux/amd64
+    image: "${SHIMMY_BRIDGE_IMAGE_PREFIX:-shimmy-bridge}-system-dbi:${SHIMMY_BRIDGE_TAG:-dev}"
+    build:
+      <<: *build
+      target: bridge-system-dbi
+      platforms:
+        - linux/amd64
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    ports:
+      - "127.0.0.1:${SHIMMY_BRIDGE_SYSTEM_DBI_PORT:-18583}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  bridge-python-native-fresh:
+    <<: *common
+    image: "${SHIMMY_BRIDGE_IMAGE_PREFIX:-shimmy-bridge}-python-native-fresh:${SHIMMY_BRIDGE_TAG:-dev}"
+    build:
+      <<: *build
+      target: bridge-python-native-fresh
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    ports:
+      - "127.0.0.1:${SHIMMY_BRIDGE_PYTHON_NATIVE_FRESH_PORT:-18584}:8080"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2).read()"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  bridge-python-native-persistent:
+    <<: *common
+    image: "${SHIMMY_BRIDGE_IMAGE_PREFIX:-shimmy-bridge}-python-native-persistent:${SHIMMY_BRIDGE_TAG:-dev}"
+    build:
+      <<: *build
+      target: bridge-python-native-persistent
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    ports:
+      - "127.0.0.1:${SHIMMY_BRIDGE_PYTHON_NATIVE_PERSISTENT_PORT:-18585}:8080"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2).read()"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  bridge-python-agent-cow:
+    <<: *common
+    image: "${SHIMMY_BRIDGE_IMAGE_PREFIX:-shimmy-bridge}-python-agent-cow:${SHIMMY_BRIDGE_TAG:-dev}"
+    build:
+      <<: *build
+      target: bridge-python-agent-cow
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    ports:
+      - "127.0.0.1:${SHIMMY_BRIDGE_PYTHON_AGENT_PORT:-18586}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 36
+      start_period: 120s
+
+  bridge-python-pyodide-persistent:
+    <<: *common
+    image: "${SHIMMY_BRIDGE_IMAGE_PREFIX:-shimmy-bridge}-python-pyodide-persistent:${SHIMMY_BRIDGE_TAG:-dev}"
+    build:
+      <<: *build
+      target: bridge-python-pyodide-persistent
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    ports:
+      - "127.0.0.1:${SHIMMY_BRIDGE_PYTHON_PYODIDE_PORT:-18587}:8080"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 36
+      start_period: 120s

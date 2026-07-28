@@ -8,6 +8,8 @@ BUILD_DIR=${BUILD_DIR:-"$REPO_ROOT/.cache/qemu-fallback-image"}
 GUEST_BINARY=${GUEST_BINARY:-"$BUILD_DIR/shimmy-qemu-guest"}
 EVALUATOR_BINARY=${EVALUATOR_BINARY:-"$BUILD_DIR/file-evaluator"}
 RPC_EVALUATOR_BINARY=${RPC_EVALUATOR_BINARY:-"$BUILD_DIR/rpc-evaluator"}
+FILE_EVALUATOR_PACKAGE=${FILE_EVALUATOR_PACKAGE:-./experiments/qemu-fallback/file-evaluator}
+FILE_EVALUATOR_ID=${FILE_EVALUATOR_ID:-qemu-file-evaluator-v1}
 BUSYBOX_BINARY=${BUSYBOX_BINARY:-/bin/busybox}
 KERNEL_PATH=${KERNEL_PATH:-}
 LOCK_FILE="$SCRIPT_DIR/sources.lock.json"
@@ -32,6 +34,10 @@ fi
 require_file "$KERNEL_PATH"
 require_file "$BUSYBOX_BINARY"
 require_file "$LOCK_FILE"
+if [[ ! "$FILE_EVALUATOR_PACKAGE" =~ ^[A-Za-z0-9._/-]+$ || ! "$FILE_EVALUATOR_ID" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+  printf 'unsafe file evaluator package or id\n' >&2
+  exit 1
+fi
 
 readarray -t lock_values < <(python3 - "$LOCK_FILE" <<'PY'
 import json
@@ -80,7 +86,7 @@ rm -rf "$BUILD_DIR/rootfs"
 mkdir -p "$BUILD_DIR/rootfs" "$OUTPUT_DIR"
 
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -trimpath -ldflags='-s -w -buildid=' -o "$GUEST_BINARY" ./cmd/shimmy-qemu-guest
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -trimpath -ldflags='-s -w -buildid=' -o "$EVALUATOR_BINARY" ./experiments/qemu-fallback/file-evaluator
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -trimpath -ldflags='-s -w -buildid=' -o "$EVALUATOR_BINARY" "$FILE_EVALUATOR_PACKAGE"
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -trimpath -ldflags='-s -w -buildid=' -o "$RPC_EVALUATOR_BINARY" ./experiments/qemu-fallback/rpc-evaluator
 
 ROOT="$BUILD_DIR/rootfs"
@@ -195,11 +201,13 @@ kernel_sha=$(sha256sum "$OUTPUT_DIR/vmlinuz" | cut -d' ' -f1)
 initrd_sha=$(sha256sum "$OUTPUT_DIR/initramfs.img" | cut -d' ' -f1)
 rootfs_sha=$(sha256sum "$FINAL_ROOTFS" | cut -d' ' -f1)
 source_lock_sha=$(sha256sum "$LOCK_FILE" | cut -d' ' -f1)
+evaluator_sha=$(sha256sum "$EVALUATOR_BINARY" | cut -d' ' -f1)
 cat >"$OUTPUT_DIR/manifest.json" <<MANIFEST
 {
   "schema_version": 1,
   "architecture": "x86_64",
   "source_lock_sha256": "$source_lock_sha",
+  "file_evaluator": {"id": "$FILE_EVALUATOR_ID", "package": "$FILE_EVALUATOR_PACKAGE", "sha256": "$evaluator_sha"},
   "kernel": {"path": "vmlinuz", "sha256": "$kernel_sha"},
   "initrd": {"path": "initramfs.img", "sha256": "$initrd_sha"},
   "rootfs": {"path": "evaluator.squashfs", "sha256": "$rootfs_sha", "format": "raw"}

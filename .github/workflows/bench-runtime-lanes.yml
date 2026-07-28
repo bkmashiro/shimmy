@@ -14,8 +14,11 @@ on:
       - internal/execution/supervisor/**
       - internal/execution/wasm/**
       - scripts/benchmark-runtime-lanes.py
+      - scripts/benchmark-runtime-comparison-bridge.py
       - scripts/tests/test_benchmark_runtime_lanes.py
+      - scripts/tests/test_benchmark_runtime_comparison_bridge.py
       - scripts/tests/test_benchmark_qemu_rpc_hot_reset.py
+      - experiments/runtime-comparison-bridge/**
       - build/python-reactor/**
 
 permissions:
@@ -36,6 +39,10 @@ jobs:
       SHIMMY_DEMO_VERSION: bench-${{ github.run_number }}
       SHIMMY_DEMO_COMMIT: ${{ github.sha }}
       SHIMMY_DEMO_INCLUDE_DBI: "1"
+      SHIMMY_BRIDGE_IMAGE_PREFIX: shimmy-bridge
+      SHIMMY_BRIDGE_TAG: ci
+      SHIMMY_BRIDGE_VERSION: bridge-${{ github.run_number }}
+      SHIMMY_BRIDGE_COMMIT: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v7
 
@@ -53,8 +60,14 @@ jobs:
       - name: Validate benchmark contract
         run: |
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest \
-            scripts.tests.test_benchmark_runtime_lanes -v
+            scripts.tests.test_benchmark_runtime_lanes \
+            scripts.tests.test_benchmark_runtime_comparison_bridge \
+            experiments.runtime-comparison-bridge.test_bridge -v
+          npm --prefix examples/eval-pyodide test
+          go test ./experiments/runtime-comparison-bridge/contract \
+            ./experiments/runtime-comparison-bridge/native-file
           docker compose --profile dbi -f demo/compose/compose.yaml config --quiet
+          docker compose --profile dbi -f experiments/runtime-comparison-bridge/compose.yaml config --quiet
 
       - name: Record runner environment
         run: |
@@ -71,6 +84,13 @@ jobs:
           docker compose --profile dbi -f demo/compose/compose.yaml build \
             generic python-reactor pyodide-scipy dbi-lean
 
+      - name: Build same-fixture comparison bridge images
+        run: |
+          docker compose --profile dbi -f experiments/runtime-comparison-bridge/compose.yaml build \
+            bridge-system-native bridge-system-generic bridge-system-dbi \
+            bridge-python-native-fresh bridge-python-native-persistent \
+            bridge-python-agent-cow bridge-python-pyodide-persistent
+
       - name: Benchmark public HTTP lifecycle phases
         run: |
           python3 scripts/benchmark-runtime-lanes.py \
@@ -79,11 +99,21 @@ jobs:
             --samples 10 \
             --output artifacts/runtime-lane-bench/compose-lanes.json
 
+      - name: Benchmark declared same-fixture comparison edges
+        run: |
+          python3 scripts/benchmark-runtime-comparison-bridge.py \
+            --compose-file experiments/runtime-comparison-bridge/compose.yaml \
+            --warmups 2 \
+            --samples 10 \
+            --output artifacts/runtime-lane-bench/comparison-bridge.json
+
       - name: Capture failure logs
         if: failure()
         run: |
           docker compose --profile dbi -f demo/compose/compose.yaml \
             logs --no-color > artifacts/runtime-lane-bench/compose-failure.log 2>&1 || true
+          docker compose --profile dbi -f experiments/runtime-comparison-bridge/compose.yaml \
+            logs --no-color > artifacts/runtime-lane-bench/comparison-bridge-failure.log 2>&1 || true
 
       - name: Upload compose-lane evidence
         if: always()
@@ -146,6 +176,8 @@ jobs:
           OUTPUT_DIR: ${{ github.workspace }}/artifacts/qemu-fallback
           BUILD_DIR: ${{ runner.temp }}/qemu-runtime-lane-image
           KERNEL_PATH: ${{ env.KERNEL_PATH }}
+          FILE_EVALUATOR_PACKAGE: ./experiments/runtime-comparison-bridge/native-file
+          FILE_EVALUATOR_ID: system-bridge-v1
         run: experiments/qemu-fallback/build-image.sh
 
       - name: Benchmark native and QEMU public HTTP requests
@@ -154,6 +186,8 @@ jobs:
           BIN_DIR: ${{ runner.temp }}/qemu-runtime-lane-bench
           OUTPUT: ${{ github.workspace }}/artifacts/runtime-lane-bench/qemu-file.json
           REQUEST_COUNT: "3"
+          FILE_EVALUATOR_PACKAGE: ./experiments/runtime-comparison-bridge/native-file
+          FILE_EVALUATOR_ID: system-bridge-v1
         run: experiments/qemu-fallback/benchmark-ci-file.sh
 
       - name: Benchmark QEMU RPC prewarm effectiveness and lazy reset

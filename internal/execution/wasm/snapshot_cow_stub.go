@@ -23,6 +23,7 @@ func newCowRuntimeSupport(_ string, _ *cowImageCoordinator) *cowRuntimeSupport {
 func (s *cowRuntimeSupport) instantiateContext(ctx context.Context) context.Context {
 	return ctx
 }
+func (s *cowRuntimeSupport) Close() error { return nil }
 func (s *cowRuntimeSupport) snapshotStrategy(_ api.Memory, _ *zap.Logger) SnapshotStrategy {
 	return NewFullMemcpyStrategy()
 }

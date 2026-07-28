@@ -39,6 +39,7 @@ func TestCowLinuxMechanismEvidence(t *testing.T) {
 	t.Cleanup(func() {
 		for _, memory := range memories {
 			memory.Free()
+			require.NoError(t, memory.Release())
 		}
 		require.NoError(t, coordinator.Close())
 	})
@@ -284,6 +285,9 @@ func BenchmarkCowVsFullCopyResetOnly(b *testing.B) {
 			}
 			b.Cleanup(func() {
 				memory.Free()
+				if err := memory.Release(); err != nil {
+					b.Errorf("release COW memory: %v", err)
+				}
 				_ = coordinator.Close()
 			})
 			dirtyPages := len(buf) / unix.Getpagesize() * dirtyPercent / 100

@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math"
 	"runtime"
@@ -198,24 +199,40 @@ func (m *cowLinearMemory) Reallocate(size uint64) []byte {
 	return m.visibleLocked()
 }
 
-// Free implements experimental.LinearMemory. Wazero calls this during module
-// close, so it is the sole owner of the per-instance munmap.
+// Free implements experimental.LinearMemory. Wazero can call this from a
+// termination check before wazevo has fully unwound its native call frame, so
+// this invalidates logical use without revoking the virtual address range.
+// Release owns the later, physical unmap after the call has returned.
 func (m *cowLinearMemory) Free() {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.freed {
-		m.mu.Unlock()
 		return
 	}
-	region := m.region
-	m.region = nil
 	m.length = 0
 	m.capacity = 0
 	m.image = nil
 	m.freed = true
-	m.mu.Unlock()
-	if len(region) != 0 {
-		_ = unix.Munmap(region)
+}
+
+// Release revokes the stable virtual address range after its owning module is
+// no longer executing. It is idempotent and also covers construction failures
+// where wazero never reached LinearMemory.Free.
+func (m *cowLinearMemory) Release() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.length = 0
+	m.capacity = 0
+	m.image = nil
+	m.freed = true
+	if len(m.region) == 0 {
+		return nil
 	}
+	if err := unix.Munmap(m.region); err != nil {
+		return err
+	}
+	m.region = nil
+	return nil
 }
 
 func (m *cowLinearMemory) Bytes() []byte {
@@ -339,6 +356,19 @@ func (a *cowMemoryAllocator) Allocate(capacity, maximum uint64) experimental.Lin
 	}
 	a.backings = append(a.backings, memory)
 	return memory
+}
+
+func (a *cowMemoryAllocator) Close() error {
+	a.mu.Lock()
+	backings := a.backings
+	a.backings = nil
+	a.mu.Unlock()
+
+	var releaseErr error
+	for _, backing := range backings {
+		releaseErr = errors.Join(releaseErr, backing.Release())
+	}
+	return releaseErr
 }
 
 func (a *cowMemoryAllocator) backingFor(mem api.Memory) (*cowLinearMemory, error) {
@@ -502,6 +532,15 @@ func newCowRuntimeSupport(mode string, coordinator *cowImageCoordinator) *cowRun
 
 func (s *cowRuntimeSupport) instantiateContext(ctx context.Context) context.Context {
 	return experimental.WithMemoryAllocator(ctx, s.allocator)
+}
+
+func (s *cowRuntimeSupport) Close() error {
+	if s == nil || s.allocator == nil {
+		return nil
+	}
+	err := s.allocator.Close()
+	s.allocator = nil
+	return err
 }
 
 func (s *cowRuntimeSupport) snapshotStrategy(mem api.Memory, log *zap.Logger) SnapshotStrategy {

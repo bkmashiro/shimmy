@@ -102,7 +102,8 @@ func (s *wasmSupervisor) Start(ctx context.Context) error {
 	}
 	mod, err := s.runtime.InstantiateModule(instantiateCtx, s.compiled, instCfg)
 	if err != nil {
-		return fmt.Errorf("wasm: instantiate module: %w", err)
+		releaseErr := s.closeResources(ctx)
+		return errors.Join(fmt.Errorf("wasm: instantiate module: %w", err), releaseErr)
 	}
 
 	s.mod = mod
@@ -120,10 +121,8 @@ func (s *wasmSupervisor) Start(ctx context.Context) error {
 
 	// Snapshot linear memory so we can restore it before each request.
 	if err := s.takeSnapshot(); err != nil {
-		_ = s.strategy.Close()
-		_ = mod.Close(ctx)
-		s.mod = nil
-		return fmt.Errorf("wasm: snapshot memory: %w", err)
+		releaseErr := s.closeResources(ctx)
+		return errors.Join(fmt.Errorf("wasm: snapshot memory: %w", err), releaseErr)
 	}
 
 	memSize := uint32(0)
@@ -181,24 +180,33 @@ func (s *wasmSupervisor) Shutdown(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.mod == nil {
+	if s.mod == nil && s.strategy == nil && s.cowSupport == nil {
 		return nil
 	}
 
 	s.log.Debug("shutting down wasm module instance")
+	return s.closeResources(ctx)
+}
 
-	if err := s.mod.Close(ctx); err != nil {
-		return fmt.Errorf("wasm: close module: %w", err)
+// closeResources must run only after guest execution has stopped and while
+// s.mu is held. The COW allocator owns the virtual address range used by the
+// compiled module, so physical release is deliberately last.
+func (s *wasmSupervisor) closeResources(ctx context.Context) error {
+	var moduleErr, strategyErr, supportErr error
+	if s.mod != nil {
+		moduleErr = s.mod.Close(ctx)
+		s.mod = nil
+		s.adapter = nil
 	}
-
-	s.mod = nil
-	s.adapter = nil
-
-	if err := s.strategy.Close(); err != nil {
-		s.log.Warn("failed to close snapshot strategy", zap.Error(err))
+	if s.strategy != nil {
+		strategyErr = s.strategy.Close()
+		s.strategy = nil
 	}
-
-	return nil
+	if s.cowSupport != nil {
+		supportErr = s.cowSupport.Close()
+		s.cowSupport = nil
+	}
+	return errors.Join(moduleErr, strategyErr, supportErr)
 }
 
 // takeSnapshot captures the guest's linear memory via the active strategy and

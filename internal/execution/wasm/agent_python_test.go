@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -385,6 +386,99 @@ def evaluation_function(response, answer, params=None):
 		require.NoError(t, err)
 		assert.Equal(t, float64(1), result["result"].(map[string]any)["counter"])
 	}
+}
+
+func TestAgentPythonDispatcherCowTimeoutDiscardsInvalidatedSlot(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("prepared-memory COW requires Linux")
+	}
+	wasmPath := os.Getenv("AGENT_PYTHON_RUNTIME_WASM")
+	manifestPath := os.Getenv("AGENT_PYTHON_RUNTIME_MANIFEST")
+	if wasmPath == "" || manifestPath == "" {
+		t.Skip("AGENT_PYTHON_RUNTIME_WASM and AGENT_PYTHON_RUNTIME_MANIFEST are required")
+	}
+
+	scriptPath := filepath.Join(t.TempDir(), "cow-timeout.py")
+	script := `
+import sys
+
+def evaluation_function(response, answer, params=None):
+    if response == "loop":
+        print("cow-timeout-loop-entered", file=sys.stderr, flush=True)
+        while True:
+            pass
+    return {"is_correct": response == answer}
+`
+	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o644))
+
+	var eventsMu sync.Mutex
+	var events []AgentPythonPhaseEvent
+	dispatcher := NewAgentPythonDispatcher(Config{
+		ModulePath:                  wasmPath,
+		AgentPythonManifestPath:     manifestPath,
+		PythonScriptPath:            scriptPath,
+		PythonLifecycle:             "snapshot",
+		SnapshotMode:                "cow",
+		MaxInstances:                1,
+		PythonSnapshotHeadroomBytes: 32 << 20,
+		MaxMemoryPages:              16384,
+		Timeout:                     2 * time.Minute,
+		AgentPythonObserver: func(event AgentPythonPhaseEvent) {
+			eventsMu.Lock()
+			events = append(events, event)
+			eventsMu.Unlock()
+		},
+	}, zap.NewNop())
+	startContext, startCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer startCancel()
+	require.NoError(t, dispatcher.Start(startContext))
+	t.Cleanup(func() {
+		shutdownContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = dispatcher.Shutdown(shutdownContext)
+	})
+
+	health, err := dispatcher.Send(context.Background(), "healthcheck", nil)
+	require.NoError(t, err)
+	assert.Equal(t, "cow", health["result"].(map[string]any)["snapshot_selected"])
+	eventsMu.Lock()
+	events = nil
+	eventsMu.Unlock()
+
+	timeoutContext, timeoutCancel := context.WithTimeout(context.Background(), time.Second)
+	_, err = dispatcher.Send(timeoutContext, "eval", map[string]any{"response": "loop", "answer": "x"})
+	timeoutCancel()
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Contains(t, err.Error(), "cow-timeout-loop-entered", "the guest must enter the target execution segment before cancellation")
+	eventsMu.Lock()
+	timeoutEvents := append([]AgentPythonPhaseEvent(nil), events...)
+	events = nil
+	eventsMu.Unlock()
+	for _, event := range timeoutEvents {
+		if event.Purpose == AgentPythonPurposeRequest {
+			require.NotEqual(t, AgentPythonPhaseRestore, event.Phase, "%+v", event)
+		}
+	}
+
+	after, err := dispatcher.Send(context.Background(), "eval", map[string]any{"response": "42", "answer": "42"})
+	require.NoError(t, err)
+	assert.Equal(t, true, after["result"].(map[string]any)["is_correct"])
+	eventsMu.Lock()
+	recoveryEvents := append([]AgentPythonPhaseEvent(nil), events...)
+	eventsMu.Unlock()
+	restoreObserved := false
+	for _, event := range recoveryEvents {
+		if event.Purpose == AgentPythonPurposeRequest && event.Phase == AgentPythonPhaseRestore {
+			require.Equal(t, AgentPythonOutcomeOK, event.Outcome)
+			restoreObserved = true
+		}
+	}
+	require.True(t, restoreObserved, "the successful recovery request must restore its COW baseline")
+
+	health, err = dispatcher.Send(context.Background(), "healthcheck", nil)
+	require.NoError(t, err)
+	assert.Equal(t, 1, health["result"].(map[string]any)["prepared_ready"])
 }
 
 func TestAgentPythonDispatcherSingleUsePreparedRefillsNeverServedCandidates(t *testing.T) {

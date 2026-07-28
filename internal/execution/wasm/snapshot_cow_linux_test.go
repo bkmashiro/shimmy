@@ -4,12 +4,27 @@ package wasm
 
 import (
 	"bytes"
+	"context"
+	_ "embed"
 	"errors"
 	"testing"
+	"time"
 	"unsafe"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tetratelabs/wazero"
 )
+
+//go:embed testdata/echo.wasm
+var cowSupervisorEchoWasm []byte
+
+func cleanupCowLinearMemory(t *testing.T, memory *cowLinearMemory) {
+	t.Helper()
+	t.Cleanup(func() {
+		memory.Free()
+		require.NoError(t, memory.Release())
+	})
+}
 
 func preparedCowPattern(size int) []byte {
 	buf := make([]byte, size)
@@ -27,7 +42,7 @@ func TestCowLinearMemoryCrossInstanceIsolationAndReset(t *testing.T) {
 
 	first, err := newCowLinearMemory(size)
 	require.NoError(t, err)
-	t.Cleanup(first.Free)
+	cleanupCowLinearMemory(t, first)
 	firstBytes := first.Reallocate(size)
 	require.Len(t, firstBytes, size)
 	copy(firstBytes, baseline)
@@ -37,7 +52,7 @@ func TestCowLinearMemoryCrossInstanceIsolationAndReset(t *testing.T) {
 
 	second, err := newCowLinearMemory(size)
 	require.NoError(t, err)
-	t.Cleanup(second.Free)
+	cleanupCowLinearMemory(t, second)
 	secondBytes := second.Reallocate(size)
 	require.Len(t, secondBytes, size)
 	copy(secondBytes, baseline)
@@ -69,13 +84,13 @@ func TestCowLinearMemoryRejectsMismatchedPreparedImage(t *testing.T) {
 
 	canonical, err := newCowLinearMemory(size)
 	require.NoError(t, err)
-	t.Cleanup(canonical.Free)
+	cleanupCowLinearMemory(t, canonical)
 	copy(canonical.Reallocate(size), baseline)
 	require.NoError(t, coordinator.PublishOrAttach(canonical))
 
 	mismatch, err := newCowLinearMemory(size)
 	require.NoError(t, err)
-	t.Cleanup(mismatch.Free)
+	cleanupCowLinearMemory(t, mismatch)
 	mismatchBytes := mismatch.Reallocate(size)
 	copy(mismatchBytes, baseline)
 	mismatchBytes[len(mismatchBytes)-1] ^= 0xff
@@ -94,7 +109,7 @@ func TestCowLinearMemoryRejectsGrowthAfterAttach(t *testing.T) {
 
 	memory, err := newCowLinearMemory(maximum)
 	require.NoError(t, err)
-	t.Cleanup(memory.Free)
+	cleanupCowLinearMemory(t, memory)
 	initialBytes := memory.Reallocate(initial)
 	copy(initialBytes, preparedCowPattern(initial))
 	require.NoError(t, coordinator.PublishOrAttach(memory))
@@ -106,22 +121,76 @@ func TestCowLinearMemoryRejectsGrowthAfterAttach(t *testing.T) {
 	require.NoError(t, memory.Reset())
 }
 
-func TestCowLinearMemoryFreeIsIdempotent(t *testing.T) {
+func TestCowLinearMemoryFreeDefersUnmapUntilRelease(t *testing.T) {
 	memory, err := newCowLinearMemory(4096)
 	require.NoError(t, err)
-	require.Len(t, memory.Reallocate(4096), 4096)
+	view := memory.Reallocate(4096)
+	require.Len(t, view, 4096)
+	view[0] = 0x5a
 
 	require.NotPanics(t, memory.Free)
 	require.NotPanics(t, memory.Free)
 	require.Nil(t, memory.Bytes())
 	require.ErrorIs(t, memory.Reset(), ErrCowMemoryFreed)
+	// wazero can still touch MemoryInstance.Buffer while its native call engine
+	// unwinds after cancellation. Free invalidates logical use, but Release owns
+	// the later point where revoking the virtual address range is safe.
+	require.Equal(t, byte(0x5a), view[0])
+	require.NotEmpty(t, memory.region)
+
+	require.NoError(t, memory.Release())
+	require.NoError(t, memory.Release())
+	require.Nil(t, memory.region)
+}
+
+func TestCowMemoryAllocatorCloseReleasesEveryBacking(t *testing.T) {
+	allocator := newCowMemoryAllocator()
+	first := allocator.Allocate(4096, 4096).(*cowLinearMemory)
+	second := allocator.Allocate(4096, 4096).(*cowLinearMemory)
+	require.Len(t, first.Reallocate(4096), 4096)
+	require.Len(t, second.Reallocate(4096), 4096)
+	first.Free()
+	second.Free()
+
+	require.NoError(t, allocator.Close())
+	require.NoError(t, allocator.Close())
+	require.Nil(t, first.region)
+	require.Nil(t, second.region)
+}
+
+func TestCowWasmSupervisorShutdownReleasesBacking(t *testing.T) {
+	ctx := context.Background()
+	rt, compiled := compileEchoModule(t, ctx, cowSupervisorEchoWasm)
+	t.Cleanup(func() { _ = rt.Close(ctx) })
+	coordinator := newCowImageCoordinator()
+	t.Cleanup(func() { require.NoError(t, coordinator.Close()) })
+
+	supervisor := newWasmSupervisor(
+		rt,
+		compiled,
+		wazero.NewModuleConfig().WithName(""),
+		5*time.Second,
+		"cow",
+		newTestLogger(t),
+		coordinator,
+	)
+	require.NoError(t, supervisor.Start(ctx))
+	require.NotNil(t, supervisor.cowSupport)
+	backing, err := supervisor.cowSupport.allocator.backingFor(supervisor.mod.Memory())
+	require.NoError(t, err)
+	require.NotEmpty(t, backing.region)
+
+	require.NoError(t, supervisor.Shutdown(ctx))
+	require.NoError(t, supervisor.Shutdown(ctx))
+	require.Nil(t, backing.region)
+	require.Nil(t, supervisor.cowSupport)
 }
 
 func TestCowCoordinatorCloseRequiresNoLiveReset(t *testing.T) {
 	coordinator := newCowImageCoordinator()
 	memory, err := newCowLinearMemory(4096)
 	require.NoError(t, err)
-	t.Cleanup(memory.Free)
+	cleanupCowLinearMemory(t, memory)
 	copy(memory.Reallocate(4096), bytes.Repeat([]byte{0x5a}, 4096))
 	require.NoError(t, coordinator.PublishOrAttach(memory))
 	require.NoError(t, coordinator.Close())

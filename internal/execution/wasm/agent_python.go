@@ -77,21 +77,24 @@ func (slot *agentPythonModuleSlot) close(ctx context.Context) error {
 	if slot == nil {
 		return nil
 	}
-	var strategyErr, moduleErr, imageErr error
+	var moduleErr, strategyErr, supportErr, imageErr error
+	if slot.module != nil {
+		moduleErr = slot.module.Close(ctx)
+		slot.module = nil
+	}
 	if slot.strategy != nil {
 		strategyErr = slot.strategy.Close()
 		slot.strategy = nil
 	}
-	if slot.module != nil {
-		moduleErr = slot.module.Close(ctx)
-		slot.module = nil
+	if slot.cowSupport != nil {
+		supportErr = slot.cowSupport.Close()
+		slot.cowSupport = nil
 	}
 	if slot.cowImage != nil {
 		imageErr = slot.cowImage.Close()
 		slot.cowImage = nil
 	}
-	slot.cowSupport = nil
-	return errors.Join(strategyErr, moduleErr, imageErr)
+	return errors.Join(moduleErr, strategyErr, supportErr, imageErr)
 }
 
 func NewAgentPythonDispatcher(cfg Config, log *zap.Logger) *AgentPythonDispatcher {
@@ -435,14 +438,17 @@ func (d *AgentPythonDispatcher) Send(ctx context.Context, method string, params 
 	})
 
 	if d.cfg.PythonLifecycle == "snapshot" {
-		phaseStart = time.Now()
-		restoreErr := restoreAgentPythonSnapshot(slot)
-		d.observeAgentPythonPhase(AgentPythonPhaseObservation{
-			Phase: AgentPythonPhaseRestore, Purpose: AgentPythonPurposeRequest,
-			RequestID: requestID, SlotID: slot.id, Started: phaseStart,
-			MemoryBytes: uint64(slot.module.Memory().Size()), SnapshotSelected: slot.snapshotSelected,
-			Outcome: agentPythonPhaseOutcome(restoreErr), Err: restoreErr,
-		})
+		var restoreErr error
+		if callErr == nil {
+			phaseStart = time.Now()
+			restoreErr = restoreAgentPythonSnapshot(slot)
+			d.observeAgentPythonPhase(AgentPythonPhaseObservation{
+				Phase: AgentPythonPhaseRestore, Purpose: AgentPythonPurposeRequest,
+				RequestID: requestID, SlotID: slot.id, Started: phaseStart,
+				MemoryBytes: uint64(slot.module.Memory().Size()), SnapshotSelected: slot.snapshotSelected,
+				Outcome: agentPythonPhaseOutcome(restoreErr), Err: restoreErr,
+			})
+		}
 		if callErr != nil || restoreErr != nil {
 			diagnostic := slot.diagnostic.String()
 			_ = slot.close(context.Background())
@@ -656,6 +662,9 @@ func (d *AgentPythonDispatcher) newPreparedModuleSlot(
 		slotID,
 	)
 	if err != nil {
+		if cowSupport != nil {
+			_ = cowSupport.Close()
+		}
 		if cowImage != nil {
 			_ = cowImage.Close()
 		}

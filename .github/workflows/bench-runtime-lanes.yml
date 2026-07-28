@@ -2,24 +2,6 @@ name: Runtime Lane E2E Benchmarks
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - feat/wasm-backend
-    paths:
-      - .github/workflows/bench-runtime-lanes.yml
-      - demo/compose/**
-      - examples/eval-python/**
-      - examples/eval-pyodide/**
-      - experiments/qemu-fallback/**
-      - internal/execution/supervisor/**
-      - internal/execution/wasm/**
-      - scripts/benchmark-runtime-lanes.py
-      - scripts/benchmark-runtime-comparison-bridge.py
-      - scripts/tests/test_benchmark_runtime_lanes.py
-      - scripts/tests/test_benchmark_runtime_comparison_bridge.py
-      - scripts/tests/test_benchmark_qemu_rpc_hot_reset.py
-      - experiments/runtime-comparison-bridge/**
-      - build/python-reactor/**
 
 permissions:
   contents: read

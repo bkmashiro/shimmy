@@ -146,6 +146,14 @@ class BridgeContractTests(unittest.TestCase):
         self.assertNotIn("FUNCTION_WASM_SNAPSHOT_MODE", single_use)
         self.assertNotIn("FUNCTION_WASM_SNAPSHOT_MODE", fresh)
 
+    def test_runtime_lane_benchmark_is_manual_only(self):
+        workflow = (SCRIPT.parents[1] / ".github/workflows/bench-runtime-lanes.yml").read_text()
+        triggers = workflow.split("permissions:", 1)[0]
+        self.assertIn("workflow_dispatch:", triggers)
+        self.assertNotIn("push:", triggers)
+        self.assertNotIn("pull_request:", triggers)
+        self.assertNotIn("schedule:", triggers)
+
     def test_single_use_policy_evidence_requires_ready_hit_then_miss(self):
         evidence = module.validate_single_use_policy_evidence(
             {

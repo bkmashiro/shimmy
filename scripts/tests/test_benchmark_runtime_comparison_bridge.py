@@ -133,6 +133,19 @@ class BridgeContractTests(unittest.TestCase):
             self.assertIn(f"{target}:", compose)
             self.assertIn(target, workflow)
 
+        bridge_base = dockerfile.split("AS bridge-python-agent-base", 1)[1].split(
+            "AS bridge-python-agent-cow", 1
+        )[0]
+        self.assertNotIn("FUNCTION_WASM_SNAPSHOT_MODE", bridge_base)
+        single_use = dockerfile.split("AS bridge-python-agent-single-use", 1)[1].split(
+            "AS bridge-python-agent-fresh", 1
+        )[0]
+        fresh = dockerfile.split("AS bridge-python-agent-fresh", 1)[1].split(
+            "AS bridge-python-pyodide-persistent", 1
+        )[0]
+        self.assertNotIn("FUNCTION_WASM_SNAPSHOT_MODE", single_use)
+        self.assertNotIn("FUNCTION_WASM_SNAPSHOT_MODE", fresh)
+
     def test_single_use_policy_evidence_requires_ready_hit_then_miss(self):
         evidence = module.validate_single_use_policy_evidence(
             {

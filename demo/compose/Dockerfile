@@ -227,13 +227,33 @@ ENV FUNCTION_INTERFACE=rpc \
     FUNCTION_RPC_TRANSPORT=stdio \
     FUNCTION_COMMAND=/opt/evaluators/rpc_evaluator.py
 
-FROM python-reactor AS bridge-python-agent-base
+FROM busybox:1.37.0-musl AS bridge-python-agent-base
+COPY --from=shimmy-build /out/shimmy /shimmy
+COPY build/python-reactor/artifacts/ /opt/runtimes/agent-python/
 COPY experiments/runtime-comparison-bridge/python/eval.py /opt/evaluators/eval.py
+RUN echo "90c27951b2d8c2c7a8b42705b365cb4231c6dad207aad5260d55d2f9a85f1034  /opt/runtimes/agent-python/agent-python-runtime-numpy-core.wasm" | sha256sum -c -
+ENV LOG_LEVEL=error \
+    FUNCTION_INTERFACE=wasm \
+    FUNCTION_WASM_PROFILE=agent-python \
+    FUNCTION_WASM_MODULE=/opt/runtimes/agent-python/agent-python-runtime-numpy-core.wasm \
+    FUNCTION_WASM_MANIFEST=/opt/runtimes/agent-python/manifest.json \
+    FUNCTION_WASM_PYTHON_SCRIPT=/opt/evaluators/eval.py \
+    FUNCTION_WASM_MAX_MEMORY_PAGES=8192 \
+    FUNCTION_MAX_PROCS=1 \
+    FUNCTION_WORKER_SEND_TIMEOUT=180s \
+    FUNCTION_TIMEOUT=180s
+USER 65532:65532
+EXPOSE 8080
+ENTRYPOINT ["/shimmy"]
+CMD ["serve", "--host", "0.0.0.0", "--port", "8080"]
 
 FROM bridge-python-agent-base AS bridge-python-agent-cow
+ENV FUNCTION_WASM_PYTHON_LIFECYCLE=snapshot \
+    FUNCTION_WASM_SNAPSHOT_MODE=cow
 
 FROM bridge-python-agent-base AS bridge-python-agent-memcpy
-ENV FUNCTION_WASM_SNAPSHOT_MODE=memcpy
+ENV FUNCTION_WASM_PYTHON_LIFECYCLE=snapshot \
+    FUNCTION_WASM_SNAPSHOT_MODE=memcpy
 
 FROM bridge-python-agent-base AS bridge-python-agent-single-use
 ENV FUNCTION_WASM_PYTHON_LIFECYCLE=single-use \

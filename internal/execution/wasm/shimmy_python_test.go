@@ -115,12 +115,13 @@ def preview_function(response, answer, params=None):
 	require.NoError(t, err)
 	assert.Equal(t, "ValueError", failure["result"].(map[string]any)["error_type"])
 
-	binary128, err := dispatcher.Send(context.Background(), "eval", map[string]any{"response": "float128", "answer": "x"})
+	longdouble, err := dispatcher.Send(context.Background(), "eval", map[string]any{"response": "float128", "answer": "x"})
 	require.NoError(t, err)
-	value := binary128["result"].(map[string]any)
+	value := longdouble["result"].(map[string]any)
 	assert.Equal(t, float64(16), value["longdouble_itemsize"])
 	assert.GreaterOrEqual(t, value["longdouble_nmant"].(float64), float64(112))
-	assert.Equal(t, true, value["preserves_extra_precision"])
+	assert.Greater(t, value["longdouble_nmant"].(float64), value["double_nmant"].(float64))
+	assert.Equal(t, false, value["preserves_extra_precision"], "WASI longdouble string parsing is binary64 fallback")
 	assert.Equal(t, true, value["narrows_to_double_one"])
 	assert.Equal(t, true, value["epsilon_is_narrower"])
 }

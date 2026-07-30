@@ -4,11 +4,11 @@
 
 **Archived performance evidence; current mechanism ancestry.** This report remains
 an auditable record of the July 2026 generic-WASM and old
-`py_init/py_prepare` artifact. Agent Python v1 now reconnects the same strategy
+`py_init/py_prepare` artifact. Shimmy Python v1 now reconnects the same strategy
 implementations around `_initialize/runtime_init/runtime_prepare/execute`, with
 one COW image per slot rather than a dispatcher-shared image. The historical
 latencies below are not current `numpy-core` performance results; current claims
-require the exact Linux Agent Python COW E2E and runtime-lane evidence.
+require the exact Linux Shimmy Python COW E2E and runtime-lane evidence.
 
 This document records legacy correctness and mechanism evidence. It is not a
 production performance claim and does not justify an automatic/default strategy

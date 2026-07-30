@@ -68,14 +68,14 @@ evaluation functions look like.
 
 ## Python / NumPy demos
 
-Agent Python runs cross-platform under wazero and uses a fresh instance per
+Shimmy Python runs cross-platform under wazero and uses a fresh instance per
 request. The pinned NumPy bundle is available directly from the repository:
 
 ```bash
 FUNCTION_INTERFACE=wasm \
-FUNCTION_WASM_PROFILE=agent-python \
-FUNCTION_WASM_MODULE=$PWD/build/python-reactor/artifacts/agent-python-runtime-numpy-core.wasm \
-FUNCTION_WASM_MANIFEST=$PWD/build/python-reactor/artifacts/manifest.json \
+FUNCTION_WASM_PROFILE=shimmy-python \
+FUNCTION_WASM_MODULE=$PWD/dist/shimmy-python/numpy-core/shimmy-python-runtime-numpy-core.wasm \
+FUNCTION_WASM_MANIFEST=$PWD/dist/shimmy-python/numpy-core/manifest.json \
 FUNCTION_WASM_PYTHON_SCRIPT=$PWD/examples/eval-numpy/eval.py \
 FUNCTION_WASM_MAX_MEMORY_PAGES=8192 \
 FUNCTION_MAX_PROCS=1 \
@@ -97,8 +97,8 @@ Good real Lambda Feedback candidates for Python/WASM demo scripts:
 
 | Source repo | Why it is useful | WASM path |
 |---|---|---|
-| `lambda-feedback/IsSimilar` | numeric tolerance grading using NumPy scalar helpers | Agent Python candidate; rerun fixture E2E |
-| `lambda-feedback/ArrayEqual` | array/matrix comparison using `numpy.allclose` | Agent Python candidate; rerun fixture E2E |
+| `lambda-feedback/IsSimilar` | numeric tolerance grading using NumPy scalar helpers | Shimmy Python candidate; rerun fixture E2E |
+| `lambda-feedback/ArrayEqual` | array/matrix comparison using `numpy.allclose` | Shimmy Python candidate; rerun fixture E2E |
 | `lambda-feedback/SymbolicEqual` | symbolic algebra with SymPy | Pyodide; SymPy is not in the Agent artifact |
 | `lambda-feedback/compareBoolean` | boolean expression parsing + SymPy logic | Pyodide; no compatibility polyfill |
 | `lambda-feedback/evaluatePython` | code runner / sandbox story | separate security demo; not a pure evaluator port |

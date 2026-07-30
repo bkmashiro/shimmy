@@ -22,7 +22,7 @@ Pyodide's process is persistent, but legacy script mode executes the evaluator
 in a fresh namespace for every request; the counter evidence therefore qualifies
 clean Python application state, not linear-memory reset. The removed legacy
 `ReactorPythonDispatcher` is historical evidence, not a current competitor;
-`python-reactor` now selects `AgentPythonDispatcher`.
+`python-reactor` now selects `ShimmyPythonDispatcher`.
 
 ## Workloads
 

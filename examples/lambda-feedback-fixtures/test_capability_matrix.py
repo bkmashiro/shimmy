@@ -25,13 +25,13 @@ def test_capability_matrix_schema_and_fixture_paths() -> None:
 
     for row in rows:
         assert row["status"] in {
-            "agent-python-qualified",
-            "agent-python-candidate",
+            "shimmy-python-qualified",
+            "shimmy-python-candidate",
             "not-qualified",
             "pyodide-only",
             "out-of-scope",
         }
-        assert isinstance(row["agent_python_bundle"], bool)
+        assert isinstance(row["shimmy_python_bundle"], bool)
         assert isinstance(row["pyodide_package"], bool)
         assert isinstance(row["requires_pure_python_deps"], list)
         assert isinstance(row["requires_agent_artifact_deps"], list)
@@ -39,22 +39,22 @@ def test_capability_matrix_schema_and_fixture_paths() -> None:
         assert isinstance(row["verified_probes"], list)
 
         fixture_path = ROOT / row["fixture"]
-        if row["agent_python_bundle"]:
-            assert fixture_path.exists(), f"Agent Python fixture missing: {fixture_path}"
-        if row["status"] == "agent-python-qualified":
-            assert row["agent_python_bundle"]
+        if row["shimmy_python_bundle"]:
+            assert fixture_path.exists(), f"Shimmy Python fixture missing: {fixture_path}"
+        if row["status"] == "shimmy-python-qualified":
+            assert row["shimmy_python_bundle"]
             assert row["verified_probes"], f"qualified fixture lacks probes: {row['fixture']}"
             assert not row["unqualified_reasons"]
         else:
             assert row["unqualified_reasons"], f"unqualified row lacks reasons: {row['fixture']}"
 
 
-def test_capability_matrix_matches_agent_python_qualification() -> None:
+def test_capability_matrix_matches_shimmy_python_qualification() -> None:
     rows = {row["fixture"]: row for row in json.loads(MATRIX.read_text())}
 
-    assert rows["boilerplate-python"]["status"] == "agent-python-qualified"
-    assert rows["array-equal"]["status"] == "agent-python-candidate"
-    assert rows["is-similar"]["status"] == "agent-python-candidate"
+    assert rows["boilerplate-python"]["status"] == "shimmy-python-qualified"
+    assert rows["array-equal"]["status"] == "shimmy-python-candidate"
+    assert rows["is-similar"]["status"] == "shimmy-python-candidate"
     assert rows["compare-boolean"]["status"] == "not-qualified"
     assert rows["symbolic-equal"]["status"] == "not-qualified"
     assert rows["short-text-answer"]["status"] == "pyodide-only"

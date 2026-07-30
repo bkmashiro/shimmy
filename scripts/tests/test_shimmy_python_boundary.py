@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pathlib
+import subprocess
 import unittest
 
 
@@ -8,6 +9,45 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 class ShimmyPythonBoundaryTests(unittest.TestCase):
+
+    def test_no_legacy_runtime_identity_in_active_tracked_text(self) -> None:
+        tracked = subprocess.check_output(
+            ["git", "ls-files", "-z"], cwd=ROOT
+        ).decode().split("\0")
+        allowed = {
+            "build/python-reactor/producer/contract/shimmy-python-runtime-v1.json",
+            "build/python-reactor/producer/tools/verify_sources_lock.py",
+        }
+        forbidden = (
+            "agent-python-runtime",
+            "Agent Python",
+            "agent-python",
+            "agent_python",
+            "AgentPython",
+            "AGENT_PYTHON",
+            "agent_runtime_v1",
+            "build/python-reactor/artifacts",
+        )
+        offenders: list[str] = []
+        for relative in tracked:
+            if not relative or relative in allowed:
+                continue
+            if relative.startswith((
+                "docs/archive/",
+                "scripts/tests/",
+                "build/python-reactor/producer/tests/",
+            )):
+                continue
+            path = ROOT / relative
+            try:
+                text = path.read_text()
+            except (UnicodeDecodeError, IsADirectoryError):
+                continue
+            for marker in forbidden:
+                if marker in text:
+                    offenders.append(f"{relative}: {marker}")
+        self.assertEqual([], offenders)
+
     def test_no_tracked_python_runtime_bundle(self) -> None:
         self.assertFalse((ROOT / "build/python-reactor/artifacts").exists())
         attributes = ROOT / ".gitattributes"

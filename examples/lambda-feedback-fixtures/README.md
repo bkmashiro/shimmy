@@ -6,10 +6,10 @@ copied from `.demo-lambda-sources` so tests can run without network access.
 ## Capability matrix
 
 The machine-readable matrix lives in [`capability-matrix.json`](./capability-matrix.json).
-It records historical fixtures. Current Agent Python qualification is narrower
+It records historical fixtures. Current Shimmy Python qualification is narrower
 than the old reactor matrix:
 
-| Fixture | Agent Python status | Requirements | Pyodide stance |
+| Fixture | Shimmy Python status | Requirements | Pyodide stance |
 |---|---|---|---|
 | `boilerplate-python` | package bundle supported | evaluator + adapter only | supported |
 | `array-equal` | candidate | NumPy core is present; fixture E2E must be rerun before qualification | supported |
@@ -20,7 +20,7 @@ than the old reactor matrix:
 
 Rules of thumb:
 - Pure Python evaluator code and dependencies can be bundled with `tools/lf-bundle-python --include-root`.
-- Native/WASI dependencies must already be present in the pinned Agent Python artifact.
+- Native/WASI dependencies must already be present in the pinned Shimmy Python artifact.
 - Heavy scientific/data/rendering stacks remain Pyodide-only unless they become first-class artifact requirements.
 
 ## Fixtures
@@ -43,7 +43,7 @@ Rules of thumb:
   - Relative imports inside evaluator packages (e.g. `from .parse import ...`).
   - Rich parser/AST helper modules needed at runtime.
   - Preview/eval flow with real parse-side error handling (`FeedbackException`).
-  - Historical parser coverage only; the current Agent Python path does not inject
+  - Historical parser coverage only; the current Shimmy Python path does not inject
     the deleted `ctypes` polyfill and has not qualified this fixture.
 
 ### `array-equal`
@@ -79,4 +79,4 @@ not mounted.
 ## Notes
 - Network-dependent and/or non-runtime artifacts were intentionally omitted: `.git/`, CI workflow files,
   Dockerfiles, tests, and unrelated docs.
-- `scipy` and very heavy/data-bearing dependencies remain out of Agent Python scope; use Pyodide for those.
+- `scipy` and very heavy/data-bearing dependencies remain out of Shimmy Python scope; use Pyodide for those.

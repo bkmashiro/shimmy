@@ -207,13 +207,13 @@ Do not model every source language as a peer `FUNCTION_INTERFACE`. The cleaner t
 | Source language | Build/deployment recipe | Runtime path | Notes |
 |----------|-------------|---------|-------|
 | Rust / C / C++ / Go | compile to `wasm32-wasip1` with a Shimmy ABI wrapper | `FUNCTION_INTERFACE=wasm` | Generic WASM ABI; snapshot/restore in wazero pool. |
-| Python (pure / NumPy core) | Agent Python Runtime v1 + script/package bundle | `FUNCTION_INTERFACE=wasm` + `FUNCTION_WASM_PROFILE=agent-python` | Fresh single-use instance per request; `python-reactor` and `reactor-python` are compatibility aliases. |
+| Python (pure / NumPy core) | Shimmy Python Runtime v1 + script/package bundle | `FUNCTION_INTERFACE=wasm` + `FUNCTION_WASM_PROFILE=shimmy-python` | Fresh single-use instance per request; `python-reactor` and `reactor-python` are compatibility aliases. |
 | Python (SciPy/Pandas/heavy packages) | Pyodide/Emscripten runner | `FUNCTION_INTERFACE=pyodide` | Compatibility lane; slowest; not the same in-process wazero pool. |
 | JavaScript | Javy / QuickJS → WASI + ABI adapter | future WASM profile; current demo uses RPC subprocess | JS compiled to WASM, but generic in-process ABI integration is not complete. |
 
 Routing must remain explicit at deployment time. Do not infer runtime from imports, `requirements.txt`, or source file extension. See `docs/wasm-backend-model.md` for the model and `docs/deployment-recipes.md` for copy-pasteable `FUNCTION_*` recipes.
 
-The active Agent Python Runtime bundle is produced in `bkmashiro/agent-python-runtime` and pinned under `build/python-reactor/artifacts/` with its manifest, checksums, SBOM, notices, and LFS Wasm object. Shimmy owns the Host adapter and final consumer gates.
+The active Shimmy Python Runtime bundle is built from `build/python-reactor/producer/` by this repository's manual Artifact CI. Generated bundles live under `dist/shimmy-python/`, are verified against their manifest and checksums, and are not tracked as LFS objects.
 
 ---
 

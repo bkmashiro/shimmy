@@ -52,14 +52,14 @@ CMD ["serve", "--host", "0.0.0.0", "--port", "8080"]
 
 FROM busybox:1.37.0-musl AS python-reactor
 COPY --from=shimmy-build /out/shimmy /shimmy
-COPY build/python-reactor/artifacts/ /opt/runtimes/agent-python/
+COPY dist/shimmy-python/numpy-core/ /opt/runtimes/shimmy-python/
 COPY examples/eval-python/eval.py /opt/evaluators/eval.py
-RUN echo "90c27951b2d8c2c7a8b42705b365cb4231c6dad207aad5260d55d2f9a85f1034  /opt/runtimes/agent-python/agent-python-runtime-numpy-core.wasm" | sha256sum -c -
+RUN cd /opt/runtimes/shimmy-python && sha256sum -c SHA256SUMS
 ENV LOG_LEVEL=error \
     FUNCTION_INTERFACE=wasm \
-    FUNCTION_WASM_PROFILE=agent-python \
-    FUNCTION_WASM_MODULE=/opt/runtimes/agent-python/agent-python-runtime-numpy-core.wasm \
-    FUNCTION_WASM_MANIFEST=/opt/runtimes/agent-python/manifest.json \
+    FUNCTION_WASM_PROFILE=shimmy-python \
+    FUNCTION_WASM_MODULE=/opt/runtimes/shimmy-python/shimmy-python-runtime-numpy-core.wasm \
+    FUNCTION_WASM_MANIFEST=/opt/runtimes/shimmy-python/manifest.json \
     FUNCTION_WASM_PYTHON_SCRIPT=/opt/evaluators/eval.py \
     FUNCTION_WASM_PYTHON_LIFECYCLE=snapshot \
     FUNCTION_WASM_SNAPSHOT_MODE=cow \
@@ -227,16 +227,16 @@ ENV FUNCTION_INTERFACE=rpc \
     FUNCTION_RPC_TRANSPORT=stdio \
     FUNCTION_COMMAND=/opt/evaluators/rpc_evaluator.py
 
-FROM busybox:1.37.0-musl AS bridge-python-agent-base
+FROM busybox:1.37.0-musl AS bridge-python-shimmy-base
 COPY --from=shimmy-build /out/shimmy /shimmy
-COPY build/python-reactor/artifacts/ /opt/runtimes/agent-python/
+COPY dist/shimmy-python/numpy-core/ /opt/runtimes/shimmy-python/
 COPY experiments/runtime-comparison-bridge/python/eval.py /opt/evaluators/eval.py
-RUN echo "90c27951b2d8c2c7a8b42705b365cb4231c6dad207aad5260d55d2f9a85f1034  /opt/runtimes/agent-python/agent-python-runtime-numpy-core.wasm" | sha256sum -c -
+RUN cd /opt/runtimes/shimmy-python && sha256sum -c SHA256SUMS
 ENV LOG_LEVEL=error \
     FUNCTION_INTERFACE=wasm \
-    FUNCTION_WASM_PROFILE=agent-python \
-    FUNCTION_WASM_MODULE=/opt/runtimes/agent-python/agent-python-runtime-numpy-core.wasm \
-    FUNCTION_WASM_MANIFEST=/opt/runtimes/agent-python/manifest.json \
+    FUNCTION_WASM_PROFILE=shimmy-python \
+    FUNCTION_WASM_MODULE=/opt/runtimes/shimmy-python/shimmy-python-runtime-numpy-core.wasm \
+    FUNCTION_WASM_MANIFEST=/opt/runtimes/shimmy-python/manifest.json \
     FUNCTION_WASM_PYTHON_SCRIPT=/opt/evaluators/eval.py \
     FUNCTION_WASM_MAX_MEMORY_PAGES=8192 \
     FUNCTION_MAX_PROCS=1 \
@@ -247,19 +247,19 @@ EXPOSE 8080
 ENTRYPOINT ["/shimmy"]
 CMD ["serve", "--host", "0.0.0.0", "--port", "8080"]
 
-FROM bridge-python-agent-base AS bridge-python-agent-cow
+FROM bridge-python-shimmy-base AS bridge-python-shimmy-cow
 ENV FUNCTION_WASM_PYTHON_LIFECYCLE=snapshot \
     FUNCTION_WASM_SNAPSHOT_MODE=cow
 
-FROM bridge-python-agent-base AS bridge-python-agent-memcpy
+FROM bridge-python-shimmy-base AS bridge-python-shimmy-memcpy
 ENV FUNCTION_WASM_PYTHON_LIFECYCLE=snapshot \
     FUNCTION_WASM_SNAPSHOT_MODE=memcpy
 
-FROM bridge-python-agent-base AS bridge-python-agent-single-use
+FROM bridge-python-shimmy-base AS bridge-python-shimmy-single-use
 ENV FUNCTION_WASM_PYTHON_LIFECYCLE=single-use \
     FUNCTION_WASM_PYTHON_PREPARED_CAPACITY=1
 
-FROM bridge-python-agent-base AS bridge-python-agent-fresh
+FROM bridge-python-shimmy-base AS bridge-python-shimmy-fresh
 ENV FUNCTION_WASM_PYTHON_LIFECYCLE=fresh
 
 FROM pyodide-scipy AS bridge-python-pyodide-persistent

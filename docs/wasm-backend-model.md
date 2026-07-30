@@ -13,7 +13,7 @@ infer a runtime from imports, requirements, or file extensions.
 
 | Tier | Paths | Positioning |
 |---|---|---|
-| Primary | Generic WASM; Agent Python | In-process wazero execution. |
+| Primary | Generic WASM; Shimmy Python | In-process wazero execution. |
 | Migration | `file`; `rpc`; Pyodide | Existing workers and heavy Python compatibility. |
 | Terminal fallback | DynamoRIO; QEMU | Explicit wrappers around `file`/`rpc`, never automatic retries. |
 | Generic memory options | COW; UFFD; soft-dirty; mprotect | Explicit generic-WASM experiments; full copy remains default. |
@@ -26,7 +26,7 @@ infer a runtime from imports, requirements, or file extensions.
 | `rpc` | Persistent subprocess with JSON-RPC transport. |
 | `file` | Subprocess-per-request file protocol. |
 | `pyodide` | Node/Pyodide compatibility lane for heavy packages. |
-| `reactor-python` | Legacy configuration alias that routes to Agent Python. |
+| `reactor-python` | Legacy configuration alias that routes to Shimmy Python. |
 | `python-wasm` | Independent older resident Python/WASM comparison path. |
 
 ## WASM profiles
@@ -43,17 +43,17 @@ The guest directly exports Shimmy's `alloc + evaluate` ABI. The source language
 is irrelevant at runtime. Generic modules can opt into the existing snapshot
 strategies.
 
-### Agent Python
+### Shimmy Python
 
 ```bash
 FUNCTION_INTERFACE=wasm
-FUNCTION_WASM_PROFILE=agent-python
-FUNCTION_WASM_MODULE=/path/to/agent-python-runtime-numpy-core.wasm
+FUNCTION_WASM_PROFILE=shimmy-python
+FUNCTION_WASM_MODULE=/path/to/shimmy-python-runtime-numpy-core.wasm
 FUNCTION_WASM_MANIFEST=/path/to/manifest.json
 FUNCTION_WASM_PYTHON_SCRIPT=/path/to/eval.py
 ```
 
-The profile consumes Agent Python Runtime ABI v1:
+The profile consumes Shimmy Python Runtime ABI v1:
 
 ```text
 _initialize
@@ -61,7 +61,7 @@ runtime_init
 runtime_prepare
 alloc / dealloc
 execute
-agent_runtime_v1.host_call
+no custom Host import
 ```
 
 The artifact and manifest are verified before compilation. Shimmy compiles once,
@@ -70,18 +70,18 @@ are closed, never restored or returned to a pool. Snapshot/COW configuration is
 rejected for this profile.
 
 `python-reactor`, `reactor-python`, and `FUNCTION_INTERFACE=reactor-python` are
-configuration aliases for Agent Python. They do not activate the deleted legacy
+configuration aliases for Shimmy Python. They do not activate the deleted legacy
 loader.
 
 ## Memory-strategy boundary
 
 Generic snapshot modes cover WASM linear memory only. They do not reset globals,
 tables, Host/WASI state, descriptors, clocks, entropy, Go buffers, or external
-effects. Generic Linux COW uses a dispatcher-scoped sealed image; Agent Python
+effects. Generic Linux COW uses a dispatcher-scoped sealed image; Shimmy Python
 uses one sealed image per independently randomized prepared slot. Both use
 fixed-size private mappings and neither is whole-instance cloning.
 
-Agent Python exposes three explicit Host-owned lifecycle policies: post-prepare
+Shimmy Python exposes three explicit Host-owned lifecycle policies: post-prepare
 linear-memory `snapshot` restore (default), never-served `single-use` prepared
 candidates, and synchronous `fresh` instances. Timeout, trap, memory-size drift,
 or restore failure always discards the slot. These policies do not widen a
@@ -94,7 +94,7 @@ linear-memory claim into whole-instance reset.
 | Go | `GOOS=wasip1 GOARCH=wasm go build` plus Shimmy ABI | Generic WASM. |
 | Rust | `cargo build --target wasm32-wasip1` plus ABI wrapper | Generic WASM. |
 | C/C++ | WASI SDK targeting `wasm32-wasip1` | Generic WASM. |
-| Plain Python / NumPy core | Pinned Agent Python artifact plus evaluator script or startup bundle | Agent Python profile. |
+| Plain Python / NumPy core | Pinned Shimmy Python artifact plus evaluator script or startup bundle | Shimmy Python profile. |
 | SciPy/heavy Python | Pyodide package ecosystem | Pyodide compatibility lane. |
 | JavaScript | Javy/QuickJS-to-WASI plus an explicit ABI adapter | Future generic integration; current demo remains RPC-style. |
 

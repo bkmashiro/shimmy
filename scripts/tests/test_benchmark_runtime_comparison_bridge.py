@@ -102,10 +102,10 @@ class BridgeContractTests(unittest.TestCase):
 
     def test_exact_python_strategy_lanes_are_declared(self):
         expected = {
-            "python-agent-cow": ("snapshot", "linear-memory-cow"),
-            "python-agent-memcpy": ("snapshot", "linear-memory-memcpy"),
-            "python-agent-single-use": ("single-use", "single-use-prepared"),
-            "python-agent-fresh": ("fresh", "fresh-module"),
+            "python-shimmy-cow": ("snapshot", "linear-memory-cow"),
+            "python-shimmy-memcpy": ("snapshot", "linear-memory-memcpy"),
+            "python-shimmy-single-use": ("single-use", "single-use-prepared"),
+            "python-shimmy-fresh": ("fresh", "fresh-module"),
         }
         for lane_name, (lifecycle, reset_mode) in expected.items():
             lane = module.LANES[lane_name]
@@ -120,7 +120,7 @@ class BridgeContractTests(unittest.TestCase):
                 reset_mode,
             )
 
-    def test_agent_strategy_images_compose_and_workflow_are_wired(self):
+    def test_shimmy_strategy_images_are_compose_wired_not_qemu_ci(self) -> None:
         repo_root = SCRIPT.parents[1]
         dockerfile = (repo_root / "demo" / "compose" / "Dockerfile").read_text()
         compose = (
@@ -128,19 +128,19 @@ class BridgeContractTests(unittest.TestCase):
         ).read_text()
         workflow = (repo_root / ".github" / "workflows" / "bench-runtime-lanes.yml").read_text()
         for suffix in ("cow", "memcpy", "single-use", "fresh"):
-            target = f"bridge-python-agent-{suffix}"
+            target = f"bridge-python-shimmy-{suffix}"
             self.assertIn(f"AS {target}", dockerfile)
             self.assertIn(f"{target}:", compose)
-            self.assertIn(target, workflow)
+            self.assertNotIn(target, workflow)
 
-        bridge_base = dockerfile.split("AS bridge-python-agent-base", 1)[1].split(
-            "AS bridge-python-agent-cow", 1
+        bridge_base = dockerfile.split("AS bridge-python-shimmy-base", 1)[1].split(
+            "AS bridge-python-shimmy-cow", 1
         )[0]
         self.assertNotIn("FUNCTION_WASM_SNAPSHOT_MODE", bridge_base)
-        single_use = dockerfile.split("AS bridge-python-agent-single-use", 1)[1].split(
-            "AS bridge-python-agent-fresh", 1
+        single_use = dockerfile.split("AS bridge-python-shimmy-single-use", 1)[1].split(
+            "AS bridge-python-shimmy-fresh", 1
         )[0]
-        fresh = dockerfile.split("AS bridge-python-agent-fresh", 1)[1].split(
+        fresh = dockerfile.split("AS bridge-python-shimmy-fresh", 1)[1].split(
             "AS bridge-python-pyodide-persistent", 1
         )[0]
         self.assertNotIn("FUNCTION_WASM_SNAPSHOT_MODE", single_use)

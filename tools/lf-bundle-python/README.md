@@ -16,7 +16,7 @@ The generated file embeds:
 - the minimal `lf_toolkit/` shim from `--adapter-root`.
 
 It uses an in-memory `sys.meta_path` loader, so the package root is not required
-inside the guest at request time. The Agent Python profile executes the generated
+inside the guest at request time. The Shimmy Python profile executes the generated
 script through `runtime_prepare` in each fresh instance.
 
 ## Build a bundle
@@ -30,13 +30,13 @@ python3 tools/lf-bundle-python/lf_bundle_python.py \
   --out /tmp/boilerplate.bundle.py
 ```
 
-Run it with the pinned Agent Python Runtime bundle:
+Run it with the pinned Shimmy Python Runtime bundle:
 
 ```bash
 FUNCTION_INTERFACE=wasm \
-FUNCTION_WASM_PROFILE=agent-python \
-FUNCTION_WASM_MODULE=build/python-reactor/artifacts/agent-python-runtime-numpy-core.wasm \
-FUNCTION_WASM_MANIFEST=build/python-reactor/artifacts/manifest.json \
+FUNCTION_WASM_PROFILE=shimmy-python \
+FUNCTION_WASM_MODULE=dist/shimmy-python/numpy-core/shimmy-python-runtime-numpy-core.wasm \
+FUNCTION_WASM_MANIFEST=dist/shimmy-python/numpy-core/manifest.json \
 FUNCTION_WASM_PYTHON_SCRIPT=/tmp/boilerplate.bundle.py \
 ./shimmy serve
 ```
@@ -47,9 +47,9 @@ Shimmy can invoke the bundler once at process startup:
 
 ```bash
 FUNCTION_INTERFACE=wasm \
-FUNCTION_WASM_PROFILE=agent-python \
-FUNCTION_WASM_MODULE=build/python-reactor/artifacts/agent-python-runtime-numpy-core.wasm \
-FUNCTION_WASM_MANIFEST=build/python-reactor/artifacts/manifest.json \
+FUNCTION_WASM_PROFILE=shimmy-python \
+FUNCTION_WASM_MODULE=dist/shimmy-python/numpy-core/shimmy-python-runtime-numpy-core.wasm \
+FUNCTION_WASM_MANIFEST=dist/shimmy-python/numpy-core/manifest.json \
 FUNCTION_LF_ROOT=examples/lambda-feedback-fixtures/boilerplate-python \
 ./shimmy serve
 ```
@@ -103,7 +103,7 @@ python3 tools/lf-bundle-python/lf_bundle_python.py \
   --out /tmp/compare-boolean.bundle.py
 ```
 
-The Agent Python profile exposes no Host filesystem paths to the guest. Shimmy
+The Shimmy Python profile exposes no Host filesystem paths to the guest. Shimmy
 therefore rejects `FUNCTION_LF_SYS_PATH` and `sys_path` in `FUNCTION_LF_CONFIG`.
 Use `FUNCTION_LF_INCLUDE_ROOTS` so dependencies are embedded in the generated
 script before sandbox startup.

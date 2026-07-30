@@ -1,4 +1,4 @@
-"""Shared pure-Python fixture for native CPython, Agent Python, and Pyodide."""
+"""Shared pure-Python fixture for native CPython, Shimmy Python, and Pyodide."""
 
 MAX_ITERATIONS = 5_000_000
 _MASK = (1 << 64) - 1

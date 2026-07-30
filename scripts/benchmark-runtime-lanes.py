@@ -47,12 +47,12 @@ LANES: Dict[str, LaneSpec] = {
         initialization_placement="module compilation and pool startup occur before HTTP readiness",
         resource_limit="1 CPU / 256 MiB",
     ),
-    "agent-python-cow": LaneSpec(
+    "shimmy-python-cow": LaneSpec(
         service="python-reactor",
         port=18082,
         payload={"response": "3.14159", "answer": "3.1416", "params": {"tolerance": 0.001}},
         workload="Python numeric-tolerance evaluator consumed through the pinned external runtime artifact",
-        lifecycle="persistent Shimmy server; one prepared Agent Python slot restored from its per-slot COW image after every request",
+        lifecycle="persistent Shimmy server; one prepared Shimmy Python slot restored from its per-slot COW image after every request",
         initialization_placement="module compilation, _initialize, runtime_init, runtime_prepare, headroom reservation, and COW snapshot occur before HTTP readiness",
         resource_limit="2 CPUs / 2 GiB",
     ),
@@ -122,11 +122,11 @@ def assert_lane_response(lane: str, response: Dict[str, Any]) -> None:
         if result.get("snapshot_isolation_ok") is not True:
             raise ValueError("generic snapshot_isolation_ok must be true")
         return
-    if lane == "agent-python-cow":
+    if lane == "shimmy-python-cow":
         if result.get("is_correct") is not True:
-            raise ValueError("agent-python-cow is_correct must be true")
+            raise ValueError("shimmy-python-cow is_correct must be true")
         if result.get("guest_invocation_count") != 1:
-            raise ValueError("agent-python-cow guest_invocation_count must be 1")
+            raise ValueError("shimmy-python-cow guest_invocation_count must be 1")
         return
     if lane == "dbi-lean":
         if result.get("is_correct") is not True:
@@ -144,7 +144,7 @@ def assert_lane_response(lane: str, response: Dict[str, Any]) -> None:
     raise ValueError(f"unknown lane: {lane}")
 
 
-def assert_agent_python_cow_healthcheck(response: Dict[str, Any]) -> Dict[str, Any]:
+def assert_shimmy_python_cow_healthcheck(response: Dict[str, Any]) -> Dict[str, Any]:
     result = result_object(response)
     expected = {
         "lifecycle": "snapshot",
@@ -154,7 +154,7 @@ def assert_agent_python_cow_healthcheck(response: Dict[str, Any]) -> Dict[str, A
     for field, value in expected.items():
         if result.get(field) != value:
             raise ValueError(
-                f"agent-python-cow healthcheck {field} must be {value!r}, "
+                f"shimmy-python-cow healthcheck {field} must be {value!r}, "
                 f"got {result.get(field)!r}"
             )
     return expected
@@ -507,14 +507,14 @@ def benchmark_lane(
         ready_ns = time.perf_counter_ns() - started
 
         lifecycle_evidence = None
-        if lane == "agent-python-cow":
+        if lane == "shimmy-python-cow":
             _, health_response = timed_request(
                 base + "/",
                 {},
                 request_timeout,
                 command="healthcheck",
             )
-            lifecycle_evidence = assert_agent_python_cow_healthcheck(health_response)
+            lifecycle_evidence = assert_shimmy_python_cow_healthcheck(health_response)
 
         first_ns, response = timed_request(base + "/", spec.payload, request_timeout)
         assert_lane_response(lane, response)

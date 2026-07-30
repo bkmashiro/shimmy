@@ -203,9 +203,9 @@ Feedback layout uses the WASM backend plus an explicit profile:
 
 ```bash
 FUNCTION_INTERFACE=wasm
-FUNCTION_WASM_PROFILE=agent-python
-FUNCTION_WASM_MODULE=/opt/agent-python/agent-python-runtime-numpy-core.wasm
-FUNCTION_WASM_MANIFEST=/opt/agent-python/manifest.json
+FUNCTION_WASM_PROFILE=shimmy-python
+FUNCTION_WASM_MODULE=/opt/shimmy-python/shimmy-python-runtime-numpy-core.wasm
+FUNCTION_WASM_MANIFEST=/opt/shimmy-python/manifest.json
 FUNCTION_LF_ROOT=/var/task
 ```
 
@@ -223,9 +223,9 @@ For more complex packages, keep the environment small with one JSON config file:
 
 ```bash
 FUNCTION_INTERFACE=wasm
-FUNCTION_WASM_PROFILE=agent-python
-FUNCTION_WASM_MODULE=/opt/agent-python/agent-python-runtime-numpy-core.wasm
-FUNCTION_WASM_MANIFEST=/opt/agent-python/manifest.json
+FUNCTION_WASM_PROFILE=shimmy-python
+FUNCTION_WASM_MODULE=/opt/shimmy-python/shimmy-python-runtime-numpy-core.wasm
+FUNCTION_WASM_MANIFEST=/opt/shimmy-python/manifest.json
 FUNCTION_LF_CONFIG=/var/task/shimmy-lf.json
 ```
 
@@ -288,8 +288,8 @@ scripts/demo-wasm.sh
   evaluators should use Pyodide today.
 - Do not claim automatic import/requirements routing. Runtime selection is
   explicit via `FUNCTION_INTERFACE`.
-- Agent Python runs through the same wazero adapter on macOS and Linux; do not
-  substitute Pyodide or a native Python process and label it Agent Python.
+- Shimmy Python runs through the same wazero adapter on macOS and Linux; do not
+  substitute Pyodide or a native Python process and label it Shimmy Python.
 - The checked-in bundle is acceptance evidence, not proof of a deployed image.
 - Do not claim zpoline/soft-dirty as the Lambda path. Current probe results favor
   `userfaultfd` write-protect support over soft-dirty/zpoline assumptions.

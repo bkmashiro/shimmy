@@ -71,7 +71,7 @@ func main() {
 	startContext, startCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	if err := dispatcher.Start(startContext); err != nil {
 		startCancel()
-		fmt.Fprintf(os.Stderr, "error: starting Agent Python Runtime: %v\n", err)
+		fmt.Fprintf(os.Stderr, "error: starting Shimmy Python Runtime: %v\n", err)
 		os.Exit(1)
 	}
 	startCancel()

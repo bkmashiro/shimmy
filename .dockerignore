@@ -6,8 +6,11 @@ bin
 build/*
 !build/python-reactor/
 build/python-reactor/*
-!build/python-reactor/artifacts/
-!build/python-reactor/artifacts/**
+dist/*
+!dist/shimmy-python/
+dist/shimmy-python/*
+!dist/shimmy-python/numpy-core/
+!dist/shimmy-python/numpy-core/**
 coverage.out
 lcov.info
 *.test

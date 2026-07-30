@@ -82,12 +82,12 @@ services:
       retries: 30
       start_period: 10s
 
-  bridge-python-agent-cow:
+  bridge-python-shimmy-cow:
     <<: *common
-    image: "${SHIMMY_BRIDGE_IMAGE_PREFIX:-shimmy-bridge}-python-agent-cow:${SHIMMY_BRIDGE_TAG:-dev}"
+    image: "${SHIMMY_BRIDGE_IMAGE_PREFIX:-shimmy-bridge}-python-shimmy-cow:${SHIMMY_BRIDGE_TAG:-dev}"
     build:
       <<: *build
-      target: bridge-python-agent-cow
+      target: bridge-python-shimmy-cow
     tmpfs:
       - /tmp:size=256m,mode=1777
     ports:
@@ -99,12 +99,12 @@ services:
       retries: 36
       start_period: 120s
 
-  bridge-python-agent-memcpy:
+  bridge-python-shimmy-memcpy:
     <<: *common
-    image: "${SHIMMY_BRIDGE_IMAGE_PREFIX:-shimmy-bridge}-python-agent-memcpy:${SHIMMY_BRIDGE_TAG:-dev}"
+    image: "${SHIMMY_BRIDGE_IMAGE_PREFIX:-shimmy-bridge}-python-shimmy-memcpy:${SHIMMY_BRIDGE_TAG:-dev}"
     build:
       <<: *build
-      target: bridge-python-agent-memcpy
+      target: bridge-python-shimmy-memcpy
     tmpfs:
       - /tmp:size=256m,mode=1777
     ports:
@@ -116,12 +116,12 @@ services:
       retries: 36
       start_period: 120s
 
-  bridge-python-agent-single-use:
+  bridge-python-shimmy-single-use:
     <<: *common
-    image: "${SHIMMY_BRIDGE_IMAGE_PREFIX:-shimmy-bridge}-python-agent-single-use:${SHIMMY_BRIDGE_TAG:-dev}"
+    image: "${SHIMMY_BRIDGE_IMAGE_PREFIX:-shimmy-bridge}-python-shimmy-single-use:${SHIMMY_BRIDGE_TAG:-dev}"
     build:
       <<: *build
-      target: bridge-python-agent-single-use
+      target: bridge-python-shimmy-single-use
     tmpfs:
       - /tmp:size=256m,mode=1777
     ports:
@@ -133,12 +133,12 @@ services:
       retries: 36
       start_period: 120s
 
-  bridge-python-agent-fresh:
+  bridge-python-shimmy-fresh:
     <<: *common
-    image: "${SHIMMY_BRIDGE_IMAGE_PREFIX:-shimmy-bridge}-python-agent-fresh:${SHIMMY_BRIDGE_TAG:-dev}"
+    image: "${SHIMMY_BRIDGE_IMAGE_PREFIX:-shimmy-bridge}-python-shimmy-fresh:${SHIMMY_BRIDGE_TAG:-dev}"
     build:
       <<: *build
-      target: bridge-python-agent-fresh
+      target: bridge-python-shimmy-fresh
     tmpfs:
       - /tmp:size=256m,mode=1777
     ports:

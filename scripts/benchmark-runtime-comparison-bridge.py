@@ -92,45 +92,45 @@ LANES: Dict[str, LaneSpec] = {
             "shared pure-Python eval.py through a thin RPC adapter",
         ),
         LaneSpec(
-            "python-agent-cow",
-            "bridge-python-agent-cow",
+            "python-shimmy-cow",
+            "bridge-python-shimmy-cow",
             18586,
             "python",
             "clean",
-            "Agent Python snapshot lifecycle with linear-memory COW reset",
+            "Shimmy Python snapshot lifecycle with linear-memory COW reset",
             "runtime_prepare is pre-snapshot; restore is request-visible",
             "verified linear-memory reset; guest invocation count must be one",
             "the exact same shared pure-Python eval.py",
         ),
         LaneSpec(
-            "python-agent-memcpy",
-            "bridge-python-agent-memcpy",
+            "python-shimmy-memcpy",
+            "bridge-python-shimmy-memcpy",
             18588,
             "python",
             "clean",
-            "Agent Python snapshot lifecycle with full linear-memory memcpy reset",
+            "Shimmy Python snapshot lifecycle with full linear-memory memcpy reset",
             "runtime_prepare is pre-snapshot; full-memory restore is request-visible",
             "verified linear-memory reset; guest invocation count must be one",
             "the exact same shared pure-Python eval.py",
         ),
         LaneSpec(
-            "python-agent-single-use",
-            "bridge-python-agent-single-use",
+            "python-shimmy-single-use",
+            "bridge-python-shimmy-single-use",
             18589,
             "python",
             "clean",
-            "Agent Python never-served prepared instance consumed once",
+            "Shimmy Python never-served prepared instance consumed once",
             "initial preparation and replacement refill are outside a ready hit but visible on an immediate miss",
             "single-use initialized instance; guest invocation count must be one",
             "the exact same shared pure-Python eval.py",
         ),
         LaneSpec(
-            "python-agent-fresh",
-            "bridge-python-agent-fresh",
+            "python-shimmy-fresh",
+            "bridge-python-shimmy-fresh",
             18590,
             "python",
             "clean",
-            "Agent Python fresh module and runtime initialization per request",
+            "Shimmy Python fresh module and runtime initialization per request",
             "module instantiate, runtime_init and runtime_prepare are request-visible",
             "fresh module; guest invocation count must be one",
             "the exact same shared pure-Python eval.py",
@@ -150,21 +150,21 @@ LANES: Dict[str, LaneSpec] = {
 }
 
 AGENT_LIFECYCLE_EXPECTATIONS: Dict[str, Dict[str, str]] = {
-    "python-agent-cow": {
+    "python-shimmy-cow": {
         "lifecycle": "snapshot",
         "snapshot_selected": "cow",
         "reset_mode": "linear-memory-cow",
     },
-    "python-agent-memcpy": {
+    "python-shimmy-memcpy": {
         "lifecycle": "snapshot",
         "snapshot_selected": "memcpy",
         "reset_mode": "linear-memory-memcpy",
     },
-    "python-agent-single-use": {
+    "python-shimmy-single-use": {
         "lifecycle": "single-use",
         "reset_mode": "single-use-prepared",
     },
-    "python-agent-fresh": {
+    "python-shimmy-fresh": {
         "lifecycle": "fresh",
         "reset_mode": "fresh-module",
     },
@@ -187,9 +187,9 @@ EDGE_DEFINITIONS = (
         "id": "python-warm",
         "lanes": [
             "python-native-persistent",
-            "python-agent-cow",
-            "python-agent-memcpy",
-            "python-agent-single-use",
+            "python-shimmy-cow",
+            "python-shimmy-memcpy",
+            "python-shimmy-single-use",
             "python-pyodide-clean-namespace",
         ],
         "basis": "exact same Python file and public HTTP payload on one runner with equal resource limits",
@@ -199,10 +199,10 @@ EDGE_DEFINITIONS = (
         "id": "python-clean",
         "lanes": [
             "python-native-fresh",
-            "python-agent-fresh",
-            "python-agent-cow",
-            "python-agent-memcpy",
-            "python-agent-single-use",
+            "python-shimmy-fresh",
+            "python-shimmy-cow",
+            "python-shimmy-memcpy",
+            "python-shimmy-single-use",
             "python-pyodide-clean-namespace",
         ],
         "basis": "exact same Python file, public HTTP payload, verified invocation count one, runner and resource limits",
@@ -432,11 +432,11 @@ def agent_health_result(spec: LaneSpec, base: str, timeout: float) -> Dict[str, 
     result = result_object(response)
     expected = AGENT_LIFECYCLE_EXPECTATIONS.get(spec.lane)
     if expected is None:
-        raise ValueError(f"no Agent Python lifecycle contract for {spec.lane}")
+        raise ValueError(f"no Shimmy Python lifecycle contract for {spec.lane}")
     for key, value in expected.items():
         if result.get(key) != value:
             raise ValueError(
-                f"Agent Python {spec.lane} healthcheck {key} = "
+                f"Shimmy Python {spec.lane} healthcheck {key} = "
                 f"{result.get(key)!r}, want {value!r}"
             )
     return result
@@ -465,7 +465,7 @@ def wait_agent_prepared_ready(
             return time.perf_counter_ns() - started, result
         time.sleep(0.05)
     raise TimeoutError(
-        f"Agent Python {spec.lane} prepared slot not ready after {timeout}s: {last_ready!r}"
+        f"Shimmy Python {spec.lane} prepared slot not ready after {timeout}s: {last_ready!r}"
     )
 
 
@@ -528,7 +528,7 @@ def benchmark_lane(
 
         single_use_policy_evidence = None
         def measured_request(payload: Dict[str, Any]) -> tuple[int, Dict[str, Any]]:
-            if spec.lane == "python-agent-single-use":
+            if spec.lane == "python-shimmy-single-use":
                 wait_agent_prepared_ready(spec, base, request_timeout)
             return timed_request(base + "/", payload, request_timeout)
 
@@ -581,7 +581,7 @@ def benchmark_lane(
                 "steady": summarize_ns(steady_ns),
             }
 
-        if spec.lane == "python-agent-single-use":
+        if spec.lane == "python-shimmy-single-use":
             fixed = WORKLOADS["fixed"]
             fixed_checksum = expected_checksum(fixed["iterations"], fixed["seed"])
             fixed_payload = {
@@ -700,7 +700,7 @@ def build_report(
             "system-language lanes versus Python lanes",
             "DBI versus Python or Pyodide",
             "Pyodide namespace reset versus Agent linear-memory restore as an isolation-equivalent score",
-            "legacy ReactorPythonDispatcher versus current AgentPythonDispatcher",
+            "legacy ReactorPythonDispatcher versus current ShimmyPythonDispatcher",
         ],
         "lanes": list(rows),
     }

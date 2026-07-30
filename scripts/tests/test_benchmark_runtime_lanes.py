@@ -42,28 +42,28 @@ class LaneAssertionTests(unittest.TestCase):
                 {"result": {"is_correct": True, "guest_invocation_count": 1, "snapshot_isolation_ok": False}},
             )
 
-    def test_agent_python_cow_requires_correct_result(self):
+    def test_shimmy_python_cow_requires_correct_result(self):
         module.assert_lane_response(
-            "agent-python-cow",
+            "shimmy-python-cow",
             {"result": {"is_correct": True, "guest_invocation_count": 1}},
         )
         with self.assertRaisesRegex(ValueError, "guest_invocation_count"):
             module.assert_lane_response(
-                "agent-python-cow",
+                "shimmy-python-cow",
                 {"result": {"is_correct": True, "guest_invocation_count": 2}},
             )
         with self.assertRaisesRegex(ValueError, "is_correct"):
             module.assert_lane_response(
-                "agent-python-cow",
+                "shimmy-python-cow",
                 {"result": {"is_correct": False, "guest_invocation_count": 1}},
             )
 
-        spec = module.LANES["agent-python-cow"]
+        spec = module.LANES["shimmy-python-cow"]
         self.assertIn("COW", spec.lifecycle)
         self.assertIn("runtime_prepare", spec.initialization_placement)
 
-    def test_agent_python_cow_requires_selected_cow_healthcheck(self):
-        evidence = module.assert_agent_python_cow_healthcheck(
+    def test_shimmy_python_cow_requires_selected_cow_healthcheck(self):
+        evidence = module.assert_shimmy_python_cow_healthcheck(
             {
                 "command": "healthcheck",
                 "result": {
@@ -75,7 +75,7 @@ class LaneAssertionTests(unittest.TestCase):
         )
         self.assertEqual("linear-memory-cow", evidence["reset_mode"])
         with self.assertRaisesRegex(ValueError, "snapshot_selected"):
-            module.assert_agent_python_cow_healthcheck(
+            module.assert_shimmy_python_cow_healthcheck(
                 {
                     "result": {
                         "lifecycle": "snapshot",
@@ -107,7 +107,7 @@ class LaneAssertionTests(unittest.TestCase):
 
 
 class ComposeLifecycleContractTests(unittest.TestCase):
-    def test_agent_python_benchmark_image_pins_snapshot_cow(self):
+    def test_shimmy_python_benchmark_image_pins_snapshot_cow(self):
         dockerfile = (SCRIPT.parents[1] / "demo" / "compose" / "Dockerfile").read_text()
         python_stage = dockerfile.split("FROM busybox:1.37.0-musl AS python-reactor", 1)[1].split("FROM ", 1)[0]
         self.assertIn("FUNCTION_WASM_PYTHON_LIFECYCLE=snapshot", python_stage)
@@ -370,7 +370,7 @@ class ReportContractTests(unittest.TestCase):
 
     def test_report_is_json_serializable(self):
         report = module.build_lane_report(
-            lane="agent-python-cow",
+            lane="shimmy-python-cow",
             workload="numeric tolerance",
             lifecycle="post-prepare COW restore",
             initialization_placement="artifact verified before readiness",

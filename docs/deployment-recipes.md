@@ -9,8 +9,8 @@ extensions.
 | Scenario | Required configuration | Notes |
 |---|---|---|
 | Generic WASM | `FUNCTION_INTERFACE=wasm`; `FUNCTION_WASM_PROFILE=generic`; `FUNCTION_WASM_MODULE=/path/eval.wasm` | Guest exports Shimmy `alloc + evaluate` ABI. Generic snapshot modes remain available. |
-| Agent Python script | `FUNCTION_INTERFACE=wasm`; `FUNCTION_WASM_PROFILE=agent-python`; `FUNCTION_WASM_MODULE=/path/agent-python-runtime-numpy-core.wasm`; `FUNCTION_WASM_MANIFEST=/path/manifest.json`; `FUNCTION_WASM_PYTHON_SCRIPT=/path/eval.py` | CPython 3.14 + NumPy core. Post-prepare snapshot/memcpy by default; explicit single-use and fresh modes remain available. |
-| Agent Python LF package | Agent Python artifact/manifest plus `FUNCTION_LF_ROOT=/path/package` | Shimmy bundles package modules and pure-Python include roots once at startup. |
+| Shimmy Python script | `FUNCTION_INTERFACE=wasm`; `FUNCTION_WASM_PROFILE=shimmy-python`; `FUNCTION_WASM_MODULE=/path/shimmy-python-runtime-numpy-core.wasm`; `FUNCTION_WASM_MANIFEST=/path/manifest.json`; `FUNCTION_WASM_PYTHON_SCRIPT=/path/eval.py` | CPython 3.14 + NumPy core. Post-prepare snapshot/memcpy by default; explicit single-use and fresh modes remain available. |
+| Shimmy Python LF package | Shimmy Python artifact/manifest plus `FUNCTION_LF_ROOT=/path/package` | Shimmy bundles package modules and pure-Python include roots once at startup. |
 | Pyodide compatibility | `FUNCTION_INTERFACE=pyodide`; runner plus script or package-mode variables | Compatibility lane for SciPy/Pandas and Emscripten packages. |
 | RPC/file migration | `FUNCTION_INTERFACE=rpc` or `file`; `FUNCTION_COMMAND=...` | Existing subprocess protocols. |
 | Full Linux via QEMU | Existing `rpc`/`file` configuration plus explicit `FUNCTION_QEMU_*` artifact and lifecycle values | Transparent terminal fallback; QEMU and DBI are mutually exclusive. |
@@ -18,22 +18,22 @@ extensions.
 Shared HTTP, stdio JSON-RPC, and Pyodide frames default to 4 MiB. Agent
 Python's guest ABI additionally bounds each request and response to 1 MiB.
 
-## Agent Python
+## Shimmy Python
 
 Canonical repository paths:
 
 ```text
-build/python-reactor/artifacts/agent-python-runtime-numpy-core.wasm
-build/python-reactor/artifacts/manifest.json
+dist/shimmy-python/numpy-core/shimmy-python-runtime-numpy-core.wasm
+dist/shimmy-python/numpy-core/manifest.json
 ```
 
 Artifact identity:
 
 ```text
-size:     63,626,531 bytes
-sha256:   90c27951b2d8c2c7a8b42705b365cb4231c6dad207aad5260d55d2f9a85f1034
-commit:   76b49158cc6c4824491561531bfe7e34872cb820
-ABI:      v1
+artifact: generated, not tracked
+sha256:   bound by manifest and SHA256SUMS
+commit:   exact Shimmy producer/consumer commit
+ABI:      shimmy-python-runtime/v1
 profile:  numpy-core
 ```
 
@@ -41,9 +41,9 @@ profile:  numpy-core
 
 ```bash
 FUNCTION_INTERFACE=wasm \
-FUNCTION_WASM_PROFILE=agent-python \
-FUNCTION_WASM_MODULE=build/python-reactor/artifacts/agent-python-runtime-numpy-core.wasm \
-FUNCTION_WASM_MANIFEST=build/python-reactor/artifacts/manifest.json \
+FUNCTION_WASM_PROFILE=shimmy-python \
+FUNCTION_WASM_MODULE=dist/shimmy-python/numpy-core/shimmy-python-runtime-numpy-core.wasm \
+FUNCTION_WASM_MANIFEST=dist/shimmy-python/numpy-core/manifest.json \
 FUNCTION_WASM_PYTHON_SCRIPT=examples/eval-python/eval.py \
 FUNCTION_WASM_PYTHON_LIFECYCLE=snapshot \
 FUNCTION_WASM_SNAPSHOT_MODE=memcpy \
@@ -58,7 +58,7 @@ executes the trusted script inside each fresh request namespace.
 
 `FUNCTION_WASM_PYTHON_LIFECYCLE` accepts `snapshot` (default), `single-use`, or
 `fresh`. Snapshot mode accepts the same strategy names as generic WASM. On
-Linux, `FUNCTION_WASM_SNAPSHOT_MODE=cow` uses one sealed image per Agent Python
+Linux, `FUNCTION_WASM_SNAPSHOT_MODE=cow` uses one sealed image per Shimmy Python
 slot; on other platforms it explicitly falls back to `memcpy`. Single-use uses
 `FUNCTION_WASM_PYTHON_PREPARED_CAPACITY=1..4` and never returns a served module
 to its ready pool.
@@ -67,9 +67,9 @@ to its ready pool.
 
 ```bash
 FUNCTION_INTERFACE=wasm \
-FUNCTION_WASM_PROFILE=agent-python \
-FUNCTION_WASM_MODULE=build/python-reactor/artifacts/agent-python-runtime-numpy-core.wasm \
-FUNCTION_WASM_MANIFEST=build/python-reactor/artifacts/manifest.json \
+FUNCTION_WASM_PROFILE=shimmy-python \
+FUNCTION_WASM_MODULE=dist/shimmy-python/numpy-core/shimmy-python-runtime-numpy-core.wasm \
+FUNCTION_WASM_MANIFEST=dist/shimmy-python/numpy-core/manifest.json \
 FUNCTION_LF_ROOT=examples/lambda-feedback-fixtures/boilerplate-python \
 FUNCTION_LF_INCLUDE_ROOTS=/opt/lf-puredeps \
 ./shimmy serve
@@ -81,8 +81,7 @@ profile exposes no Host filesystem to guest code, so `FUNCTION_LF_SYS_PATH` and
 `sys_path` config entries fail closed. Embed pure-Python dependencies with
 `FUNCTION_LF_INCLUDE_ROOTS` instead.
 
-The only custom guest import is `agent_runtime_v1.host_call`. Shimmy currently
-denies it, so no network, credential, or transaction capability is granted.
+The guest imports only WASI. No network, credential, transaction, or custom Host capability is granted.
 
 Verify locally:
 
@@ -101,7 +100,7 @@ through `FUNCTION_WASM_SNAPSHOT_MODE`: `memcpy`, `soft-dirty`, `mprotect`,
 The Linux COW prototype uses a dispatcher-scoped sealed prepared-memory image
 and fixed-size private mappings. It covers linear memory only, not globals,
 tables, WASI/Host state, external effects, RNG, clocks, or descriptors. It must
-not be used to claim whole-instance freshness. Agent Python uses the same
+not be used to claim whole-instance freshness. Shimmy Python uses the same
 strategy implementations but gives each COW slot its own image because separate
 CPython initialization carries independently randomized state.
 
@@ -135,8 +134,8 @@ QEMU. There is no silent KVM-to-TCG fallback.
 Accepted but not recommended for new configurations:
 
 - `FUNCTION_WASM_PROFILE=python-reactor` and `reactor-python` route to
-  `agent-python`;
-- `FUNCTION_INTERFACE=reactor-python` routes to the same Agent Python path;
+  `shimmy-python`;
+- `FUNCTION_INTERFACE=reactor-python` routes to the same Shimmy Python path;
 - `FUNCTION_COMMAND=/path/module.wasm` remains a generic module-path alias;
 - `FUNCTION_INTERFACE=python-wasm` is the independent legacy resident Python
   comparison path.

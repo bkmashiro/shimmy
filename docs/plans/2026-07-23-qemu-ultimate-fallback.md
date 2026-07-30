@@ -24,7 +24,7 @@ mechanism/Lambda probes: a separately controlled qualification harness
 accepted evidence: reviewed, version-bound project evidence artifacts
 ```
 
-It does not belong to Agent Python Runtime.
+It does not belong to Shimmy Python Runtime.
 
 Shimmy's deployment portfolio remains conceptually:
 

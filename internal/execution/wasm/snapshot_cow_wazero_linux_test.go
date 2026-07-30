@@ -88,7 +88,7 @@ func TestShimmyPythonSnapshotStrategyNameReportsCowFallbackAsMemcpy(t *testing.T
 	strategy := newCowSnapshotStrategy(nil, nil, newTestLogger(t))
 	require.NoError(t, strategy.Take(supervisor.mod.Memory()))
 	require.False(t, strategy.UsingCow())
-	require.Equal(t, "memcpy", agentPythonSnapshotStrategyName(strategy))
+	require.Equal(t, "memcpy", shimmyPythonSnapshotStrategyName(strategy))
 }
 
 func TestCowSupervisorRestoreFailureMarksInstanceUnhealthy(t *testing.T) {

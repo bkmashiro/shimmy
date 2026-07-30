@@ -295,7 +295,7 @@ Language-specific work belongs in build/deployment recipes:
 - JavaScript: future Javy/QuickJS-to-WASI integration with a Shimmy ABI adapter
 
 For Python fast-path deployments, prefer `FUNCTION_INTERFACE=wasm` plus
-`FUNCTION_WASM_PROFILE=agent-python`, a manifest-bound Agent Python Runtime
+`FUNCTION_WASM_PROFILE=shimmy-python`, a manifest-bound Shimmy Python Runtime
 artifact, and an evaluator script or startup bundle. `python-reactor`,
 `reactor-python`, and `FUNCTION_INTERFACE=reactor-python` remain configuration
 aliases, not separate legacy loaders.

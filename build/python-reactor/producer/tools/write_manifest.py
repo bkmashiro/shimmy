@@ -44,13 +44,15 @@ def build_manifest(
     if source_date_epoch <= 0:
         raise ValueError("source date epoch must be positive")
     sources_document = json.loads(source_lock_path.read_text())
-    patches = [
-        {
-            "path": path.as_posix(),
-            "sha256": digest(path),
-        }
-        for path in sorted(patch_paths)
-    ]
+    patch_root = source_lock_path.resolve().parent
+    patches = []
+    for path in sorted(patch_paths):
+        resolved = path.resolve()
+        try:
+            relative = resolved.relative_to(patch_root)
+        except ValueError as error:
+            raise ValueError(f"patch is outside producer root: {path}") from error
+        patches.append({"path": relative.as_posix(), "sha256": digest(resolved)})
     timestamp = dt.datetime.fromtimestamp(source_date_epoch, tz=dt.timezone.utc)
     return {
         "schema": "shimmy-python-runtime-artifact/v1",

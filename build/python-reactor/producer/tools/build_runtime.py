@@ -256,7 +256,7 @@ def build_base(
     wasmtime_root = roots["wasmtime-linux-x86-64"]
     wasi_vfs_tools = roots["wasi-vfs-cli-linux-x86-64"]
     wasi_vfs_library_root = roots["wasi-vfs-library"]
-    wasmtime = wasmtime_root / "bin" / "wasmtime"
+    wasmtime = wasmtime_root / "wasmtime"
     wasi_vfs = wasi_vfs_tools / "wasi-vfs"
     for executable in (wasmtime, wasi_vfs):
         if not executable.is_file():

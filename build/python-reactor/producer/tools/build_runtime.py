@@ -334,7 +334,9 @@ def build_base(
     )
     manifest_path = dist_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
-    checksummed = [artifact, raw_artifact, manifest_path, shape_path, LOCK_PATH]
+    bundled_lock = dist_dir / LOCK_PATH.name
+    shutil.copy2(LOCK_PATH, bundled_lock)
+    checksummed = [artifact, raw_artifact, manifest_path, shape_path, bundled_lock]
     (dist_dir / "SHA256SUMS").write_text(
         "".join(f"{sha256(path)}  {path.name}\n" for path in checksummed)
     )

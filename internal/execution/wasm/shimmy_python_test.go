@@ -37,8 +37,9 @@ func TestShimmyPythonRejectsHostFilesystemPaths(t *testing.T) {
 func TestShimmyPythonDispatcherRealNumPyArtifactCompatibility(t *testing.T) {
 	wasmPath := os.Getenv("SHIMMY_PYTHON_RUNTIME_WASM")
 	manifestPath := os.Getenv("SHIMMY_PYTHON_RUNTIME_MANIFEST")
-	if wasmPath == "" || manifestPath == "" {
-		t.Skip("SHIMMY_PYTHON_RUNTIME_WASM and SHIMMY_PYTHON_RUNTIME_MANIFEST are required")
+	expectedCommit := os.Getenv("SHIMMY_PYTHON_EXPECTED_COMMIT")
+	if wasmPath == "" || manifestPath == "" || expectedCommit == "" {
+		t.Skip("SHIMMY_PYTHON_RUNTIME_WASM, SHIMMY_PYTHON_RUNTIME_MANIFEST, and SHIMMY_PYTHON_EXPECTED_COMMIT are required")
 	}
 
 	scriptPath := filepath.Join(t.TempDir(), "eval.py")
@@ -72,14 +73,15 @@ def preview_function(response, answer, params=None):
 	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o644))
 
 	dispatcher := NewShimmyPythonDispatcher(Config{
-		ModulePath:               wasmPath,
-		ShimmyPythonManifestPath: manifestPath,
-		PythonScriptPath:         scriptPath,
-		PythonLifecycle:          "snapshot",
-		SnapshotMode:             "memcpy",
-		MaxInstances:             1,
-		MaxMemoryPages:           8192,
-		Timeout:                  120 * time.Second,
+		ModulePath:                 wasmPath,
+		ShimmyPythonManifestPath:   manifestPath,
+		ShimmyPythonExpectedCommit: expectedCommit,
+		PythonScriptPath:           scriptPath,
+		PythonLifecycle:            "snapshot",
+		SnapshotMode:               "memcpy",
+		MaxInstances:               1,
+		MaxMemoryPages:             8192,
+		Timeout:                    120 * time.Second,
 	}, zap.NewNop())
 	startContext, startCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer startCancel()
@@ -201,8 +203,9 @@ func TestShimmyPythonDispatcherRealNumPyCOWRestoresState(t *testing.T) {
 	}
 	wasmPath := os.Getenv("SHIMMY_PYTHON_RUNTIME_WASM")
 	manifestPath := os.Getenv("SHIMMY_PYTHON_RUNTIME_MANIFEST")
-	if wasmPath == "" || manifestPath == "" {
-		t.Skip("SHIMMY_PYTHON_RUNTIME_WASM and SHIMMY_PYTHON_RUNTIME_MANIFEST are required")
+	expectedCommit := os.Getenv("SHIMMY_PYTHON_EXPECTED_COMMIT")
+	if wasmPath == "" || manifestPath == "" || expectedCommit == "" {
+		t.Skip("SHIMMY_PYTHON_RUNTIME_WASM, SHIMMY_PYTHON_RUNTIME_MANIFEST, and SHIMMY_PYTHON_EXPECTED_COMMIT are required")
 	}
 
 	scriptPath := filepath.Join(t.TempDir(), "cow.py")
@@ -217,14 +220,15 @@ def evaluation_function(response, answer, params=None):
 	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o644))
 
 	dispatcher := NewShimmyPythonDispatcher(Config{
-		ModulePath:               wasmPath,
-		ShimmyPythonManifestPath: manifestPath,
-		PythonScriptPath:         scriptPath,
-		PythonLifecycle:          "snapshot",
-		SnapshotMode:             "cow",
-		MaxInstances:             2,
-		MaxMemoryPages:           8192,
-		Timeout:                  120 * time.Second,
+		ModulePath:                 wasmPath,
+		ShimmyPythonManifestPath:   manifestPath,
+		ShimmyPythonExpectedCommit: expectedCommit,
+		PythonScriptPath:           scriptPath,
+		PythonLifecycle:            "snapshot",
+		SnapshotMode:               "cow",
+		MaxInstances:               2,
+		MaxMemoryPages:             8192,
+		Timeout:                    120 * time.Second,
 	}, zap.NewNop())
 	startContext, startCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer startCancel()
@@ -254,8 +258,9 @@ func TestShimmyPythonDispatcherCowTimeoutDiscardsInvalidatedSlot(t *testing.T) {
 	}
 	wasmPath := os.Getenv("SHIMMY_PYTHON_RUNTIME_WASM")
 	manifestPath := os.Getenv("SHIMMY_PYTHON_RUNTIME_MANIFEST")
-	if wasmPath == "" || manifestPath == "" {
-		t.Skip("SHIMMY_PYTHON_RUNTIME_WASM and SHIMMY_PYTHON_RUNTIME_MANIFEST are required")
+	expectedCommit := os.Getenv("SHIMMY_PYTHON_EXPECTED_COMMIT")
+	if wasmPath == "" || manifestPath == "" || expectedCommit == "" {
+		t.Skip("SHIMMY_PYTHON_RUNTIME_WASM, SHIMMY_PYTHON_RUNTIME_MANIFEST, and SHIMMY_PYTHON_EXPECTED_COMMIT are required")
 	}
 
 	scriptPath := filepath.Join(t.TempDir(), "cow-timeout.py")
@@ -344,8 +349,9 @@ def evaluation_function(response, answer, params=None):
 func TestShimmyPythonDispatcherSingleUsePreparedRefillsNeverServedCandidates(t *testing.T) {
 	wasmPath := os.Getenv("SHIMMY_PYTHON_RUNTIME_WASM")
 	manifestPath := os.Getenv("SHIMMY_PYTHON_RUNTIME_MANIFEST")
-	if wasmPath == "" || manifestPath == "" {
-		t.Skip("SHIMMY_PYTHON_RUNTIME_WASM and SHIMMY_PYTHON_RUNTIME_MANIFEST are required")
+	expectedCommit := os.Getenv("SHIMMY_PYTHON_EXPECTED_COMMIT")
+	if wasmPath == "" || manifestPath == "" || expectedCommit == "" {
+		t.Skip("SHIMMY_PYTHON_RUNTIME_WASM, SHIMMY_PYTHON_RUNTIME_MANIFEST, and SHIMMY_PYTHON_EXPECTED_COMMIT are required")
 	}
 
 	scriptPath := filepath.Join(t.TempDir(), "single-use.py")
@@ -360,14 +366,15 @@ def evaluation_function(response, answer, params=None):
 	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o644))
 
 	dispatcher := NewShimmyPythonDispatcher(Config{
-		ModulePath:               wasmPath,
-		ShimmyPythonManifestPath: manifestPath,
-		PythonScriptPath:         scriptPath,
-		PythonLifecycle:          "single-use",
-		PythonPreparedCapacity:   1,
-		MaxInstances:             1,
-		MaxMemoryPages:           8192,
-		Timeout:                  120 * time.Second,
+		ModulePath:                 wasmPath,
+		ShimmyPythonManifestPath:   manifestPath,
+		ShimmyPythonExpectedCommit: expectedCommit,
+		PythonScriptPath:           scriptPath,
+		PythonLifecycle:            "single-use",
+		PythonPreparedCapacity:     1,
+		MaxInstances:               1,
+		MaxMemoryPages:             8192,
+		Timeout:                    120 * time.Second,
 	}, zap.NewNop())
 	startContext, startCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer startCancel()
@@ -421,8 +428,9 @@ def evaluation_function(response, answer, params=None):
 func TestShimmyPythonDispatcherTimeoutDoesNotPoisonRuntime(t *testing.T) {
 	wasmPath := os.Getenv("SHIMMY_PYTHON_RUNTIME_WASM")
 	manifestPath := os.Getenv("SHIMMY_PYTHON_RUNTIME_MANIFEST")
-	if wasmPath == "" || manifestPath == "" {
-		t.Skip("SHIMMY_PYTHON_RUNTIME_WASM and SHIMMY_PYTHON_RUNTIME_MANIFEST are required")
+	expectedCommit := os.Getenv("SHIMMY_PYTHON_EXPECTED_COMMIT")
+	if wasmPath == "" || manifestPath == "" || expectedCommit == "" {
+		t.Skip("SHIMMY_PYTHON_RUNTIME_WASM, SHIMMY_PYTHON_RUNTIME_MANIFEST, and SHIMMY_PYTHON_EXPECTED_COMMIT are required")
 	}
 
 	scriptPath := filepath.Join(t.TempDir(), "timeout.py")
@@ -436,12 +444,13 @@ def evaluation_function(response, answer, params=None):
 	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o644))
 
 	dispatcher := NewShimmyPythonDispatcher(Config{
-		ModulePath:               wasmPath,
-		ShimmyPythonManifestPath: manifestPath,
-		PythonScriptPath:         scriptPath,
-		MaxInstances:             1,
-		MaxMemoryPages:           8192,
-		Timeout:                  12 * time.Second,
+		ModulePath:                 wasmPath,
+		ShimmyPythonManifestPath:   manifestPath,
+		ShimmyPythonExpectedCommit: expectedCommit,
+		PythonScriptPath:           scriptPath,
+		MaxInstances:               1,
+		MaxMemoryPages:             8192,
+		Timeout:                    12 * time.Second,
 	}, zap.NewNop())
 	startContext, startCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer startCancel()
@@ -464,8 +473,9 @@ def evaluation_function(response, answer, params=None):
 func TestShimmyPythonDispatcherRealLambdaFeedbackBundle(t *testing.T) {
 	wasmPath := os.Getenv("SHIMMY_PYTHON_RUNTIME_WASM")
 	manifestPath := os.Getenv("SHIMMY_PYTHON_RUNTIME_MANIFEST")
-	if wasmPath == "" || manifestPath == "" {
-		t.Skip("set SHIMMY_PYTHON_RUNTIME_WASM and SHIMMY_PYTHON_RUNTIME_MANIFEST")
+	expectedCommit := os.Getenv("SHIMMY_PYTHON_EXPECTED_COMMIT")
+	if wasmPath == "" || manifestPath == "" || expectedCommit == "" {
+		t.Skip("set SHIMMY_PYTHON_RUNTIME_WASM, SHIMMY_PYTHON_RUNTIME_MANIFEST, and SHIMMY_PYTHON_EXPECTED_COMMIT")
 	}
 
 	_, currentFile, _, ok := runtime.Caller(0)
@@ -485,12 +495,13 @@ func TestShimmyPythonDispatcherRealLambdaFeedbackBundle(t *testing.T) {
 	require.NoError(t, err, string(output))
 
 	dispatcher := NewShimmyPythonDispatcher(Config{
-		ModulePath:               wasmPath,
-		ShimmyPythonManifestPath: manifestPath,
-		PythonScriptPath:         bundlePath,
-		MaxMemoryPages:           8192,
-		MaxInstances:             1,
-		Timeout:                  2 * time.Minute,
+		ModulePath:                 wasmPath,
+		ShimmyPythonManifestPath:   manifestPath,
+		ShimmyPythonExpectedCommit: expectedCommit,
+		PythonScriptPath:           bundlePath,
+		MaxMemoryPages:             8192,
+		MaxInstances:               1,
+		Timeout:                    2 * time.Minute,
 	}, zap.NewNop())
 	startContext, startCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer startCancel()

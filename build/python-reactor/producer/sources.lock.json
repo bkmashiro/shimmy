@@ -92,6 +92,16 @@
       "license": "MIT"
     },
     {
+      "name": "packaging",
+      "version": "26.2",
+      "kind": "tool",
+      "url": "https://files.pythonhosted.org/packages/df/b2/87e62e8c3e2f4b32e5fe99e0b86d576da1312593b39f47d8ceef365e95ed/packaging-26.2-py3-none-any.whl",
+      "sha256": "5fc45236b9446107ff2415ce77c807cee2862cb6fac22b8a73826d0693b0980e",
+      "size": 100195,
+      "archive_root": ".",
+      "license": "Apache-2.0 OR BSD-2-Clause"
+    },
+    {
       "name": "wasmtime-linux-x86-64",
       "version": "47.0.2",
       "kind": "tool",

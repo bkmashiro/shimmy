@@ -8,6 +8,10 @@
 
 #include "shimmy_python_bootstrap.inc"
 
+#ifdef SHIMMY_NUMPY_CORE
+PyMODINIT_FUNC PyInit__multiarray_umath(void);
+#endif
+
 static unsigned char shimmy_response[
     SHIMMY_RESPONSE_PREFIX_BYTES + SHIMMY_RESPONSE_MAX_BYTES
 ];
@@ -68,6 +72,12 @@ int32_t shimmy_python_init(void) {
     if (shimmy_initialized) {
         return 0;
     }
+
+#ifdef SHIMMY_NUMPY_CORE
+    if (PyImport_AppendInittab("_multiarray_umath", PyInit__multiarray_umath) < 0) {
+        return -6;
+    }
+#endif
 
     PyConfig config;
     PyStatus status;

@@ -47,6 +47,11 @@ class GuestSourceContractTests(unittest.TestCase):
         self.assertIn("bootstrap_path.read_bytes()", self.embedder)
         self.assertIn("output_path.write_text", self.embedder)
 
+    def test_numpy_core_registration_is_compile_time_only(self) -> None:
+        self.assertIn("#ifdef SHIMMY_NUMPY_CORE", self.runtime)
+        self.assertIn('PyImport_AppendInittab("_multiarray_umath"', self.runtime)
+        self.assertNotIn("PyInit_agent", self.runtime)
+
 
 if __name__ == "__main__":
     unittest.main()

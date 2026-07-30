@@ -72,6 +72,26 @@
       "license": "Apache-2.0"
     },
     {
+      "name": "setuptools",
+      "version": "83.0.0",
+      "kind": "tool",
+      "url": "https://files.pythonhosted.org/packages/5d/40/e1e72872c6354b306daef1703549e8e83b4d43cfea356311bf722a043752/setuptools-83.0.0-py3-none-any.whl",
+      "sha256": "29b23c360f22f414dc7336bb39178cc7bcbf6021ed2733cde173f09dba19abb3",
+      "size": 1008090,
+      "archive_root": ".",
+      "license": "MIT"
+    },
+    {
+      "name": "wheel",
+      "version": "0.47.0",
+      "kind": "tool",
+      "url": "https://files.pythonhosted.org/packages/87/1b/9e33c09813d65e248f7f773119148a612516a4bea93e9c6f545f78455b7c/wheel-0.47.0-py3-none-any.whl",
+      "sha256": "212281cab4dff978f6cedd499cd893e1f620791ca6ff7107cf270781e587eced",
+      "size": 32218,
+      "archive_root": ".",
+      "license": "MIT"
+    },
+    {
       "name": "wasmtime-linux-x86-64",
       "version": "47.0.2",
       "kind": "tool",

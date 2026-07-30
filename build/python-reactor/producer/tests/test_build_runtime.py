@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import json
 import pathlib
 import sys
 import tarfile
@@ -32,12 +33,27 @@ class BuildRuntimeTests(unittest.TestCase):
         command = self.module.cpython_build_command(
             pathlib.Path("/work/Python-3.14.6"),
             pathlib.Path("/work/wasi-sdk"),
-            8,
         )
         self.assertEqual(command[:3], [sys.executable, "Tools/wasm/wasi", "build"])
-        self.assertEqual(
-            command[-4:], ["--wasi-sdk", "/work/wasi-sdk", "--parallel", "8"]
-        )
+        self.assertEqual(command[-2:], ["--wasi-sdk", "/work/wasi-sdk"])
+
+    def test_cpython_policy_bounds_official_helper_jobs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            wasi = root / "Tools/wasm/wasi"
+            wasi.mkdir(parents=True)
+            (wasi / "config.site-wasm32-wasi").write_text("# official config\n")
+            patch_path = ROOT / "patches/cpython/bounded-build-jobs.json"
+            replacement = json.loads(patch_path.read_text())
+            helper = root / replacement["path"]
+            helper.write_text("import os\n" + replacement["old"] + "print('ok')\n")
+
+            applied = self.module._apply_cpython_policy(root)
+
+            self.assertEqual(len(applied), 2)
+            patched = helper.read_text()
+            self.assertIn("SHIMMY_BUILD_JOBS", patched)
+            self.assertNotIn(replacement["old"], patched)
 
     def test_verify_blob_checks_size_and_digest(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

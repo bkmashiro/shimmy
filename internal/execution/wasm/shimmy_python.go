@@ -103,7 +103,7 @@ func NewShimmyPythonDispatcher(cfg Config, log *zap.Logger) *ShimmyPythonDispatc
 	}
 	return &ShimmyPythonDispatcher{
 		cfg:      cfg,
-		log:      log.Named("dispatcher_agent_python"),
+		log:      log.Named("dispatcher_shimmy_python"),
 		closedCh: make(chan struct{}),
 	}
 }

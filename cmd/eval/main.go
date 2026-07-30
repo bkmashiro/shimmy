@@ -20,8 +20,9 @@ func main() {
 		fs.PrintDefaults()
 	}
 
-	wasmPath := fs.String("wasm", firstEnvironment("SHIMMY_PYTHON_RUNTIME_WASM", "FUNCTION_WASM_MODULE"), "Path to Agent Python Runtime Wasm")
+	wasmPath := fs.String("wasm", firstEnvironment("SHIMMY_PYTHON_RUNTIME_WASM", "FUNCTION_WASM_MODULE"), "Path to the Shimmy Python runtime Wasm")
 	manifestPath := fs.String("manifest", firstEnvironment("SHIMMY_PYTHON_RUNTIME_MANIFEST", "FUNCTION_WASM_MANIFEST"), "Path to the producer manifest (defaults to manifest.json next to Wasm)")
+	expectedCommit := fs.String("expected-commit", firstEnvironment("SHIMMY_PYTHON_EXPECTED_COMMIT", "FUNCTION_WASM_SHIMMY_PYTHON_EXPECTED_COMMIT"), "Required 40-hex artifact producer commit")
 	inputJSON := fs.String("input", `{"response":"","answer":""}`, `JSON input object, e.g. '{"response":"1","answer":"1"}'`)
 	method := fs.String("method", "eval", "eval or preview")
 	timeoutSeconds := fs.Int("timeout", 120, "Per-request timeout in seconds")
@@ -59,12 +60,13 @@ func main() {
 	defer func() { _ = log.Sync() }()
 
 	dispatcher := wasm.NewShimmyPythonDispatcher(wasm.Config{
-		ModulePath:               *wasmPath,
-		ShimmyPythonManifestPath: *manifestPath,
-		PythonScriptPath:         fs.Args()[0],
-		MaxInstances:             1,
-		MaxMemoryPages:           8192,
-		Timeout:                  time.Duration(*timeoutSeconds) * time.Second,
+		ModulePath:                 *wasmPath,
+		ShimmyPythonManifestPath:   *manifestPath,
+		ShimmyPythonExpectedCommit: *expectedCommit,
+		PythonScriptPath:           fs.Args()[0],
+		MaxInstances:               1,
+		MaxMemoryPages:             8192,
+		Timeout:                    time.Duration(*timeoutSeconds) * time.Second,
 	}, log)
 	startContext, startCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	if err := dispatcher.Start(startContext); err != nil {

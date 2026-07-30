@@ -1,0 +1,7 @@
+[
+  {
+    "path": "numpy/_core/meson.build",
+    "old": "py.extension_module('_multiarray_umath',\n  [\n    config_h,\n    _numpyconfig_h,\n    src_multiarray,\n    src_multiarray_umath_common,\n    src_umath,\n    src_ufunc_api[1],  # __ufunc_api.h\n    src_numpy_api[1],  # __multiarray_api.h\n    src_umath_doc_h,\n    npy_math_internal_h,\n  ],\n  objects: svml_objects,\n  c_args: c_args_common,\n  cpp_args: cpp_args_common,\n  include_directories: [\n    'include',\n    'src/common',\n    'src/multiarray',\n    'src/npymath',\n    'src/umath',\n    'src/highway'\n  ],\n  dependencies: [blas_dep],\n  link_with: [npymath_lib, multiarray_umath_mtargets.static_lib('_multiarray_umath_mtargets')] + highway_lib,\n  install: true,\n  subdir: 'numpy/_core',\n)\n",
+    "new": "static_library('shimmy_numpy_multiarray_umath',\n  [\n    config_h,\n    _numpyconfig_h,\n    src_multiarray,\n    src_multiarray_umath_common,\n    src_umath,\n    src_ufunc_api[1],  # __ufunc_api.h\n    src_numpy_api[1],  # __multiarray_api.h\n    src_umath_doc_h,\n    npy_math_internal_h,\n  ],\n  objects: svml_objects,\n  c_args: c_args_common,\n  cpp_args: cpp_args_common,\n  include_directories: [\n    'include',\n    'src/common',\n    'src/multiarray',\n    'src/npymath',\n    'src/umath',\n    'src/highway'\n  ],\n  dependencies: [py_dep, blas_dep],\n  link_with: [npymath_lib, multiarray_umath_mtargets.static_lib('_multiarray_umath_mtargets')] + highway_lib,\n  install: false,\n)\n"
+  }
+]

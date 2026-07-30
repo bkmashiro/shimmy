@@ -13,12 +13,12 @@
     },
     {
       "name": "numpy",
-      "version": "2.4.2",
+      "version": "2.2.6",
       "kind": "source",
-      "url": "https://files.pythonhosted.org/packages/57/fd/0005efbd0af48e55eb3c7208af93f2862d4b1a56cd78e84309a2d959208d/numpy-2.4.2.tar.gz",
-      "sha256": "659a6107e31a83c4e33f763942275fd278b21d095094044eb35569e86a21ddae",
-      "size": 20723651,
-      "archive_root": "numpy-2.4.2",
+      "url": "https://files.pythonhosted.org/packages/76/21/7d2a95e4bba9dc13d043ee156a356c0a8f0c6309dff6b21b4d71a073b8a8/numpy-2.2.6.tar.gz",
+      "sha256": "e29554e2bef54a90aa5cc07da6ce955accb83f21ab5de01a62c8478897b264fd",
+      "size": 20276440,
+      "archive_root": "numpy-2.2.6",
       "license": "BSD-3-Clause"
     },
     {
@@ -48,6 +48,26 @@
       "url": "https://github.com/kateinoigakukun/wasi-vfs/releases/download/v0.6.3/wasi-vfs-cli-x86_64-unknown-linux-gnu.zip",
       "sha256": "c9ee8179f6f0882abc37024fbe0cd678311aa8a29083fa364915ed4d29a69485",
       "size": 7055605,
+      "archive_root": ".",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "cython",
+      "version": "3.2.9",
+      "kind": "tool",
+      "url": "https://files.pythonhosted.org/packages/f6/de/db48b8870e766cfea809986cc50c1e986c663a9ab7bafd0ac1a2512c4a26/cython-3.2.9.tar.gz",
+      "sha256": "d249c9022ab13286b17bd66f30609e800c5f95efeecb06168990c7a66cecde6c",
+      "size": 3293493,
+      "archive_root": "cython-3.2.9",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "ninja-linux-x86-64",
+      "version": "1.13.0",
+      "kind": "tool",
+      "url": "https://files.pythonhosted.org/packages/ed/de/0e6edf44d6a04dabd0318a519125ed0415ce437ad5a1ec9b9be03d9048cf/ninja-1.13.0-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "sha256": "fb46acf6b93b8dd0322adc3a4945452a4e774b75b91293bafcc7b7f8e6517dfa",
+      "size": 180716,
       "archive_root": ".",
       "license": "Apache-2.0"
     },

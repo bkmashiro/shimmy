@@ -11,9 +11,9 @@ case "$SLURM_JOB_ID" in
     ;;
 esac
 
-run_root="/tmp/shimmy-agent-python-${SLURM_JOB_ID}"
+run_root="/tmp/shimmy-shimmy-python-${SLURM_JOB_ID}"
 case "$run_root" in
-  /tmp/shimmy-agent-python-[0-9]*) ;;
+  /tmp/shimmy-shimmy-python-[0-9]*) ;;
   *)
     printf 'unsafe run root: %q\n' "$run_root" >&2
     exit 2
@@ -22,7 +22,7 @@ esac
 
 cleanup_run_root() {
   case "$run_root" in
-    /tmp/shimmy-agent-python-[0-9]*) rm -rf -- "$run_root" ;;
+    /tmp/shimmy-shimmy-python-[0-9]*) rm -rf -- "$run_root" ;;
     *) printf 'refusing cleanup of unsafe path: %q\n' "$run_root" >&2; return 2 ;;
   esac
 }
@@ -123,9 +123,9 @@ rm -f -- "$input_tar"
 } >"$output_dir/environment.txt" 2>"$output_dir/environment.stderr"
 
 benchmark_rc=0
-"$input_dir/agent-python-ultimate" run \
+"$input_dir/shimmy-python-ultimate" run \
   --config "$input_dir/ultimate.json" \
-  --artifact "$input_dir/agent-python-runtime-numpy-core.wasm" \
+  --artifact "$input_dir/shimmy-python-runtime-numpy-core.wasm" \
   --manifest "$input_dir/manifest.json" \
   --output "$output_dir/run" \
   >"$output_dir/benchmark.stdout" \

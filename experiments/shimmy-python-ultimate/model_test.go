@@ -10,7 +10,7 @@ import (
 
 func TestPlanStrictDecoderRejectsUnknownField(t *testing.T) {
 	raw := []byte(`{
-		"schema": "agent-python-ultimate-plan/v1",
+		"schema": "shimmy-python-ultimate-plan/v1",
 		"rows": [{
 			"row_id": "r-001",
 			"campaign": "capability",
@@ -27,7 +27,7 @@ func TestPlanStrictDecoderRejectsUnknownField(t *testing.T) {
 }
 
 func TestPlanStrictDecoderRejectsTrailingJSON(t *testing.T) {
-	raw := []byte(`{"schema":"agent-python-ultimate-plan/v1","rows":[]}{"extra":1}`)
+	raw := []byte(`{"schema":"shimmy-python-ultimate-plan/v1","rows":[]}{"extra":1}`)
 	_, err := ParsePlanJSON(raw)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "trailing")
@@ -35,7 +35,7 @@ func TestPlanStrictDecoderRejectsTrailingJSON(t *testing.T) {
 
 func TestPlanValidationRejectsInvalidLifecycle(t *testing.T) {
 	raw := []byte(`{
-		"schema":"agent-python-ultimate-plan/v1",
+		"schema":"shimmy-python-ultimate-plan/v1",
 		"rows":[{
 			"row_id":"r-001",
 			"campaign":"capability",
@@ -51,7 +51,7 @@ func TestPlanValidationRejectsInvalidLifecycle(t *testing.T) {
 
 func TestPlanValidationRejectsCapacityOutOfRange(t *testing.T) {
 	raw := []byte(`{
-		"schema":"agent-python-ultimate-plan/v1",
+		"schema":"shimmy-python-ultimate-plan/v1",
 		"rows":[{
 			"row_id":"r-001",
 			"campaign":"capability",
@@ -65,7 +65,7 @@ func TestPlanValidationRejectsCapacityOutOfRange(t *testing.T) {
 	require.Error(t, err)
 
 	raw2 := []byte(`{
-		"schema":"agent-python-ultimate-plan/v1",
+		"schema":"shimmy-python-ultimate-plan/v1",
 		"rows":[{
 			"row_id":"r-001",
 			"campaign":"capability",
@@ -81,7 +81,7 @@ func TestPlanValidationRejectsCapacityOutOfRange(t *testing.T) {
 
 func TestPlanValidationRejectsDuplicateRowID(t *testing.T) {
 	raw := []byte(`{
-		"schema":"agent-python-ultimate-plan/v1",
+		"schema":"shimmy-python-ultimate-plan/v1",
 		"rows":[
 			{"row_id":"dup", "campaign":"capability", "lifecycle":"fresh", "pool":1, "prepared_capacity":1, "repeat":1},
 			{"row_id":"dup", "campaign":"capability", "lifecycle":"single-use", "pool":1, "prepared_capacity":1, "repeat":1}
@@ -93,7 +93,7 @@ func TestPlanValidationRejectsDuplicateRowID(t *testing.T) {
 
 func TestPlanValidationRejectsPayloadOverflow(t *testing.T) {
 	raw := []byte(`{
-		"schema":"agent-python-ultimate-plan/v1",
+		"schema":"shimmy-python-ultimate-plan/v1",
 		"rows":[{
 			"row_id":"r-001",
 			"campaign":"input-payload",
@@ -110,7 +110,7 @@ func TestPlanValidationRejectsPayloadOverflow(t *testing.T) {
 
 func TestPlanValidationRejectsInvalidDirtyBps(t *testing.T) {
 	raw := []byte(`{
-		"schema":"agent-python-ultimate-plan/v1",
+		"schema":"shimmy-python-ultimate-plan/v1",
 		"rows":[{
 			"row_id":"r-001",
 			"campaign":"dirty-pattern",
@@ -127,7 +127,7 @@ func TestPlanValidationRejectsInvalidDirtyBps(t *testing.T) {
 
 func TestPlanValidationRejectsFallbackImpersonatingSelected(t *testing.T) {
 	raw := []byte(`{
-		"schema":"agent-python-ultimate-plan/v1",
+		"schema":"shimmy-python-ultimate-plan/v1",
 		"rows":[{
 			"row_id":"r-001",
 			"campaign":"capability",
@@ -171,7 +171,7 @@ func TestPlanValidationAcceptsCanonicalRows(t *testing.T) {
 
 func TestReportValidationRejectsSummaryMismatch(t *testing.T) {
 	raw := []byte(`{
-		"schema":"agent-python-ultimate-report/v1",
+		"schema":"shimmy-python-ultimate-report/v1",
 		"rows":[{
 			"row_id":"r-001",
 			"campaign":"capability",
@@ -186,7 +186,7 @@ func TestReportValidationRejectsSummaryMismatch(t *testing.T) {
 
 func TestReportValidationRejectsFallbackImpersonatingSelected(t *testing.T) {
 	raw := []byte(`{
-		"schema":"agent-python-ultimate-report/v1",
+		"schema":"shimmy-python-ultimate-report/v1",
 		"rows":[{
 			"row_id":"r-001",
 			"campaign":"capability",

@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "agent-python-ultimate Report",
+  "title": "shimmy-python-ultimate Report",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "rows"],
   "properties": {
     "schema": {
-      "const": "agent-python-ultimate-report/v1"
+      "const": "shimmy-python-ultimate-report/v1"
     },
     "rows": {
       "type": "array",

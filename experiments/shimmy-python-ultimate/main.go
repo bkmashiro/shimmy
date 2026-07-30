@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	runReportSchema = "agent-python-ultimate-run-report/v1"
+	runReportSchema = "shimmy-python-ultimate-run-report/v1"
 	// workerProtocolExitCode is reserved for worker CLI/input/output protocol failures.
 	// Row-level evaluator/runtime crashes must never intentionally use this code.
 	workerProtocolExitCode = 90
@@ -164,7 +164,7 @@ func commandWorker(args []string) error {
 func commandRun(args []string) error {
 	flags := flag.NewFlagSet("run", flag.ContinueOnError)
 	configPath := flags.String("config", "", "strict benchmark config")
-	artifactPath := flags.String("artifact", "", "exact Agent Python wasm")
+	artifactPath := flags.String("artifact", "", "exact Shimmy Python wasm")
 	manifestPath := flags.String("manifest", "", "exact artifact manifest")
 	outputDir := flags.String("output", "", "private result directory")
 	limit := flags.Int("limit", 0, "explicit smoke row limit")
@@ -291,7 +291,7 @@ func runParent(configPath, artifactPath, manifestPath, outputDir string, limit i
 	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
 		return err
 	}
-	if err := prewarmCompileCache(executable, artifactPath, manifestPath, cacheDir, outputDir, plan); err != nil {
+	if err := prewarmCompileCache(executable, artifactPath, manifestPath, metadata.SourceCommit, cacheDir, outputDir, plan); err != nil {
 		return fmt.Errorf("prewarm compile cache: %w", err)
 	}
 
@@ -311,8 +311,8 @@ func runParent(configPath, artifactPath, manifestPath, outputDir string, limit i
 			break
 		}
 		input := WorkerInput{
-			Schema: "agent-python-ultimate-worker-input/v1", Row: row,
-			ArtifactPath: artifactPath, ManifestPath: manifestPath,
+			Schema: "shimmy-python-ultimate-worker-input/v1", Row: row,
+			ArtifactPath: artifactPath, ManifestPath: manifestPath, ExpectedCommit: metadata.SourceCommit,
 			CompileCacheDir: cacheDir, Seed: 20260727 + int64(index),
 		}
 		inputPath := filepath.Join(outputDir, "rows", row.ID+".input.json")
@@ -356,7 +356,7 @@ func runParent(configPath, artifactPath, manifestPath, outputDir string, limit i
 	return writeJSON(filepath.Join(outputDir, "report.json"), report)
 }
 
-func prewarmCompileCache(executable, artifact, manifest, cacheDir, outputDir string, plan *Plan) error {
+func prewarmCompileCache(executable, artifact, manifest, expectedCommit, cacheDir, outputDir string, plan *Plan) error {
 	marker := filepath.Join(cacheDir, ".prewarmed")
 	if _, err := os.Stat(marker); err == nil {
 		return nil
@@ -374,7 +374,7 @@ func prewarmCompileCache(executable, artifact, manifest, cacheDir, outputDir str
 	row.InputBytes, row.OutputBytes, row.ArenaMiB, row.DirtyBps, row.Concurrency = nil, nil, nil, nil, nil
 	row.CPUProfile, row.DirtyPattern, row.Fault = "none", "", ""
 	row.SnapshotSelected, row.SnapshotFallback, row.Surface, row.CacheState = "", false, "direct", "warm"
-	input := WorkerInput{Schema: "agent-python-ultimate-worker-input/v1", Row: row, ArtifactPath: artifact, ManifestPath: manifest, CompileCacheDir: cacheDir, Seed: 1}
+	input := WorkerInput{Schema: "shimmy-python-ultimate-worker-input/v1", Row: row, ArtifactPath: artifact, ManifestPath: manifest, ExpectedCommit: expectedCommit, CompileCacheDir: cacheDir, Seed: 1}
 	inputPath := filepath.Join(outputDir, "prewarm.input.json")
 	resultPath := filepath.Join(outputDir, "prewarm.result.json")
 	if err := writeJSON(inputPath, input); err != nil {

@@ -9,7 +9,7 @@ for name in CI GITHUB_ACTIONS GITLAB_CI BUILDKITE CIRCLECI JENKINS_URL; do
   case "$value" in
     ""|0|false|FALSE|no|NO|off|OFF) ;;
     *)
-      printf 'agent-python DoC benchmark is manual-only; refusing CI environment (%s)\n' "$name" >&2
+      printf 'shimmy-python DoC benchmark is manual-only; refusing CI environment (%s)\n' "$name" >&2
       exit 2
       ;;
   esac
@@ -17,7 +17,7 @@ done
 
 validate_run_id() {
   local run_id="${1-}"
-  if [[ ! "$run_id" =~ ^agent-python-[0-9]{8}t[0-9]{6}z-[a-f0-9]{8}$ ]]; then
+  if [[ ! "$run_id" =~ ^shimmy-python-[0-9]{8}t[0-9]{6}z-[a-f0-9]{8}$ ]]; then
     printf 'invalid run id: %q\n' "$run_id" >&2
     return 2
   fi
@@ -34,7 +34,7 @@ validate_job_id() {
 gateway_root() {
   local run_id="$1"
   validate_run_id "$run_id"
-  printf '/tmp/shimmy-agent-python-controller-%s' "$run_id"
+  printf '/tmp/shimmy-shimmy-python-controller-%s' "$run_id"
 }
 
 render_sbatch() {
@@ -42,7 +42,7 @@ render_sbatch() {
   local job_script="${2:-$(gateway_root "$run_id")/job.sh}"
   validate_run_id "$run_id"
   case "$job_script" in
-    /tmp/shimmy-agent-python-controller-"$run_id"/job.sh) ;;
+    /tmp/shimmy-shimmy-python-controller-"$run_id"/job.sh) ;;
     *) printf 'unsafe remote job script: %q\n' "$job_script" >&2; return 2 ;;
   esac
   printf '%s\n' \
@@ -58,7 +58,7 @@ render_sbatch() {
     "--time=2-12:00:00" \
     "--export=NIL" \
     "--chdir=/tmp" \
-    "--output=/tmp/shimmy-agent-python-%j-slurm.out" \
+    "--output=/tmp/shimmy-shimmy-python-%j-slurm.out" \
     "--job-name=${run_id}" \
     "$job_script"
 }
@@ -72,7 +72,7 @@ submit_job() {
       --partition=a16 --nodelist=gpuvm36 --nodes=1 --ntasks=1 \
       --cpus-per-task=6 --mem=48G --gres=gpu:nvidia_a16:1 \
       --time=2-12:00:00 --export=NIL --chdir=/tmp \
-      --output=/tmp/shimmy-agent-python-%j-slurm.out \
+      --output=/tmp/shimmy-shimmy-python-%j-slurm.out \
       --job-name="$run_id" "$root/job.sh"
 }
 
@@ -87,7 +87,7 @@ stage_job() {
 set -euo pipefail
 root="$1"
 job_id="$2"
-case "$root" in /tmp/shimmy-agent-python-controller-agent-python-*) ;; *) exit 2 ;; esac
+case "$root" in /tmp/shimmy-shimmy-python-controller-shimmy-python-*) ;; *) exit 2 ;; esac
 for _ in $(seq 1 600); do
   state="$(squeue -h -j "$job_id" -o '%T')"
   case "$state" in
@@ -99,8 +99,8 @@ done
 [[ "${state-}" == RUNNING ]]
 sleep 5
 broadcast_output="$({
-  sbcast -v --force --jobid="$job_id.batch" "$root/input.tar.zst" "/tmp/shimmy-agent-python-$job_id/input.tar.zst"
-  sbcast -v --force --jobid="$job_id.batch" "$root/input.sha256" "/tmp/shimmy-agent-python-$job_id/input.sha256"
+  sbcast -v --force --jobid="$job_id.batch" "$root/input.tar.zst" "/tmp/shimmy-shimmy-python-$job_id/input.tar.zst"
+  sbcast -v --force --jobid="$job_id.batch" "$root/input.sha256" "/tmp/shimmy-shimmy-python-$job_id/input.sha256"
 } 2>&1)"
 printf '%s\n' "$broadcast_output"
 case "$broadcast_output" in
@@ -108,8 +108,8 @@ case "$broadcast_output" in
   *) printf 'sbcast did not confirm the batch step credential\n' >&2; exit 4 ;;
 esac
 sleep 5
-srun --jobid="$job_id" --overlap -N1 -n1 test -s "/tmp/shimmy-agent-python-$job_id/input.tar.zst"
-srun --jobid="$job_id" --overlap -N1 -n1 test -s "/tmp/shimmy-agent-python-$job_id/input.sha256"
+srun --jobid="$job_id" --overlap -N1 -n1 test -s "/tmp/shimmy-shimmy-python-$job_id/input.tar.zst"
+srun --jobid="$job_id" --overlap -N1 -n1 test -s "/tmp/shimmy-shimmy-python-$job_id/input.sha256"
 REMOTE
 }
 
@@ -122,7 +122,7 @@ job_id="$1"
 squeue -j "$job_id" -o '%.18i %.12T %.20S %.20e %.8M %.9l %.6D %R'
 sacct -j "$job_id" --starttime now-7days -X -n -P -o JobID,State,Elapsed,Timelimit,NodeList,ExitCode 2>/dev/null || true
 if [[ "$(squeue -h -j "$job_id" -o '%T')" == RUNNING ]]; then
-  if srun --jobid="$job_id" --overlap -N1 -n1 test -f "/tmp/shimmy-agent-python-$job_id/RESULT.READY" 2>/dev/null; then
+  if srun --jobid="$job_id" --overlap -N1 -n1 test -f "/tmp/shimmy-shimmy-python-$job_id/RESULT.READY" 2>/dev/null; then
     printf 'RESULT_READY=yes\n'
   else
     printf 'RESULT_READY=no\n'
@@ -142,9 +142,9 @@ pull_result() {
   local temp_checksum="$checksum.partial"
   rm -f -- "$temp_archive" "$temp_checksum"
   "${SSH[@]}" srun --jobid="$job_id" --overlap -N1 -n1 \
-    cat "/tmp/shimmy-agent-python-$job_id/result.sha256" >"$temp_checksum"
+    cat "/tmp/shimmy-shimmy-python-$job_id/result.sha256" >"$temp_checksum"
   "${SSH[@]}" srun --jobid="$job_id" --overlap -N1 -n1 \
-    cat "/tmp/shimmy-agent-python-$job_id/result.tar.zst" >"$temp_archive"
+    cat "/tmp/shimmy-shimmy-python-$job_id/result.tar.zst" >"$temp_archive"
   mv -f -- "$temp_checksum" "$checksum"
   mv -f -- "$temp_archive" "$archive"
   (
@@ -162,9 +162,9 @@ ack_result() {
   local job_id="$1"
   validate_job_id "$job_id"
   "${SSH[@]}" srun --jobid="$job_id" --overlap -N1 -n1 \
-    test -f "/tmp/shimmy-agent-python-$job_id/RESULT.READY"
+    test -f "/tmp/shimmy-shimmy-python-$job_id/RESULT.READY"
   "${SSH[@]}" srun --jobid="$job_id" --overlap -N1 -n1 \
-    touch "/tmp/shimmy-agent-python-$job_id/ACK"
+    touch "/tmp/shimmy-shimmy-python-$job_id/ACK"
 }
 
 cleanup_controller() {
@@ -174,7 +174,7 @@ cleanup_controller() {
   "${SSH[@]}" bash -s -- "$root" <<'REMOTE'
 set -euo pipefail
 root="$1"
-case "$root" in /tmp/shimmy-agent-python-controller-agent-python-*) rm -rf -- "$root" ;; *) exit 2 ;; esac
+case "$root" in /tmp/shimmy-shimmy-python-controller-shimmy-python-*) rm -rf -- "$root" ;; *) exit 2 ;; esac
 REMOTE
 }
 

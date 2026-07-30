@@ -6,7 +6,7 @@ PREPARED_SENTINEL = {{ .Sentinel }}
 CPU_PROFILE = "{{ .CPUProfile }}"
 RANDOM_SEED = {{ .Seed }}
 
-# The Agent Python runtime executes this trusted script during runtime_prepare.
+# The Shimmy Python runtime executes this trusted script during runtime_prepare.
 # Therefore these allocations are part of the prepared baseline and are restored
 # by snapshot lifecycles between calls.
 arena = bytearray(ARENA_BYTES)

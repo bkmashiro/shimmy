@@ -1,14 +1,14 @@
-# Agent Python Ultimate Manual Benchmark
+# Shimmy Python Ultimate Manual Benchmark
 
-Manual-only benchmark for the exact `agent-python-runtime-numpy-core.wasm`
-artifact. It exercises the production `AgentPythonDispatcher`; the HTTP campaign
+Manual-only benchmark for the exact `shimmy-python-runtime-numpy-core.wasm`
+artifact. It exercises the production `ShimmyPythonDispatcher`; the HTTP campaign
 adds the production `RuntimeHandler` and `CommandHandler` across a real loopback
 TCP connection.
 
 ## Hard rules
 
-- Never invoke from CI. `scripts/benchmark-agent-python-ultimate.sh` and
-  `scripts/benchmark-agent-python-doc.sh` reject common CI environments and
+- Never invoke from CI. `scripts/benchmark-shimmy-python-ultimate.sh` and
+  `scripts/benchmark-shimmy-python-doc.sh` reject common CI environments and
   expose no override.
 - Bind every run to the artifact, manifest, input config, executable SHA-256,
   and source commit.
@@ -21,7 +21,7 @@ TCP connection.
   the report's `ok` / `unavailable` / `failed` aggregates. Resume only reuses an
   exact matching row with `ok`, `unavailable`, or `unsupported` status; failed
   or behavior-drifted rows are executed again.
-- Remote input and output live under `/tmp/shimmy-agent-python-$SLURM_JOB_ID`.
+- Remote input and output live under `/tmp/shimmy-shimmy-python-$SLURM_JOB_ID`.
   A successful result remains there for up to 48 hours until the Mac streams
   and verifies the archive, extracts it, validates the exact-source raw report,
   and only then sends `ACK`; all exit paths remove the exact guarded job
@@ -49,22 +49,22 @@ stored in the run directory.
 ## Local gates
 
 ```bash
-go test ./experiments/agent-python-ultimate -count=1
+go test ./experiments/shimmy-python-ultimate -count=1
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest \
-  scripts.tests.test_benchmark_agent_python_doc \
-  scripts.tests.test_benchmark_agent_python_ultimate_manual
+  scripts.tests.test_benchmark_shimmy_python_doc \
+  scripts.tests.test_benchmark_shimmy_python_ultimate_manual
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
-  -o /tmp/agent-python-ultimate ./experiments/agent-python-ultimate
+  -o /tmp/shimmy-python-ultimate ./experiments/shimmy-python-ultimate
 ```
 
 A local exact-artifact smoke can use:
 
 ```bash
-scripts/benchmark-agent-python-ultimate.sh run \
-  --config experiments/agent-python-ultimate/configs/smoke.json \
-  --artifact build/python-reactor/artifacts/agent-python-runtime-numpy-core.wasm \
+scripts/benchmark-shimmy-python-ultimate.sh run \
+  --config experiments/shimmy-python-ultimate/configs/smoke.json \
+  --artifact build/python-reactor/artifacts/shimmy-python-runtime-numpy-core.wasm \
   --manifest build/python-reactor/artifacts/manifest.json \
-  --output /tmp/agent-python-smoke --limit 4 --max-duration 10m
+  --output /tmp/shimmy-python-smoke --limit 4 --max-duration 10m
 ```
 
 ## DoC allocation
@@ -94,5 +94,5 @@ Each run contains:
 - `report.json`: recomputed campaign/lane summaries
 - `report.recomputed.json`: independent `validate` output
 
-Run `agent-python-ultimate validate --output RUN_DIR` after transport and compare
+Run `shimmy-python-ultimate validate --output RUN_DIR` after transport and compare
 the two reports before making any public performance claim.

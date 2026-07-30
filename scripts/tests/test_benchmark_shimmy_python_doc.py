@@ -6,11 +6,11 @@ import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-LAUNCHER = ROOT / "scripts" / "benchmark-agent-python-doc.sh"
-JOB_SCRIPT = ROOT / "experiments" / "agent-python-ultimate" / "slurm" / "job.sh"
+LAUNCHER = ROOT / "scripts" / "benchmark-shimmy-python-doc.sh"
+JOB_SCRIPT = ROOT / "experiments" / "shimmy-python-ultimate" / "slurm" / "job.sh"
 
 
-class AgentPythonDoCLauncherTests(unittest.TestCase):
+class ShimmyPythonDoCLauncherTests(unittest.TestCase):
     def run_launcher(self, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [str(LAUNCHER), *args],
@@ -29,13 +29,13 @@ class AgentPythonDoCLauncherTests(unittest.TestCase):
 
     def test_validate_run_id_accepts_generated_shape(self) -> None:
         result = self.run_launcher(
-            "validate-run-id", "agent-python-20260727t001500z-a1b2c3d4"
+            "validate-run-id", "shimmy-python-20260727t001500z-a1b2c3d4"
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_render_sbatch_is_manual_fixed_host_and_bounded(self) -> None:
         result = self.run_launcher(
-            "render-sbatch", "agent-python-20260727t001500z-a1b2c3d4"
+            "render-sbatch", "shimmy-python-20260727t001500z-a1b2c3d4"
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         rendered = result.stdout
@@ -50,7 +50,7 @@ class AgentPythonDoCLauncherTests(unittest.TestCase):
             "--time=2-12:00:00",
             "--export=NIL",
             "--chdir=/tmp",
-            "--output=/tmp/shimmy-agent-python-%j-slurm.out",
+            "--output=/tmp/shimmy-shimmy-python-%j-slurm.out",
         ):
             self.assertIn(required, rendered)
         self.assertNotIn("--exclusive", rendered)
@@ -59,7 +59,7 @@ class AgentPythonDoCLauncherTests(unittest.TestCase):
         self.assertIn('sbcast -v --force --jobid="$job_id.batch"', launcher_text)
         self.assertIn("sbcast did not confirm the batch step credential", launcher_text)
         stage_body = launcher_text.split("stage_job() {", 1)[1].split("job_status() {", 1)[0]
-        self.assertNotIn('test -d "/tmp/shimmy-agent-python-$job_id"', stage_body)
+        self.assertNotIn('test -d "/tmp/shimmy-shimmy-python-$job_id"', stage_body)
         self.assertIn("sleep 5\nbroadcast_output=", stage_body)
 
     def test_slurm_job_uses_tmp_checksum_pull_ack_protocol(self) -> None:
@@ -74,7 +74,7 @@ class AgentPythonDoCLauncherTests(unittest.TestCase):
             'rm -rf -- "$run_root"',
         ):
             self.assertIn(required, text)
-        self.assertIn('/tmp/shimmy-agent-python-', text)
+        self.assertIn('/tmp/shimmy-shimmy-python-', text)
         self.assertIn("input checksum file must contain exactly", text)
         self.assertIn('$checksum_name" != "input.tar.zst', text)
         self.assertIn("trap cleanup_run_root EXIT", text)
@@ -88,8 +88,8 @@ class AgentPythonDoCLauncherTests(unittest.TestCase):
         self.assertNotIn('/ACK', pull_body)
         self.assertIn("ack_result() {", text)
         self.assertNotIn("sh -c", ack_body)
-        self.assertIn('test -f "/tmp/shimmy-agent-python-$job_id/RESULT.READY"', ack_body)
-        self.assertIn('touch "/tmp/shimmy-agent-python-$job_id/ACK"', ack_body)
+        self.assertIn('test -f "/tmp/shimmy-shimmy-python-$job_id/RESULT.READY"', ack_body)
+        self.assertIn('touch "/tmp/shimmy-shimmy-python-$job_id/ACK"', ack_body)
         self.assertIn('ack) [[ $# -eq 2 ]] || usage; ack_result "$2"', text)
 
 

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,6 +30,7 @@ type WorkerInput struct {
 	Row             PlanRow `json:"row"`
 	ArtifactPath    string  `json:"artifact_path"`
 	ManifestPath    string  `json:"manifest_path"`
+	ExpectedCommit  string  `json:"expected_commit"`
 	CompileCacheDir string  `json:"compile_cache_dir,omitempty"`
 	Seed            int64   `json:"seed"`
 }
@@ -104,8 +106,11 @@ func ParseWorkerInput(raw []byte) (*WorkerInput, error) {
 	if err := ValidatePlan(plan); err != nil {
 		return nil, err
 	}
-	if input.ArtifactPath == "" || input.ManifestPath == "" {
-		return nil, errors.New("artifact_path and manifest_path are required")
+	if input.ArtifactPath == "" || input.ManifestPath == "" || len(input.ExpectedCommit) != 40 {
+		return nil, errors.New("artifact_path, manifest_path, and 40-hex expected_commit are required")
+	}
+	if _, err := hex.DecodeString(input.ExpectedCommit); err != nil {
+		return nil, errors.New("expected_commit must be hexadecimal")
 	}
 	return &input, nil
 }
@@ -159,6 +164,7 @@ func RunWorker(ctx context.Context, input *WorkerInput) (result WorkerResult) {
 	dispatcher := wasmexec.NewShimmyPythonDispatcher(wasmexec.Config{
 		ModulePath:                  input.ArtifactPath,
 		ShimmyPythonManifestPath:    input.ManifestPath,
+		ShimmyPythonExpectedCommit:  input.ExpectedCommit,
 		PythonScriptPath:            scriptPath,
 		PythonLifecycle:             lifecycle,
 		SnapshotMode:                snapshotMode,

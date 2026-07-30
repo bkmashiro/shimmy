@@ -129,7 +129,7 @@ func TestRunPlanWorkerProcessPropagatesReservedWorkerProtocolExit(t *testing.T) 
 func TestRunMainUsesReservedExitForWorkerProtocolErrors(t *testing.T) {
 	var stderr bytes.Buffer
 
-	code := runMain([]string{"agent-python-ultimate", "worker"}, &stderr)
+	code := runMain([]string{"shimmy-python-ultimate", "worker"}, &stderr)
 
 	assert.Equal(t, 90, code)
 	assert.Contains(t, stderr.String(), "worker requires --input and --output")
@@ -138,7 +138,7 @@ func TestRunMainUsesReservedExitForWorkerProtocolErrors(t *testing.T) {
 func TestRunMainUsesOrdinaryExitForParentCommandErrors(t *testing.T) {
 	var stderr bytes.Buffer
 
-	code := runMain([]string{"agent-python-ultimate", "unknown"}, &stderr)
+	code := runMain([]string{"shimmy-python-ultimate", "unknown"}, &stderr)
 
 	assert.Equal(t, 1, code)
 	assert.Contains(t, stderr.String(), "unknown command")

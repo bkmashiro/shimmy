@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	PlanSchemaVersion   = "agent-python-ultimate-plan/v1"
-	ReportSchemaVersion = "agent-python-ultimate-report/v1"
+	PlanSchemaVersion   = "shimmy-python-ultimate-plan/v1"
+	ReportSchemaVersion = "shimmy-python-ultimate-report/v1"
 
 	MinCapacity = 1
 	MaxCapacity = 4

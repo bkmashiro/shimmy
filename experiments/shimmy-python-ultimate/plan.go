@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	PlanConfigSchema          = "agent-python-ultimate-config/v1"
+	PlanConfigSchema          = "shimmy-python-ultimate-config/v1"
 	DefaultUltimateConfigPath = "configs/ultimate.json"
 	DefaultSmokeConfigPath    = "configs/smoke.json"
 )

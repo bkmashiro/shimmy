@@ -7,11 +7,11 @@ import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-LAUNCHER = ROOT / "scripts" / "benchmark-agent-python-ultimate.sh"
+LAUNCHER = ROOT / "scripts" / "benchmark-shimmy-python-ultimate.sh"
 WORKFLOWS = ROOT / ".github" / "workflows"
 
 
-class AgentPythonUltimateManualOnlyTests(unittest.TestCase):
+class ShimmyPythonUltimateManualOnlyTests(unittest.TestCase):
     def test_launcher_refuses_ci_environment(self) -> None:
         env = os.environ.copy()
         env["CI"] = "true"
@@ -30,7 +30,7 @@ class AgentPythonUltimateManualOnlyTests(unittest.TestCase):
         references: list[str] = []
         for path in sorted(WORKFLOWS.glob("*.y*ml")):
             text = path.read_text(encoding="utf-8")
-            if "benchmark-agent-python-ultimate" in text or "agent-python-ultimate" in text:
+            if "benchmark-shimmy-python-ultimate" in text or "shimmy-python-ultimate" in text:
                 references.append(str(path.relative_to(ROOT)))
         self.assertEqual(references, [])
 

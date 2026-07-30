@@ -1,5 +1,5 @@
 {
-  "schema": "agent-python-ultimate-config/v1",
+  "schema": "shimmy-python-ultimate-config/v1",
   "seed": 20260727,
   "allow_large_plan": true,
   "max_rows": 1401,

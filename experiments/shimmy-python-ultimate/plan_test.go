@@ -10,7 +10,7 @@ import (
 )
 
 func TestPlanConfigStrictDecoderRejectsUnknownField(t *testing.T) {
-	_, err := ParsePlanConfig([]byte(`{"schema":"agent-python-ultimate-config/v1","seed":1,"unknown":1}`))
+	_, err := ParsePlanConfig([]byte(`{"schema":"shimmy-python-ultimate-config/v1","seed":1,"unknown":1}`))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown field")
 }

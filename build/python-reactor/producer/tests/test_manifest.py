@@ -43,9 +43,10 @@ class ManifestTests(unittest.TestCase):
                 contract=json.loads(CONTRACT_PATH.read_text()),
                 source_lock_path=LOCK_PATH,
                 wasm_shape={"imports": [], "exports": []},
-                patch_paths=[],
+                patch_paths=[ROOT / "patches/cpython/relative-nanosleep.site"],
             )
         self.assertEqual(manifest["schema"], "shimmy-python-runtime-artifact/v1")
+        self.assertEqual(manifest["patches"][0]["path"], "patches/cpython/relative-nanosleep.site")
         self.assertEqual(manifest["artifact_contract"], "shimmy-python-runtime/v1")
         self.assertEqual(manifest["producer"], {"project": "shimmy", "repository": "bkmashiro/shimmy", "commit": "a" * 40, "dirty": False})
         self.assertEqual(manifest["artifact"]["size"], 10)

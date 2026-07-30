@@ -41,7 +41,7 @@ digest = hashlib.sha256(data).hexdigest()
 artifact = manifest["artifact"]
 producer = manifest["producer"]
 checks = {
-    "schema": manifest.get("schema") == "shimmy-python-runtime-manifest/v1",
+    "schema": manifest.get("schema") == "shimmy-python-runtime-artifact/v1",
     "contract": manifest.get("artifact_contract") == "shimmy-python-runtime/v1",
     "profile": manifest.get("profile") in {"base", "numpy-core"},
     "target": manifest.get("target") == "wasm32-wasip1",

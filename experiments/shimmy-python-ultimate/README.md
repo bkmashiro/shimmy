@@ -62,8 +62,8 @@ A local exact-artifact smoke can use:
 ```bash
 scripts/benchmark-shimmy-python-ultimate.sh run \
   --config experiments/shimmy-python-ultimate/configs/smoke.json \
-  --artifact dist/shimmy-python/shimmy-python-runtime-numpy-core.wasm \
-  --manifest dist/shimmy-python/manifest-numpy-core.json \
+  --artifact dist/shimmy-python/numpy-core/shimmy-python-runtime-numpy-core.wasm \
+  --manifest dist/shimmy-python/numpy-core/manifest.json \
   --output /tmp/shimmy-python-smoke --limit 4 --max-duration 10m
 ```
 

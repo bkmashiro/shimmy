@@ -1,6 +1,7 @@
 package wasm
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/binary"
@@ -42,8 +43,10 @@ func TestShimmyPythonArtifactE2E(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, compiled.Close(ctx)) })
 	require.NoError(t, verifyShimmyPythonCompiledModule(compiled))
 
+	var guestStderr bytes.Buffer
 	moduleConfig := wazero.NewModuleConfig().
 		WithName("").
+		WithStderr(&guestStderr).
 		WithRandSource(rand.Reader).
 		WithSysWalltime().
 		WithSysNanotime().
@@ -88,7 +91,7 @@ def evaluation_function(response, answer, params):
 `)
 	}
 	prepareStatus := callShimmyPythonE2EWithBytes(t, ctx, mod, "shimmy_python_prepare", evaluator)
-	require.Equal(t, uint64(0), prepareStatus)
+	require.Equalf(t, uint64(0), prepareStatus, "guest stderr:\n%s", guestStderr.String())
 
 	memory := mod.Memory()
 	baselineSize := memory.Size()

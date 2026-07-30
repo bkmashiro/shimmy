@@ -69,6 +69,24 @@ def evaluation_function(response, answer, params):
     counter += 1
     return {"correct": response == answer, "counter": counter, "params": params}
 `)
+	if verified.Profile == "numpy-core" {
+		evaluator = []byte(`import numpy as np
+counter = 0
+
+def evaluation_function(response, answer, params):
+    global counter
+    counter += 1
+    matrix = np.arange(6).reshape(2, 3)
+    vector = np.array([1, 2, 3])
+    return {
+        "correct": response == answer,
+        "counter": counter,
+        "numpy_version": np.__version__,
+        "matmul": (matrix @ vector).tolist(),
+        "sum": int(matrix.sum()),
+    }
+`)
+	}
 	prepareStatus := callShimmyPythonE2EWithBytes(t, ctx, mod, "shimmy_python_prepare", evaluator)
 	require.Equal(t, uint64(0), prepareStatus)
 
@@ -83,6 +101,11 @@ def evaluation_function(response, answer, params):
 	require.Equal(t, "ok", first.Status)
 	require.Equal(t, float64(1), first.Result["counter"])
 	require.Equal(t, true, first.Result["correct"])
+	if verified.Profile == "numpy-core" {
+		require.Equal(t, "2.2.6", first.Result["numpy_version"])
+		require.Equal(t, []any{float64(8), float64(26)}, first.Result["matmul"])
+		require.Equal(t, float64(15), first.Result["sum"])
+	}
 
 	require.Equal(t, baselineSize, memory.Size(), "request grew linear memory")
 	require.True(t, memory.Write(0, baseline))

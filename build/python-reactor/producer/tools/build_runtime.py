@@ -105,7 +105,7 @@ def extract_archive(archive: pathlib.Path, destination: pathlib.Path) -> None:
 
 
 def cpython_build_command(
-    cpython_root: pathlib.Path, wasi_sdk_root: pathlib.Path
+    cpython_root: pathlib.Path, wasi_sdk_root: pathlib.Path, jobs: int = 1
 ) -> list[str]:
     del cpython_root
     return [
@@ -114,6 +114,8 @@ def cpython_build_command(
         "build",
         "--wasi-sdk",
         os.fspath(wasi_sdk_root),
+        "--parallel",
+        str(jobs),
     ]
 
 
@@ -231,6 +233,7 @@ def build_base(
     repository: str,
     commit: str,
     source_date_epoch: int,
+    jobs: int,
 ) -> pathlib.Path:
     entries = _source_index()
     required = (
@@ -273,7 +276,9 @@ def build_base(
             "PYTHONHASHSEED": "0",
         }
     )
-    _run(cpython_build_command(cpython_root, wasi_sdk_root), cwd=cpython_root, env=env)
+    _run(
+        cpython_build_command(cpython_root, wasi_sdk_root, jobs), cwd=cpython_root, env=env
+    )
 
     target_build = cpython_root / "cross-build" / "wasm32-wasip1"
     if not (target_build / "libpython3.14.a").is_file():
@@ -374,8 +379,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY", "bkmashiro/shimmy"))
     parser.add_argument("--commit")
     parser.add_argument("--source-date-epoch", type=int)
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=int(os.environ.get("SHIMMY_BUILD_JOBS", min(os.cpu_count() or 1, 8))),
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
+    if args.jobs < 1:
+        parser.error("--jobs must be positive")
 
     commit = args.commit or _git_value("rev-parse", "HEAD")
     source_date_epoch = args.source_date_epoch or int(_git_value("show", "-s", "--format=%ct", commit))
@@ -387,9 +399,10 @@ def main(argv: list[str] | None = None) -> int:
                     "repository": args.repository,
                     "commit": commit,
                     "source_date_epoch": source_date_epoch,
+                    "jobs": args.jobs,
                     "source_lock": os.fspath(LOCK_PATH.relative_to(REPO_ROOT)),
                     "cpython_command": cpython_build_command(
-                        pathlib.Path("<cpython>"), pathlib.Path("<wasi-sdk>")
+                        pathlib.Path("<cpython>"), pathlib.Path("<wasi-sdk>"), args.jobs
                     ),
                 },
                 indent=2,
@@ -405,6 +418,7 @@ def main(argv: list[str] | None = None) -> int:
         repository=args.repository,
         commit=commit,
         source_date_epoch=source_date_epoch,
+        jobs=args.jobs,
     )
     return 0
 

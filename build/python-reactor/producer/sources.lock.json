@@ -50,6 +50,16 @@
       "size": 7055605,
       "archive_root": ".",
       "license": "Apache-2.0"
+    },
+    {
+      "name": "wasmtime-linux-x86-64",
+      "version": "47.0.2",
+      "kind": "tool",
+      "url": "https://github.com/bytecodealliance/wasmtime/releases/download/v47.0.2/wasmtime-v47.0.2-x86_64-linux.tar.xz",
+      "sha256": "9ec85751649139711b6a5061c4f48a41412bf9b1ab98a08b9924ca73f22ca575",
+      "size": 11702956,
+      "archive_root": "wasmtime-v47.0.2-x86_64-linux",
+      "license": "Apache-2.0 WITH LLVM-exception"
     }
   ]
 }

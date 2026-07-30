@@ -515,7 +515,8 @@ func BenchmarkSnapshotRestore_Uffd_26MB(b *testing.B) {
 // snapshot/restore at arbitrary memory sizes without a real module.
 //
 // Binary layout (WASM spec §5):
-//   \0asm (magic) + version (1) + memory section
+//
+//	\0asm (magic) + version (1) + memory section
 func buildMinimalMemoryModule(b *testing.B, pages int) []byte {
 	b.Helper()
 

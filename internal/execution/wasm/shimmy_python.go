@@ -21,16 +21,16 @@ import (
 )
 
 const (
-	agentPythonDefaultMemoryPages = 8192
-	agentPythonMaxMemoryPages     = 16384
-	agentPythonDiagnosticMax      = 16 * 1024
+	shimmyPythonDefaultMemoryPages = 8192
+	shimmyPythonMaxMemoryPages     = 16384
+	shimmyPythonDiagnosticMax      = 16 * 1024
 )
 
-// AgentPythonDispatcher consumes the clean Agent Python Runtime v1 artifact.
+// ShimmyPythonDispatcher consumes the owned Shimmy Python Runtime v1 artifact.
 // The artifact is compiled once. Module ownership is selected explicitly by
 // PythonLifecycle: fresh, never-served single-use candidates, or prepared
 // linear-memory snapshot restore.
-type AgentPythonDispatcher struct {
+type ShimmyPythonDispatcher struct {
 	cfg Config
 	log *zap.Logger
 
@@ -43,10 +43,10 @@ type AgentPythonDispatcher struct {
 	runtime          wazero.Runtime
 	compiled         wazero.CompiledModule
 	cache            wazero.CompilationCache
-	artifact         *AgentPythonArtifact
+	artifact         *ShimmyPythonArtifact
 	script           string
 	slots            chan struct{}
-	prepared         chan *agentPythonModuleSlot
+	prepared         chan *shimmyPythonModuleSlot
 	snapshotSelected string
 
 	refillCtx       context.Context
@@ -62,10 +62,10 @@ type AgentPythonDispatcher struct {
 	slotCounter atomic.Uint64
 }
 
-type agentPythonModuleSlot struct {
+type shimmyPythonModuleSlot struct {
 	id               uint64
 	module           api.Module
-	diagnostic       *agentPythonDiagnosticBuffer
+	diagnostic       *shimmyPythonDiagnosticBuffer
 	strategy         SnapshotStrategy
 	baselineSize     uint32
 	snapshotSelected string
@@ -73,7 +73,7 @@ type agentPythonModuleSlot struct {
 	cowImage         *cowImageCoordinator
 }
 
-func (slot *agentPythonModuleSlot) close(ctx context.Context) error {
+func (slot *shimmyPythonModuleSlot) close(ctx context.Context) error {
 	if slot == nil {
 		return nil
 	}
@@ -97,39 +97,39 @@ func (slot *agentPythonModuleSlot) close(ctx context.Context) error {
 	return errors.Join(moduleErr, strategyErr, supportErr, imageErr)
 }
 
-func NewAgentPythonDispatcher(cfg Config, log *zap.Logger) *AgentPythonDispatcher {
+func NewShimmyPythonDispatcher(cfg Config, log *zap.Logger) *ShimmyPythonDispatcher {
 	if log == nil {
 		log = zap.NewNop()
 	}
-	return &AgentPythonDispatcher{
+	return &ShimmyPythonDispatcher{
 		cfg:      cfg,
 		log:      log.Named("dispatcher_agent_python"),
 		closedCh: make(chan struct{}),
 	}
 }
 
-func (d *AgentPythonDispatcher) Start(ctx context.Context) error {
+func (d *ShimmyPythonDispatcher) Start(ctx context.Context) error {
 	d.mu.Lock()
-	startupObserver := d.cfg.AgentPythonObserver
-	var startupEvents []AgentPythonPhaseEvent
+	startupObserver := d.cfg.ShimmyPythonObserver
+	var startupEvents []ShimmyPythonPhaseEvent
 	if startupObserver != nil {
 		// Start serializes dispatcher state under d.mu, but external observers must
 		// never run in that lock domain: they may synchronously inspect or shut down
 		// the dispatcher. Capture already-timed immutable events and flush them in
 		// order after releasing the lock.
-		d.cfg.AgentPythonObserver = func(event AgentPythonPhaseEvent) {
+		d.cfg.ShimmyPythonObserver = func(event ShimmyPythonPhaseEvent) {
 			startupEvents = append(startupEvents, event)
 		}
 	}
 	defer func() {
-		d.cfg.AgentPythonObserver = startupObserver
+		d.cfg.ShimmyPythonObserver = startupObserver
 		d.mu.Unlock()
 		for _, event := range startupEvents {
-			d.emitAgentPythonPhaseEvent(startupObserver, event)
+			d.emitShimmyPythonPhaseEvent(startupObserver, event)
 		}
 	}()
 	if d.closed {
-		return errors.New("agent-python: dispatcher is shut down")
+		return errors.New("shimmy-python: dispatcher is shut down")
 	}
 	if d.started {
 		return nil
@@ -140,10 +140,10 @@ func (d *AgentPythonDispatcher) Start(ctx context.Context) error {
 		d.cfg.Timeout = 30 * time.Second
 	}
 	if d.cfg.MaxMemoryPages == 0 {
-		d.cfg.MaxMemoryPages = agentPythonDefaultMemoryPages
+		d.cfg.MaxMemoryPages = shimmyPythonDefaultMemoryPages
 	}
-	if d.cfg.MaxMemoryPages > agentPythonMaxMemoryPages {
-		return fmt.Errorf("agent-python: memory limit %d pages exceeds hard bound %d", d.cfg.MaxMemoryPages, agentPythonMaxMemoryPages)
+	if d.cfg.MaxMemoryPages > shimmyPythonMaxMemoryPages {
+		return fmt.Errorf("shimmy-python: memory limit %d pages exceeds hard bound %d", d.cfg.MaxMemoryPages, shimmyPythonMaxMemoryPages)
 	}
 	if d.cfg.MaxInstances <= 0 {
 		d.cfg.MaxInstances = runtime.NumCPU()
@@ -154,40 +154,38 @@ func (d *AgentPythonDispatcher) Start(ctx context.Context) error {
 			d.cfg.MaxInstances = 1
 		}
 	}
-	if d.cfg.PythonPreloadMode == "" {
-		d.cfg.PythonPreloadMode = "evaluator"
-	}
-	d.cfg.applyAgentPythonDefaults()
-	if err := d.cfg.validatePythonPreloadMode(); err != nil {
-		return fmt.Errorf("agent-python: %w", err)
-	}
-	if err := d.cfg.validateAgentPythonLifecycle(); err != nil {
-		return fmt.Errorf("agent-python: %w", err)
+	d.cfg.applyShimmyPythonDefaults()
+	if err := d.cfg.validateShimmyPythonLifecycle(); err != nil {
+		return fmt.Errorf("shimmy-python: %w", err)
 	}
 	if d.cfg.PythonLifecycle == "snapshot" {
 		if err := d.cfg.validateSnapshotMode(d.cfg.MaxInstances); err != nil {
-			return fmt.Errorf("agent-python: %w", err)
+			return fmt.Errorf("shimmy-python: %w", err)
 		}
 	}
 	if len(d.cfg.AllowedPaths) != 0 {
-		return errors.New("agent-python does not expose Host filesystem paths; unset FUNCTION_WASM_ALLOWED_PATHS")
+		return errors.New("shimmy-python does not expose Host filesystem paths; unset FUNCTION_WASM_ALLOWED_PATHS")
 	}
 	if d.cfg.PythonScriptPath == "" {
-		return errors.New("agent-python: PythonScriptPath must be set (FUNCTION_WASM_PYTHON_SCRIPT)")
+		return errors.New("shimmy-python: PythonScriptPath must be set (FUNCTION_WASM_PYTHON_SCRIPT)")
 	}
 	scriptBytes, err := os.ReadFile(d.cfg.PythonScriptPath)
 	if err != nil {
-		return fmt.Errorf("agent-python: read script %q: %w", d.cfg.PythonScriptPath, err)
+		return fmt.Errorf("shimmy-python: read script %q: %w", d.cfg.PythonScriptPath, err)
 	}
-	if len(scriptBytes) == 0 || len(scriptBytes) > agentPythonPayloadMax {
-		return fmt.Errorf("agent-python: trusted script size %d is outside the 1 MiB guest bound", len(scriptBytes))
+	if len(scriptBytes) == 0 || len(scriptBytes) > shimmyPythonPayloadMax {
+		return fmt.Errorf("shimmy-python: trusted script size %d is outside the 1 MiB guest bound", len(scriptBytes))
 	}
 
 	phaseStart := time.Now()
-	artifact, err := verifyAgentPythonArtifact(d.cfg.ModulePath, d.cfg.AgentPythonManifestPath)
-	d.observeAgentPythonPhase(AgentPythonPhaseObservation{
-		Phase: AgentPythonPhaseArtifactVerify, Purpose: AgentPythonPurposeStartup,
-		Started: phaseStart, Outcome: agentPythonPhaseOutcome(err), Err: err,
+	artifact, err := verifyShimmyPythonArtifact(
+		d.cfg.ModulePath,
+		d.cfg.ShimmyPythonManifestPath,
+		d.cfg.ShimmyPythonExpectedCommit,
+	)
+	d.observeShimmyPythonPhase(ShimmyPythonPhaseObservation{
+		Phase: ShimmyPythonPhaseArtifactVerify, Purpose: ShimmyPythonPurposeStartup,
+		Started: phaseStart, Outcome: shimmyPythonPhaseOutcome(err), Err: err,
 	})
 	if err != nil {
 		return err
@@ -200,16 +198,16 @@ func (d *AgentPythonDispatcher) Start(ctx context.Context) error {
 	if d.cfg.CompileCacheDir != "" {
 		cache, err = wazero.NewCompilationCacheWithDir(d.cfg.CompileCacheDir)
 		if err != nil {
-			return fmt.Errorf("agent-python: create compilation cache: %w", err)
+			return fmt.Errorf("shimmy-python: create compilation cache: %w", err)
 		}
 		runtimeConfig = runtimeConfig.WithCompilationCache(cache)
 	}
 
 	phaseStart = time.Now()
 	wasmRuntime := wazero.NewRuntimeWithConfig(ctx, runtimeConfig)
-	d.observeAgentPythonPhase(AgentPythonPhaseObservation{
-		Phase: AgentPythonPhaseRuntimeCreate, Purpose: AgentPythonPurposeStartup,
-		Started: phaseStart, Outcome: AgentPythonOutcomeOK,
+	d.observeShimmyPythonPhase(ShimmyPythonPhaseObservation{
+		Phase: ShimmyPythonPhaseRuntimeCreate, Purpose: ShimmyPythonPurposeStartup,
+		Started: phaseStart, Outcome: ShimmyPythonOutcomeOK,
 	})
 	closePartial := func() {
 		_ = wasmRuntime.Close(context.Background())
@@ -219,37 +217,28 @@ func (d *AgentPythonDispatcher) Start(ctx context.Context) error {
 	}
 	phaseStart = time.Now()
 	_, err = wasi_snapshot_preview1.Instantiate(ctx, wasmRuntime)
-	d.observeAgentPythonPhase(AgentPythonPhaseObservation{
-		Phase: AgentPythonPhaseWASIImports, Purpose: AgentPythonPurposeStartup,
-		Started: phaseStart, Outcome: agentPythonPhaseOutcome(err), Err: err,
+	d.observeShimmyPythonPhase(ShimmyPythonPhaseObservation{
+		Phase: ShimmyPythonPhaseWASIImports, Purpose: ShimmyPythonPurposeStartup,
+		Started: phaseStart, Outcome: shimmyPythonPhaseOutcome(err), Err: err,
 	})
 	if err != nil {
 		closePartial()
-		return fmt.Errorf("agent-python: instantiate WASI imports: %w", err)
-	}
-	phaseStart = time.Now()
-	_, err = wasmRuntime.NewHostModuleBuilder("agent_runtime_v1").
-		NewFunctionBuilder().
-		WithFunc(agentPythonDeniedHostCall).
-		Export("host_call").
-		Instantiate(ctx)
-	d.observeAgentPythonPhase(AgentPythonPhaseObservation{
-		Phase: AgentPythonPhaseHostImports, Purpose: AgentPythonPurposeStartup,
-		Started: phaseStart, Outcome: agentPythonPhaseOutcome(err), Err: err,
-	})
-	if err != nil {
-		closePartial()
-		return fmt.Errorf("agent-python: instantiate Host imports: %w", err)
+		return fmt.Errorf("shimmy-python: instantiate WASI imports: %w", err)
 	}
 	phaseStart = time.Now()
 	compiled, err := wasmRuntime.CompileModule(ctx, artifact.WasmBytes)
-	d.observeAgentPythonPhase(AgentPythonPhaseObservation{
-		Phase: AgentPythonPhaseCompile, Purpose: AgentPythonPurposeStartup,
-		Started: phaseStart, Outcome: agentPythonPhaseOutcome(err), Err: err,
+	d.observeShimmyPythonPhase(ShimmyPythonPhaseObservation{
+		Phase: ShimmyPythonPhaseCompile, Purpose: ShimmyPythonPurposeStartup,
+		Started: phaseStart, Outcome: shimmyPythonPhaseOutcome(err), Err: err,
 	})
 	if err != nil {
 		closePartial()
-		return fmt.Errorf("agent-python: compile guest: %w", err)
+		return fmt.Errorf("shimmy-python: compile guest: %w", err)
+	}
+	if err := verifyShimmyPythonCompiledModule(compiled); err != nil {
+		_ = compiled.Close(context.Background())
+		closePartial()
+		return err
 	}
 
 	d.runtime = wasmRuntime
@@ -262,9 +251,9 @@ func (d *AgentPythonDispatcher) Start(ctx context.Context) error {
 
 	switch d.cfg.PythonLifecycle {
 	case "snapshot":
-		d.prepared = make(chan *agentPythonModuleSlot, d.cfg.MaxInstances)
+		d.prepared = make(chan *shimmyPythonModuleSlot, d.cfg.MaxInstances)
 		for i := 0; i < d.cfg.MaxInstances; i++ {
-			slot, err := d.newPreparedModuleSlot(ctx, true, AgentPythonPurposeStartup, 0)
+			slot, err := d.newPreparedModuleSlot(ctx, true, ShimmyPythonPurposeStartup, 0)
 			if err != nil {
 				_ = d.closeRuntime(context.Background())
 				return err
@@ -274,14 +263,14 @@ func (d *AgentPythonDispatcher) Start(ctx context.Context) error {
 			} else if slot.snapshotSelected != d.snapshotSelected {
 				_ = slot.close(context.Background())
 				_ = d.closeRuntime(context.Background())
-				return fmt.Errorf("agent-python: snapshot strategy selected inconsistently across slots: %q then %q", d.snapshotSelected, slot.snapshotSelected)
+				return fmt.Errorf("shimmy-python: snapshot strategy selected inconsistently across slots: %q then %q", d.snapshotSelected, slot.snapshotSelected)
 			}
 			d.prepared <- slot
 		}
 	case "single-use":
-		d.prepared = make(chan *agentPythonModuleSlot, d.cfg.PythonPreparedCapacity)
+		d.prepared = make(chan *shimmyPythonModuleSlot, d.cfg.PythonPreparedCapacity)
 		for i := 0; i < d.cfg.PythonPreparedCapacity; i++ {
-			slot, err := d.newPreparedModuleSlot(ctx, false, AgentPythonPurposeStartup, 0)
+			slot, err := d.newPreparedModuleSlot(ctx, false, ShimmyPythonPurposeStartup, 0)
 			if err != nil {
 				_ = d.closeRuntime(context.Background())
 				return err
@@ -290,7 +279,7 @@ func (d *AgentPythonDispatcher) Start(ctx context.Context) error {
 		}
 	case "fresh":
 		// Probe the exact artifact and trusted script before reporting readiness.
-		slot, err := d.newPreparedModuleSlot(ctx, false, AgentPythonPurposeStartup, 0)
+		slot, err := d.newPreparedModuleSlot(ctx, false, ShimmyPythonPurposeStartup, 0)
 		if err != nil {
 			_ = d.closeRuntime(context.Background())
 			return err
@@ -299,7 +288,7 @@ func (d *AgentPythonDispatcher) Start(ctx context.Context) error {
 	}
 
 	d.started = true
-	d.log.Info("agent-python dispatcher ready",
+	d.log.Info("shimmy-python dispatcher ready",
 		zap.String("artifact_sha256", artifact.SHA256),
 		zap.String("producer_commit", artifact.ProducerCommit),
 		zap.String("artifact_profile", artifact.Profile),
@@ -311,7 +300,7 @@ func (d *AgentPythonDispatcher) Start(ctx context.Context) error {
 	return nil
 }
 
-func (d *AgentPythonDispatcher) Send(ctx context.Context, method string, params map[string]any) (map[string]any, error) {
+func (d *ShimmyPythonDispatcher) Send(ctx context.Context, method string, params map[string]any) (map[string]any, error) {
 	if method == "healthcheck" {
 		d.mu.Lock()
 		ready := d.started && !d.closed
@@ -322,7 +311,7 @@ func (d *AgentPythonDispatcher) Send(ctx context.Context, method string, params 
 		preparedReady := len(d.prepared)
 		d.mu.Unlock()
 		if !ready {
-			return nil, errors.New("agent-python: dispatcher is not ready")
+			return nil, errors.New("shimmy-python: dispatcher is not ready")
 		}
 		return map[string]any{
 			"command": "healthcheck",
@@ -341,7 +330,7 @@ func (d *AgentPythonDispatcher) Send(ctx context.Context, method string, params 
 		}, nil
 	}
 	if !d.tryBeginSend() {
-		return nil, errors.New("agent-python: dispatcher is not ready")
+		return nil, errors.New("shimmy-python: dispatcher is not ready")
 	}
 	defer d.pending.Done()
 
@@ -349,18 +338,13 @@ func (d *AgentPythonDispatcher) Send(ctx context.Context, method string, params 
 	case d.slots <- struct{}{}:
 		defer func() { <-d.slots }()
 	case <-d.closedCh:
-		return nil, errors.New("agent-python: dispatcher is shut down")
+		return nil, errors.New("shimmy-python: dispatcher is shut down")
 	case <-ctx.Done():
-		return nil, fmt.Errorf("agent-python: acquire execution slot: %w", ctx.Err())
+		return nil, fmt.Errorf("shimmy-python: acquire execution slot: %w", ctx.Err())
 	}
 
 	requestID := d.runCounter.Add(1)
-	runID := fmt.Sprintf("shimmy-%s-%d", d.artifact.SHA256[:12], requestID)
-	scriptInRequest := ""
-	if d.cfg.PythonPreloadMode == "off" {
-		scriptInRequest = d.script
-	}
-	request, err := buildAgentPythonRunRequest(runID, method, params, scriptInRequest)
+	request, err := buildShimmyPythonRequest(method, params)
 	if err != nil {
 		return nil, err
 	}
@@ -368,16 +352,16 @@ func (d *AgentPythonDispatcher) Send(ctx context.Context, method string, params 
 	runContext, cancel := context.WithTimeout(ctx, d.cfg.Timeout)
 	defer cancel()
 
-	var slot *agentPythonModuleSlot
+	var slot *shimmyPythonModuleSlot
 	checkoutStart := time.Now()
 	switch d.cfg.PythonLifecycle {
 	case "snapshot":
-		slot, err = acquireAgentPythonSnapshotSlot(
+		slot, err = acquireShimmyPythonSnapshotSlot(
 			runContext,
 			d.prepared,
 			d.closedCh,
-			func(createContext context.Context) (*agentPythonModuleSlot, error) {
-				return d.newPreparedModuleSlot(createContext, true, AgentPythonPurposeReplacement, requestID)
+			func(createContext context.Context) (*shimmyPythonModuleSlot, error) {
+				return d.newPreparedModuleSlot(createContext, true, ShimmyPythonPurposeReplacement, requestID)
 			},
 		)
 		if err != nil {
@@ -385,7 +369,7 @@ func (d *AgentPythonDispatcher) Send(ctx context.Context, method string, params 
 		}
 		if slot.snapshotSelected != d.snapshotSelected {
 			_ = slot.close(context.Background())
-			return nil, fmt.Errorf("agent-python: replenished snapshot strategy %q, want %q", slot.snapshotSelected, d.snapshotSelected)
+			return nil, fmt.Errorf("shimmy-python: replenished snapshot strategy %q, want %q", slot.snapshotSelected, d.snapshotSelected)
 		}
 	case "single-use":
 		select {
@@ -396,78 +380,78 @@ func (d *AgentPythonDispatcher) Send(ctx context.Context, method string, params 
 		}
 		d.scheduleSingleUseRefill(requestID)
 		if slot == nil {
-			slot, err = d.newPreparedModuleSlot(runContext, false, AgentPythonPurposeFresh, requestID)
+			slot, err = d.newPreparedModuleSlot(runContext, false, ShimmyPythonPurposeFresh, requestID)
 			if err != nil {
 				return nil, err
 			}
 		}
 	case "fresh":
-		slot, err = d.newPreparedModuleSlot(runContext, false, AgentPythonPurposeFresh, requestID)
+		slot, err = d.newPreparedModuleSlot(runContext, false, ShimmyPythonPurposeFresh, requestID)
 		if err != nil {
 			return nil, err
 		}
 	}
-	d.observeAgentPythonPhase(AgentPythonPhaseObservation{
-		Phase: AgentPythonPhaseCheckout, Purpose: AgentPythonPurposeRequest,
+	d.observeShimmyPythonPhase(ShimmyPythonPhaseObservation{
+		Phase: ShimmyPythonPhaseCheckout, Purpose: ShimmyPythonPurposeRequest,
 		RequestID: requestID, SlotID: slot.id, Started: checkoutStart,
 		MemoryBytes: uint64(slot.module.Memory().Size()), SnapshotSelected: slot.snapshotSelected,
-		Outcome: AgentPythonOutcomeOK,
+		Outcome: ShimmyPythonOutcomeOK,
 	})
 	if d.cfg.PythonLifecycle != "snapshot" {
 		defer func() {
 			phaseStart := time.Now()
 			closeErr := slot.close(context.Background())
-			d.observeAgentPythonPhase(AgentPythonPhaseObservation{
-				Phase: AgentPythonPhaseClose, Purpose: AgentPythonPurposeRequest,
+			d.observeShimmyPythonPhase(ShimmyPythonPhaseObservation{
+				Phase: ShimmyPythonPhaseClose, Purpose: ShimmyPythonPurposeRequest,
 				RequestID: requestID, SlotID: slot.id, Started: phaseStart,
-				Outcome: agentPythonPhaseOutcome(closeErr), Err: closeErr,
+				Outcome: shimmyPythonPhaseOutcome(closeErr), Err: closeErr,
 			})
 		}()
 	}
 
 	phaseStart := time.Now()
-	payload, callErr := callAgentPythonExecute(runContext, slot.module, request)
+	payload, callErr := callShimmyPythonExecute(runContext, slot.module, request)
 	if callErr != nil && runContext.Err() != nil {
 		callErr = errors.Join(callErr, runContext.Err())
 	}
-	d.observeAgentPythonPhase(AgentPythonPhaseObservation{
-		Phase: AgentPythonPhaseExecute, Purpose: AgentPythonPurposeRequest,
+	d.observeShimmyPythonPhase(ShimmyPythonPhaseObservation{
+		Phase: ShimmyPythonPhaseEvaluate, Purpose: ShimmyPythonPurposeRequest,
 		RequestID: requestID, SlotID: slot.id, Started: phaseStart,
 		MemoryBytes: uint64(slot.module.Memory().Size()), SnapshotSelected: slot.snapshotSelected,
-		Outcome: agentPythonPhaseOutcome(callErr), Err: callErr,
+		Outcome: shimmyPythonPhaseOutcome(callErr), Err: callErr,
 	})
 
 	if d.cfg.PythonLifecycle == "snapshot" {
 		var restoreErr error
 		if callErr == nil {
 			phaseStart = time.Now()
-			restoreErr = restoreAgentPythonSnapshot(slot)
-			d.observeAgentPythonPhase(AgentPythonPhaseObservation{
-				Phase: AgentPythonPhaseRestore, Purpose: AgentPythonPurposeRequest,
+			restoreErr = restoreShimmyPythonSnapshot(slot)
+			d.observeShimmyPythonPhase(ShimmyPythonPhaseObservation{
+				Phase: ShimmyPythonPhaseRestore, Purpose: ShimmyPythonPurposeRequest,
 				RequestID: requestID, SlotID: slot.id, Started: phaseStart,
 				MemoryBytes: uint64(slot.module.Memory().Size()), SnapshotSelected: slot.snapshotSelected,
-				Outcome: agentPythonPhaseOutcome(restoreErr), Err: restoreErr,
+				Outcome: shimmyPythonPhaseOutcome(restoreErr), Err: restoreErr,
 			})
 		}
 		if callErr != nil || restoreErr != nil {
 			diagnostic := slot.diagnostic.String()
 			_ = slot.close(context.Background())
 			replacementErr := d.replaceSnapshotSlot(requestID)
-			return nil, withAgentPythonDiagnostic(errors.Join(callErr, restoreErr, replacementErr), diagnostic)
+			return nil, withShimmyPythonDiagnostic(errors.Join(callErr, restoreErr, replacementErr), diagnostic)
 		}
 		slot.diagnostic.Reset()
 		d.prepared <- slot
 	}
 	if callErr != nil {
-		return nil, withAgentPythonDiagnostic(callErr, slot.diagnostic.String())
+		return nil, withShimmyPythonDiagnostic(callErr, slot.diagnostic.String())
 	}
 	phaseStart = time.Now()
-	result, err := decodeAgentPythonResponse(payload)
-	d.observeAgentPythonPhase(AgentPythonPhaseObservation{
-		Phase: AgentPythonPhaseDecode, Purpose: AgentPythonPurposeRequest,
+	result, err := decodeShimmyPythonResponse(payload)
+	d.observeShimmyPythonPhase(ShimmyPythonPhaseObservation{
+		Phase: ShimmyPythonPhaseDecode, Purpose: ShimmyPythonPurposeRequest,
 		RequestID: requestID, SlotID: slot.id, Started: phaseStart,
 		SnapshotSelected: slot.snapshotSelected,
-		Outcome:          agentPythonPhaseOutcome(err), Err: err,
+		Outcome:          shimmyPythonPhaseOutcome(err), Err: err,
 	})
 	if err != nil {
 		return nil, err
@@ -475,35 +459,35 @@ func (d *AgentPythonDispatcher) Send(ctx context.Context, method string, params 
 	return map[string]any{"command": method, "result": result}, nil
 }
 
-func acquireAgentPythonSnapshotSlot(
+func acquireShimmyPythonSnapshotSlot(
 	ctx context.Context,
-	prepared <-chan *agentPythonModuleSlot,
+	prepared <-chan *shimmyPythonModuleSlot,
 	closed <-chan struct{},
-	create func(context.Context) (*agentPythonModuleSlot, error),
-) (*agentPythonModuleSlot, error) {
+	create func(context.Context) (*shimmyPythonModuleSlot, error),
+) (*shimmyPythonModuleSlot, error) {
 	select {
 	case slot := <-prepared:
 		if slot != nil {
 			return slot, nil
 		}
 	case <-closed:
-		return nil, errors.New("agent-python: dispatcher is shut down")
+		return nil, errors.New("shimmy-python: dispatcher is shut down")
 	case <-ctx.Done():
-		return nil, fmt.Errorf("agent-python: acquire prepared module: %w", ctx.Err())
+		return nil, fmt.Errorf("shimmy-python: acquire prepared module: %w", ctx.Err())
 	default:
 	}
 
 	slot, err := create(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("agent-python: replenish missing prepared snapshot slot: %w", err)
+		return nil, fmt.Errorf("shimmy-python: replenish missing prepared snapshot slot: %w", err)
 	}
 	if slot == nil {
-		return nil, errors.New("agent-python: replenish missing prepared snapshot slot returned nil")
+		return nil, errors.New("shimmy-python: replenish missing prepared snapshot slot returned nil")
 	}
 	return slot, nil
 }
 
-func (d *AgentPythonDispatcher) resetMode() string {
+func (d *ShimmyPythonDispatcher) resetMode() string {
 	switch d.cfg.PythonLifecycle {
 	case "snapshot":
 		return "linear-memory-" + d.snapshotSelected
@@ -514,7 +498,7 @@ func (d *AgentPythonDispatcher) resetMode() string {
 	}
 }
 
-func (d *AgentPythonDispatcher) tryBeginSend() bool {
+func (d *ShimmyPythonDispatcher) tryBeginSend() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if !d.started || d.closed {
@@ -524,15 +508,15 @@ func (d *AgentPythonDispatcher) tryBeginSend() bool {
 	return true
 }
 
-func (d *AgentPythonDispatcher) newInitializedModule(
+func (d *ShimmyPythonDispatcher) newInitializedModule(
 	ctx context.Context,
 	prepare bool,
 	cowSupport *cowRuntimeSupport,
-	purpose AgentPythonPurpose,
+	purpose ShimmyPythonPurpose,
 	requestID uint64,
 	slotID uint64,
-) (api.Module, *agentPythonDiagnosticBuffer, error) {
-	diagnostic := &agentPythonDiagnosticBuffer{}
+) (api.Module, *shimmyPythonDiagnosticBuffer, error) {
+	diagnostic := &shimmyPythonDiagnosticBuffer{}
 	instantiateContext := ctx
 	if cowSupport != nil {
 		instantiateContext = cowSupport.instantiateContext(ctx)
@@ -541,18 +525,25 @@ func (d *AgentPythonDispatcher) newInitializedModule(
 	module, err := d.runtime.InstantiateModule(
 		instantiateContext,
 		d.compiled,
-		wazero.NewModuleConfig().WithName("").WithRandSource(cryptorand.Reader).WithStderr(diagnostic),
+		wazero.NewModuleConfig().
+			WithName("").
+			WithStartFunctions().
+			WithRandSource(cryptorand.Reader).
+			WithSysWalltime().
+			WithSysNanotime().
+			WithSysNanosleep().
+			WithStderr(diagnostic),
 	)
 	memoryBytes := uint64(0)
 	if module != nil && module.Memory() != nil {
 		memoryBytes = uint64(module.Memory().Size())
 	}
-	d.observeAgentPythonPhase(AgentPythonPhaseObservation{
-		Phase: AgentPythonPhaseInstantiate, Purpose: purpose, RequestID: requestID, SlotID: slotID,
-		Started: phaseStart, MemoryBytes: memoryBytes, Outcome: agentPythonPhaseOutcome(err), Err: err,
+	d.observeShimmyPythonPhase(ShimmyPythonPhaseObservation{
+		Phase: ShimmyPythonPhaseInstantiate, Purpose: purpose, RequestID: requestID, SlotID: slotID,
+		Started: phaseStart, MemoryBytes: memoryBytes, Outcome: shimmyPythonPhaseOutcome(err), Err: err,
 	})
 	if err != nil {
-		return nil, diagnostic, fmt.Errorf("agent-python: instantiate guest: %w", err)
+		return nil, diagnostic, fmt.Errorf("shimmy-python: instantiate guest: %w", err)
 	}
 	failed := true
 	defer func() {
@@ -561,29 +552,32 @@ func (d *AgentPythonDispatcher) newInitializedModule(
 		}
 	}()
 	phaseStart = time.Now()
-	err = callAgentPythonNoArgs(ctx, module, "_initialize")
-	d.observeAgentPythonPhase(AgentPythonPhaseObservation{
-		Phase: AgentPythonPhaseInitialize, Purpose: purpose, RequestID: requestID, SlotID: slotID,
-		Started: phaseStart, MemoryBytes: uint64(module.Memory().Size()), Outcome: agentPythonPhaseOutcome(err), Err: err,
+	err = callShimmyPythonNoArgs(ctx, module, "_initialize")
+	d.observeShimmyPythonPhase(ShimmyPythonPhaseObservation{
+		Phase: ShimmyPythonPhaseInitialize, Purpose: purpose, RequestID: requestID, SlotID: slotID,
+		Started: phaseStart, MemoryBytes: uint64(module.Memory().Size()), Outcome: shimmyPythonPhaseOutcome(err), Err: err,
 	})
 	if err != nil {
 		return nil, diagnostic, err
 	}
 	phaseStart = time.Now()
-	err = callAgentPythonStatus(ctx, module, "runtime_init", []byte("{}"))
-	d.observeAgentPythonPhase(AgentPythonPhaseObservation{
-		Phase: AgentPythonPhaseRuntimeInit, Purpose: purpose, RequestID: requestID, SlotID: slotID,
-		Started: phaseStart, MemoryBytes: uint64(module.Memory().Size()), Outcome: agentPythonPhaseOutcome(err), Err: err,
+	err = callShimmyPythonIdentity(ctx, module)
+	if err == nil {
+		err = callShimmyPythonNoArgsStatus(ctx, module, "shimmy_python_init")
+	}
+	d.observeShimmyPythonPhase(ShimmyPythonPhaseObservation{
+		Phase: ShimmyPythonPhaseRuntimeInit, Purpose: purpose, RequestID: requestID, SlotID: slotID,
+		Started: phaseStart, MemoryBytes: uint64(module.Memory().Size()), Outcome: shimmyPythonPhaseOutcome(err), Err: err,
 	})
 	if err != nil {
 		return nil, diagnostic, err
 	}
 	if prepare {
 		phaseStart = time.Now()
-		err = callAgentPythonStatus(ctx, module, "runtime_prepare", []byte(d.script))
-		d.observeAgentPythonPhase(AgentPythonPhaseObservation{
-			Phase: AgentPythonPhaseRuntimePrepare, Purpose: purpose, RequestID: requestID, SlotID: slotID,
-			Started: phaseStart, MemoryBytes: uint64(module.Memory().Size()), Outcome: agentPythonPhaseOutcome(err), Err: err,
+		err = callShimmyPythonStatus(ctx, module, "shimmy_python_prepare", []byte(d.script))
+		d.observeShimmyPythonPhase(ShimmyPythonPhaseObservation{
+			Phase: ShimmyPythonPhaseRuntimePrepare, Purpose: purpose, RequestID: requestID, SlotID: slotID,
+			Started: phaseStart, MemoryBytes: uint64(module.Memory().Size()), Outcome: shimmyPythonPhaseOutcome(err), Err: err,
 		})
 		if err != nil {
 			return nil, diagnostic, err
@@ -594,17 +588,17 @@ func (d *AgentPythonDispatcher) newInitializedModule(
 	return module, diagnostic, nil
 }
 
-func reserveAgentPythonSnapshotHeadroom(ctx context.Context, module api.Module, bytes uint64) (retErr error) {
+func reserveShimmyPythonSnapshotHeadroom(ctx context.Context, module api.Module, bytes uint64) (retErr error) {
 	if bytes == 0 {
 		return nil
 	}
 	if bytes > math.MaxUint32 {
-		return fmt.Errorf("agent-python: snapshot headroom %d exceeds wasm32 allocation limit", bytes)
+		return fmt.Errorf("shimmy-python: snapshot headroom %d exceeds wasm32 allocation limit", bytes)
 	}
 	allocate := module.ExportedFunction("alloc")
 	deallocate := module.ExportedFunction("dealloc")
 	if allocate == nil || deallocate == nil {
-		return errors.New("agent-python: snapshot headroom requires alloc and dealloc exports")
+		return errors.New("shimmy-python: snapshot headroom requires alloc and dealloc exports")
 	}
 
 	const chunkBytes = uint64(1024 * 1024)
@@ -612,7 +606,7 @@ func reserveAgentPythonSnapshotHeadroom(ctx context.Context, module api.Module, 
 	defer func() {
 		for i := len(pointers) - 1; i >= 0; i-- {
 			if _, err := deallocate.Call(context.Background(), pointers[i]); err != nil {
-				retErr = errors.Join(retErr, fmt.Errorf("agent-python: release snapshot headroom: %w", err))
+				retErr = errors.Join(retErr, fmt.Errorf("shimmy-python: release snapshot headroom: %w", err))
 			}
 		}
 	}()
@@ -624,10 +618,10 @@ func reserveAgentPythonSnapshotHeadroom(ctx context.Context, module api.Module, 
 		}
 		result, err := allocate.Call(ctx, chunk)
 		if err != nil {
-			return fmt.Errorf("agent-python: reserve %d snapshot headroom bytes: %w", bytes, err)
+			return fmt.Errorf("shimmy-python: reserve %d snapshot headroom bytes: %w", bytes, err)
 		}
 		if len(result) != 1 || result[0] == 0 {
-			return fmt.Errorf("agent-python: reserve %d snapshot headroom bytes: guest allocator returned no pointer", bytes)
+			return fmt.Errorf("shimmy-python: reserve %d snapshot headroom bytes: guest allocator returned no pointer", bytes)
 		}
 		pointers = append(pointers, result[0])
 		remaining -= chunk
@@ -635,12 +629,12 @@ func reserveAgentPythonSnapshotHeadroom(ctx context.Context, module api.Module, 
 	return nil
 }
 
-func (d *AgentPythonDispatcher) newPreparedModuleSlot(
+func (d *ShimmyPythonDispatcher) newPreparedModuleSlot(
 	ctx context.Context,
 	takeSnapshot bool,
-	purpose AgentPythonPurpose,
+	purpose ShimmyPythonPurpose,
 	requestID uint64,
-) (*agentPythonModuleSlot, error) {
+) (*shimmyPythonModuleSlot, error) {
 	slotID := d.slotCounter.Add(1)
 	var cowImage *cowImageCoordinator
 	var cowSupport *cowRuntimeSupport
@@ -655,7 +649,7 @@ func (d *AgentPythonDispatcher) newPreparedModuleSlot(
 
 	module, diagnostic, err := d.newInitializedModule(
 		ctx,
-		d.cfg.PythonPreloadMode != "off",
+		true,
 		cowSupport,
 		purpose,
 		requestID,
@@ -668,9 +662,9 @@ func (d *AgentPythonDispatcher) newPreparedModuleSlot(
 		if cowImage != nil {
 			_ = cowImage.Close()
 		}
-		return nil, withAgentPythonDiagnostic(err, diagnostic.String())
+		return nil, withShimmyPythonDiagnostic(err, diagnostic.String())
 	}
-	slot := &agentPythonModuleSlot{
+	slot := &shimmyPythonModuleSlot{
 		id:         slotID,
 		module:     module,
 		diagnostic: diagnostic,
@@ -681,10 +675,10 @@ func (d *AgentPythonDispatcher) newPreparedModuleSlot(
 		return slot, nil
 	}
 	phaseStart := time.Now()
-	err = reserveAgentPythonSnapshotHeadroom(ctx, module, d.cfg.PythonSnapshotHeadroomBytes)
-	d.observeAgentPythonPhase(AgentPythonPhaseObservation{
-		Phase: AgentPythonPhaseHeadroom, Purpose: purpose, RequestID: requestID, SlotID: slotID,
-		Started: phaseStart, MemoryBytes: uint64(module.Memory().Size()), Outcome: agentPythonPhaseOutcome(err), Err: err,
+	err = reserveShimmyPythonSnapshotHeadroom(ctx, module, d.cfg.PythonSnapshotHeadroomBytes)
+	d.observeShimmyPythonPhase(ShimmyPythonPhaseObservation{
+		Phase: ShimmyPythonPhaseHeadroom, Purpose: purpose, RequestID: requestID, SlotID: slotID,
+		Started: phaseStart, MemoryBytes: uint64(module.Memory().Size()), Outcome: shimmyPythonPhaseOutcome(err), Err: err,
 	})
 	if err != nil {
 		_ = slot.close(context.Background())
@@ -696,38 +690,38 @@ func (d *AgentPythonDispatcher) newPreparedModuleSlot(
 	} else {
 		slot.strategy = selectSnapshotStrategy(d.cfg.SnapshotMode, module.Memory(), d.log)
 	}
-	slot.snapshotSelected = agentPythonSnapshotStrategyName(slot.strategy)
-	d.observeAgentPythonPhase(AgentPythonPhaseObservation{
-		Phase: AgentPythonPhaseStrategySelect, Purpose: purpose, RequestID: requestID, SlotID: slotID,
+	slot.snapshotSelected = shimmyPythonSnapshotStrategyName(slot.strategy)
+	d.observeShimmyPythonPhase(ShimmyPythonPhaseObservation{
+		Phase: ShimmyPythonPhaseStrategySelect, Purpose: purpose, RequestID: requestID, SlotID: slotID,
 		Started: phaseStart, MemoryBytes: uint64(module.Memory().Size()), SnapshotSelected: slot.snapshotSelected,
-		Outcome: AgentPythonOutcomeOK,
+		Outcome: ShimmyPythonOutcomeOK,
 	})
 	phaseStart = time.Now()
 	err = slot.strategy.Take(module.Memory())
-	slot.snapshotSelected = agentPythonSnapshotStrategyName(slot.strategy)
-	d.observeAgentPythonPhase(AgentPythonPhaseObservation{
-		Phase: AgentPythonPhaseSnapshotTake, Purpose: purpose, RequestID: requestID, SlotID: slotID,
+	slot.snapshotSelected = shimmyPythonSnapshotStrategyName(slot.strategy)
+	d.observeShimmyPythonPhase(ShimmyPythonPhaseObservation{
+		Phase: ShimmyPythonPhaseSnapshotTake, Purpose: purpose, RequestID: requestID, SlotID: slotID,
 		Started: phaseStart, MemoryBytes: uint64(module.Memory().Size()), SnapshotSelected: slot.snapshotSelected,
-		Outcome: agentPythonPhaseOutcome(err), Err: err,
+		Outcome: shimmyPythonPhaseOutcome(err), Err: err,
 	})
 	if err != nil {
 		_ = slot.close(context.Background())
-		return nil, fmt.Errorf("agent-python: take prepared snapshot: %w", err)
+		return nil, fmt.Errorf("shimmy-python: take prepared snapshot: %w", err)
 	}
 	slot.baselineSize = module.Memory().Size()
 	return slot, nil
 }
 
-func restoreAgentPythonSnapshot(slot *agentPythonModuleSlot) error {
+func restoreShimmyPythonSnapshot(slot *shimmyPythonModuleSlot) error {
 	if slot == nil || slot.module == nil || slot.strategy == nil {
-		return errors.New("agent-python: prepared snapshot slot is incomplete")
+		return errors.New("shimmy-python: prepared snapshot slot is incomplete")
 	}
 	memory := slot.module.Memory()
 	if memory == nil {
-		return errors.New("agent-python: prepared snapshot slot has no memory")
+		return errors.New("shimmy-python: prepared snapshot slot has no memory")
 	}
 	if memory.Size() != slot.baselineSize {
-		return fmt.Errorf("agent-python: memory size drift: got %d bytes, baseline %d", memory.Size(), slot.baselineSize)
+		return fmt.Errorf("shimmy-python: memory size drift: got %d bytes, baseline %d", memory.Size(), slot.baselineSize)
 	}
 	return slot.strategy.Restore(memory)
 }
@@ -736,7 +730,7 @@ type snapshotModeReporter interface {
 	selectedSnapshotMode() string
 }
 
-func agentPythonSnapshotStrategyName(strategy SnapshotStrategy) string {
+func shimmyPythonSnapshotStrategyName(strategy SnapshotStrategy) string {
 	if reporter, ok := strategy.(snapshotModeReporter); ok {
 		if selected := reporter.selectedSnapshotMode(); selected != "" {
 			return selected
@@ -757,7 +751,7 @@ func agentPythonSnapshotStrategyName(strategy SnapshotStrategy) string {
 	}
 }
 
-func (d *AgentPythonDispatcher) replaceSnapshotSlot(requestID uint64) error {
+func (d *ShimmyPythonDispatcher) replaceSnapshotSlot(requestID uint64) error {
 	d.mu.Lock()
 	closed := d.closed
 	d.mu.Unlock()
@@ -770,13 +764,13 @@ func (d *AgentPythonDispatcher) replaceSnapshotSlot(requestID uint64) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	slot, err := d.newPreparedModuleSlot(ctx, true, AgentPythonPurposeReplacement, requestID)
+	slot, err := d.newPreparedModuleSlot(ctx, true, ShimmyPythonPurposeReplacement, requestID)
 	if err != nil {
-		return fmt.Errorf("agent-python: replace prepared snapshot slot: %w", err)
+		return fmt.Errorf("shimmy-python: replace prepared snapshot slot: %w", err)
 	}
 	if slot.snapshotSelected != d.snapshotSelected {
 		_ = slot.close(context.Background())
-		return fmt.Errorf("agent-python: replacement selected snapshot strategy %q, want %q", slot.snapshotSelected, d.snapshotSelected)
+		return fmt.Errorf("shimmy-python: replacement selected snapshot strategy %q, want %q", slot.snapshotSelected, d.snapshotSelected)
 	}
 	d.mu.Lock()
 	closed = d.closed
@@ -788,7 +782,7 @@ func (d *AgentPythonDispatcher) replaceSnapshotSlot(requestID uint64) error {
 	return nil
 }
 
-func (d *AgentPythonDispatcher) scheduleSingleUseRefill(requestID uint64) {
+func (d *ShimmyPythonDispatcher) scheduleSingleUseRefill(requestID uint64) {
 	if d.refillCtx == nil || d.prepared == nil {
 		return
 	}
@@ -816,10 +810,10 @@ func (d *AgentPythonDispatcher) scheduleSingleUseRefill(requestID uint64) {
 		}
 		ctx, cancel := context.WithTimeout(refillCtx, timeout)
 		defer cancel()
-		slot, err := d.newPreparedModuleSlot(ctx, false, AgentPythonPurposeRefill, requestID)
+		slot, err := d.newPreparedModuleSlot(ctx, false, ShimmyPythonPurposeRefill, requestID)
 		if err != nil {
 			if refillCtx.Err() == nil {
-				d.log.Warn("agent-python single-use refill failed", zap.Error(err))
+				d.log.Warn("shimmy-python single-use refill failed", zap.Error(err))
 			}
 			return
 		}
@@ -832,7 +826,7 @@ func (d *AgentPythonDispatcher) scheduleSingleUseRefill(requestID uint64) {
 	}()
 }
 
-func (d *AgentPythonDispatcher) Shutdown(ctx context.Context) error {
+func (d *ShimmyPythonDispatcher) Shutdown(ctx context.Context) error {
 	d.mu.Lock()
 	if d.closed {
 		d.mu.Unlock()
@@ -852,7 +846,7 @@ func (d *AgentPythonDispatcher) Shutdown(ctx context.Context) error {
 	return d.closeRuntime(ctx)
 }
 
-func (d *AgentPythonDispatcher) closeRuntime(ctx context.Context) error {
+func (d *ShimmyPythonDispatcher) closeRuntime(ctx context.Context) error {
 	if d.refillCancel != nil {
 		d.refillCancel()
 		d.refillCancel = nil
@@ -889,23 +883,49 @@ preparedClosed:
 	return errors.Join(slotErr, compiledErr, runtimeErr, cacheErr)
 }
 
-func agentPythonDeniedHostCall(context.Context, api.Module, uint32, uint32, uint32, uint32) int32 {
-	return -1
-}
-
-func callAgentPythonNoArgs(ctx context.Context, module api.Module, name string) error {
+func callShimmyPythonNoArgs(ctx context.Context, module api.Module, name string) error {
 	function := module.ExportedFunction(name)
 	if function == nil {
-		return fmt.Errorf("agent-python: required export %q is missing", name)
+		return fmt.Errorf("shimmy-python: required export %q is missing", name)
 	}
 	if _, err := function.Call(ctx); err != nil {
-		return fmt.Errorf("agent-python: call %s: %w", name, err)
+		return fmt.Errorf("shimmy-python: call %s: %w", name, err)
 	}
 	return nil
 }
 
-func callAgentPythonStatus(ctx context.Context, module api.Module, name string, data []byte) error {
-	results, release, err := callAgentPythonWithBytes(ctx, module, name, data)
+func callShimmyPythonNoArgsStatus(ctx context.Context, module api.Module, name string) error {
+	function := module.ExportedFunction(name)
+	if function == nil {
+		return fmt.Errorf("shimmy-python: required export %q is missing", name)
+	}
+	results, err := function.Call(ctx)
+	if err != nil {
+		return fmt.Errorf("shimmy-python: call %s: %w", name, err)
+	}
+	if len(results) != 1 || uint32(results[0]) != 0 {
+		return fmt.Errorf("shimmy-python: %s returned non-zero status", name)
+	}
+	return nil
+}
+
+func callShimmyPythonIdentity(ctx context.Context, module api.Module) error {
+	function := module.ExportedFunction("shimmy_python_runtime_identity")
+	if function == nil {
+		return errors.New("shimmy-python: runtime identity export is missing")
+	}
+	results, err := function.Call(ctx)
+	if err != nil {
+		return fmt.Errorf("shimmy-python: call runtime identity: %w", err)
+	}
+	if len(results) != 1 || uint32(results[0]) != shimmyPythonArtifactIdentityV1 {
+		return fmt.Errorf("shimmy-python: runtime identity mismatch: %v", results)
+	}
+	return nil
+}
+
+func callShimmyPythonStatus(ctx context.Context, module api.Module, name string, data []byte) error {
+	results, release, err := callShimmyPythonWithBytes(ctx, module, name, data)
 	if release != nil {
 		defer release()
 	}
@@ -913,13 +933,13 @@ func callAgentPythonStatus(ctx context.Context, module api.Module, name string, 
 		return err
 	}
 	if len(results) != 1 || uint32(results[0]) != 0 {
-		return fmt.Errorf("agent-python: %s returned non-zero status", name)
+		return fmt.Errorf("shimmy-python: %s returned non-zero status", name)
 	}
 	return nil
 }
 
-func callAgentPythonExecute(ctx context.Context, module api.Module, request []byte) ([]byte, error) {
-	results, release, err := callAgentPythonWithBytes(ctx, module, "execute", request)
+func callShimmyPythonExecute(ctx context.Context, module api.Module, request []byte) ([]byte, error) {
+	results, release, err := callShimmyPythonWithBytes(ctx, module, "evaluate", request)
 	if release != nil {
 		defer release()
 	}
@@ -927,24 +947,24 @@ func callAgentPythonExecute(ctx context.Context, module api.Module, request []by
 		return nil, err
 	}
 	if len(results) != 1 {
-		return nil, errors.New("agent-python: execute returned an unexpected result count")
+		return nil, errors.New("shimmy-python: evaluate returned an unexpected result count")
 	}
-	return readAgentPythonResponse(module.Memory(), uint32(results[0]))
+	return readShimmyPythonResponse(module.Memory(), uint32(results[0]))
 }
 
-func callAgentPythonWithBytes(ctx context.Context, module api.Module, name string, data []byte) ([]uint64, func(), error) {
-	if len(data) == 0 || len(data) > agentPythonPayloadMax || len(data) > math.MaxUint32 {
-		return nil, nil, fmt.Errorf("agent-python: %s input size %d is outside the guest bound", name, len(data))
+func callShimmyPythonWithBytes(ctx context.Context, module api.Module, name string, data []byte) ([]uint64, func(), error) {
+	if len(data) == 0 || len(data) > shimmyPythonPayloadMax || len(data) > math.MaxUint32 {
+		return nil, nil, fmt.Errorf("shimmy-python: %s input size %d is outside the guest bound", name, len(data))
 	}
 	allocate := module.ExportedFunction("alloc")
 	deallocate := module.ExportedFunction("dealloc")
 	function := module.ExportedFunction(name)
 	if allocate == nil || deallocate == nil || function == nil {
-		return nil, nil, fmt.Errorf("agent-python: required allocation or %s export is missing", name)
+		return nil, nil, fmt.Errorf("shimmy-python: required allocation or %s export is missing", name)
 	}
 	allocated, err := allocate.Call(ctx, uint64(uint32(len(data))))
 	if err != nil || len(allocated) != 1 || allocated[0] == 0 {
-		return nil, nil, fmt.Errorf("agent-python: guest allocation failed: %w", err)
+		return nil, nil, fmt.Errorf("shimmy-python: guest allocation failed: %w", err)
 	}
 	pointer := uint32(allocated[0])
 	var once sync.Once
@@ -957,49 +977,49 @@ func callAgentPythonWithBytes(ctx context.Context, module api.Module, name strin
 	}
 	if !module.Memory().Write(pointer, data) {
 		release()
-		return nil, nil, errors.New("agent-python: guest input write is out of bounds")
+		return nil, nil, errors.New("shimmy-python: guest input write is out of bounds")
 	}
 	results, err := function.Call(ctx, uint64(pointer), uint64(uint32(len(data))))
 	if err != nil {
 		release()
-		return nil, nil, fmt.Errorf("agent-python: call %s: %w", name, err)
+		return nil, nil, fmt.Errorf("shimmy-python: call %s: %w", name, err)
 	}
 	return results, release, nil
 }
 
-func readAgentPythonResponse(memory api.Memory, pointer uint32) ([]byte, error) {
+func readShimmyPythonResponse(memory api.Memory, pointer uint32) ([]byte, error) {
 	if memory == nil {
-		return nil, errors.New("agent-python: guest module has no linear memory")
+		return nil, errors.New("shimmy-python: guest module has no linear memory")
 	}
 	header, ok := memory.Read(pointer, 4)
 	if !ok {
-		return nil, errors.New("agent-python: response length prefix is out of bounds")
+		return nil, errors.New("shimmy-python: response length prefix is out of bounds")
 	}
 	length := binary.LittleEndian.Uint32(header)
-	if length > agentPythonPayloadMax {
-		return nil, fmt.Errorf("agent-python: response payload length %d exceeds limit %d", length, agentPythonPayloadMax)
+	if length > shimmyPythonPayloadMax {
+		return nil, fmt.Errorf("shimmy-python: response payload length %d exceeds limit %d", length, shimmyPythonPayloadMax)
 	}
 	if uint64(pointer)+4+uint64(length) > uint64(memory.Size()) {
-		return nil, errors.New("agent-python: response frame is out of bounds")
+		return nil, errors.New("shimmy-python: response frame is out of bounds")
 	}
 	payload, ok := memory.Read(pointer+4, length)
 	if !ok {
-		return nil, errors.New("agent-python: response payload is out of bounds")
+		return nil, errors.New("shimmy-python: response payload is out of bounds")
 	}
 	return append([]byte(nil), payload...), nil
 }
 
-type agentPythonDiagnosticBuffer struct {
+type shimmyPythonDiagnosticBuffer struct {
 	data []byte
 }
 
-func (buffer *agentPythonDiagnosticBuffer) Write(data []byte) (int, error) {
+func (buffer *shimmyPythonDiagnosticBuffer) Write(data []byte) (int, error) {
 	length := len(data)
-	if length >= agentPythonDiagnosticMax {
-		buffer.data = append(buffer.data[:0], data[length-agentPythonDiagnosticMax:]...)
+	if length >= shimmyPythonDiagnosticMax {
+		buffer.data = append(buffer.data[:0], data[length-shimmyPythonDiagnosticMax:]...)
 		return length, nil
 	}
-	if overflow := len(buffer.data) + length - agentPythonDiagnosticMax; overflow > 0 {
+	if overflow := len(buffer.data) + length - shimmyPythonDiagnosticMax; overflow > 0 {
 		copy(buffer.data, buffer.data[overflow:])
 		buffer.data = buffer.data[:len(buffer.data)-overflow]
 	}
@@ -1007,10 +1027,10 @@ func (buffer *agentPythonDiagnosticBuffer) Write(data []byte) (int, error) {
 	return length, nil
 }
 
-func (buffer *agentPythonDiagnosticBuffer) String() string { return string(buffer.data) }
-func (buffer *agentPythonDiagnosticBuffer) Reset()         { buffer.data = buffer.data[:0] }
+func (buffer *shimmyPythonDiagnosticBuffer) String() string { return string(buffer.data) }
+func (buffer *shimmyPythonDiagnosticBuffer) Reset()         { buffer.data = buffer.data[:0] }
 
-func withAgentPythonDiagnostic(base error, diagnostic string) error {
+func withShimmyPythonDiagnostic(base error, diagnostic string) error {
 	if diagnostic == "" {
 		return base
 	}

@@ -22,7 +22,7 @@ import (
 	"go.uber.org/zap"
 )
 
-const workerResultSchema = "agent-python-ultimate-worker-result/v1"
+const workerResultSchema = "shimmy-python-ultimate-worker-result/v1"
 
 type WorkerInput struct {
 	Schema          string  `json:"schema"`
@@ -42,29 +42,29 @@ type RequestSample struct {
 }
 
 type WorkerResult struct {
-	Schema            string                           `json:"schema"`
-	Row               PlanRow                          `json:"row"`
-	Status            string                           `json:"status"`
-	StartedUTC        string                           `json:"started_utc"`
-	FinishedUTC       string                           `json:"finished_utc"`
-	StartupDuration   time.Duration                    `json:"startup_duration_ns"`
-	HTTPReadyDuration time.Duration                    `json:"http_ready_duration_ns,omitempty"`
-	ShutdownDuration  time.Duration                    `json:"shutdown_duration_ns"`
-	Requests          []RequestSample                  `json:"requests"`
-	Phases            []wasmexec.AgentPythonPhaseEvent `json:"phases"`
-	SnapshotRequested string                           `json:"snapshot_requested,omitempty"`
-	SnapshotSelected  string                           `json:"snapshot_selected,omitempty"`
-	Error             string                           `json:"error,omitempty"`
-	Before            ProcessMetrics                   `json:"process_before"`
-	BeforeShutdown    ProcessMetrics                   `json:"process_before_shutdown"`
-	After             ProcessMetrics                   `json:"process_after"`
-	PreparedHits      uint64                           `json:"prepared_hits,omitempty"`
-	PreparedMisses    uint64                           `json:"prepared_misses,omitempty"`
-	PreparedRefills   uint64                           `json:"prepared_refills,omitempty"`
+	Schema            string                            `json:"schema"`
+	Row               PlanRow                           `json:"row"`
+	Status            string                            `json:"status"`
+	StartedUTC        string                            `json:"started_utc"`
+	FinishedUTC       string                            `json:"finished_utc"`
+	StartupDuration   time.Duration                     `json:"startup_duration_ns"`
+	HTTPReadyDuration time.Duration                     `json:"http_ready_duration_ns,omitempty"`
+	ShutdownDuration  time.Duration                     `json:"shutdown_duration_ns"`
+	Requests          []RequestSample                   `json:"requests"`
+	Phases            []wasmexec.ShimmyPythonPhaseEvent `json:"phases"`
+	SnapshotRequested string                            `json:"snapshot_requested,omitempty"`
+	SnapshotSelected  string                            `json:"snapshot_selected,omitempty"`
+	Error             string                            `json:"error,omitempty"`
+	Before            ProcessMetrics                    `json:"process_before"`
+	BeforeShutdown    ProcessMetrics                    `json:"process_before_shutdown"`
+	After             ProcessMetrics                    `json:"process_after"`
+	PreparedHits      uint64                            `json:"prepared_hits,omitempty"`
+	PreparedMisses    uint64                            `json:"prepared_misses,omitempty"`
+	PreparedRefills   uint64                            `json:"prepared_refills,omitempty"`
 }
 
 type dispatcherRuntime struct {
-	dispatcher *wasmexec.AgentPythonDispatcher
+	dispatcher *wasmexec.ShimmyPythonDispatcher
 }
 
 func (runtime dispatcherRuntime) Handle(ctx context.Context, request shimmyruntime.EvaluationRequest) (shimmyruntime.EvaluationResponse, error) {
@@ -77,19 +77,19 @@ func (dispatcherRuntime) Shutdown(context.Context) error { return nil }
 
 type phaseCollector struct {
 	mu     sync.Mutex
-	events []wasmexec.AgentPythonPhaseEvent
+	events []wasmexec.ShimmyPythonPhaseEvent
 }
 
-func (c *phaseCollector) observe(event wasmexec.AgentPythonPhaseEvent) {
+func (c *phaseCollector) observe(event wasmexec.ShimmyPythonPhaseEvent) {
 	c.mu.Lock()
 	c.events = append(c.events, event)
 	c.mu.Unlock()
 }
 
-func (c *phaseCollector) snapshot() []wasmexec.AgentPythonPhaseEvent {
+func (c *phaseCollector) snapshot() []wasmexec.ShimmyPythonPhaseEvent {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return append([]wasmexec.AgentPythonPhaseEvent(nil), c.events...)
+	return append([]wasmexec.ShimmyPythonPhaseEvent(nil), c.events...)
 }
 
 func ParseWorkerInput(raw []byte) (*WorkerInput, error) {
@@ -97,7 +97,7 @@ func ParseWorkerInput(raw []byte) (*WorkerInput, error) {
 	if err := decodeStrictJSON(raw, &input); err != nil {
 		return nil, err
 	}
-	if input.Schema != "agent-python-ultimate-worker-input/v1" {
+	if input.Schema != "shimmy-python-ultimate-worker-input/v1" {
 		return nil, fmt.Errorf("unsupported worker input schema %q", input.Schema)
 	}
 	plan := &Plan{Schema: PlanSchemaVersion, Rows: []PlanRow{input.Row}}
@@ -138,7 +138,7 @@ func RunWorker(ctx context.Context, input *WorkerInput) (result WorkerResult) {
 		result.Error = err.Error()
 		return result
 	}
-	tempDir, err := os.MkdirTemp("", "agent-python-ultimate-worker-")
+	tempDir, err := os.MkdirTemp("", "shimmy-python-ultimate-worker-")
 	if err != nil {
 		result.Error = err.Error()
 		return result
@@ -156,20 +156,19 @@ func RunWorker(ctx context.Context, input *WorkerInput) (result WorkerResult) {
 	if input.Row.CacheState == "cold" {
 		cacheDir = filepath.Join(tempDir, "cold-compile-cache")
 	}
-	dispatcher := wasmexec.NewAgentPythonDispatcher(wasmexec.Config{
+	dispatcher := wasmexec.NewShimmyPythonDispatcher(wasmexec.Config{
 		ModulePath:                  input.ArtifactPath,
-		AgentPythonManifestPath:     input.ManifestPath,
+		ShimmyPythonManifestPath:    input.ManifestPath,
 		PythonScriptPath:            scriptPath,
 		PythonLifecycle:             lifecycle,
 		SnapshotMode:                snapshotMode,
 		MaxInstances:                input.Row.Pool,
 		PythonPreparedCapacity:      input.Row.PreparedCapacity,
-		PythonPreloadMode:           "evaluator",
 		PythonSnapshotHeadroomBytes: 32 << 20,
 		MaxMemoryPages:              16384,
 		Timeout:                     2 * time.Minute,
 		CompileCacheDir:             cacheDir,
-		AgentPythonObserver:         collector.observe,
+		ShimmyPythonObserver:        collector.observe,
 	}, zap.NewNop())
 
 	startup := time.Now()
@@ -231,7 +230,7 @@ func RunWorker(ctx context.Context, input *WorkerInput) (result WorkerResult) {
 
 	result.SnapshotRequested = snapshotMode
 	for _, event := range collector.snapshot() {
-		if event.Phase == wasmexec.AgentPythonPhaseSnapshotTake {
+		if event.Phase == wasmexec.ShimmyPythonPhaseSnapshotTake {
 			result.SnapshotSelected = event.SnapshotSelected
 		}
 	}
@@ -319,7 +318,7 @@ func workerResponse(row PlanRow, seed int64) (any, error) {
 
 func runWorkerRequest(
 	ctx context.Context,
-	dispatcher *wasmexec.AgentPythonDispatcher,
+	dispatcher *wasmexec.ShimmyPythonDispatcher,
 	row PlanRow,
 	response any,
 	seed int64,
@@ -404,7 +403,7 @@ func cloneAnyMap(source map[string]any) map[string]any {
 
 func executeWorkerCall(
 	ctx context.Context,
-	dispatcher *wasmexec.AgentPythonDispatcher,
+	dispatcher *wasmexec.ShimmyPythonDispatcher,
 	payload map[string]any,
 	httpServer *httptest.Server,
 	httpClient *http.Client,

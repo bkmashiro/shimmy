@@ -69,7 +69,7 @@ def evaluation_function(response, answer, params):
     counter += 1
     return {"correct": response == answer, "counter": counter, "params": params}
 `)
-	prepareStatus := callShimmyPythonWithBytes(t, ctx, mod, "shimmy_python_prepare", evaluator)
+	prepareStatus := callShimmyPythonE2EWithBytes(t, ctx, mod, "shimmy_python_prepare", evaluator)
 	require.Equal(t, uint64(0), prepareStatus)
 
 	memory := mod.Memory()
@@ -109,7 +109,7 @@ type shimmyPythonE2EResponse struct {
 	} `json:"error"`
 }
 
-func callShimmyPythonWithBytes(
+func callShimmyPythonE2EWithBytes(
 	t *testing.T,
 	ctx context.Context,
 	mod api.Module,
@@ -138,7 +138,7 @@ func callShimmyPythonEvaluate(
 	request []byte,
 ) shimmyPythonE2EResponse {
 	t.Helper()
-	responsePointer := callShimmyPythonWithBytes(t, ctx, mod, "evaluate", request)
+	responsePointer := callShimmyPythonE2EWithBytes(t, ctx, mod, "evaluate", request)
 	prefix, ok := mod.Memory().Read(uint32(responsePointer), 4)
 	require.True(t, ok)
 	responseLength := binary.LittleEndian.Uint32(prefix)

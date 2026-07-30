@@ -71,7 +71,7 @@ func TestCowWazeroMemoryGrowthFailsAfterPreparedImageAttach(t *testing.T) {
 	require.True(t, supervisor.IsHealthy(), "a rejected grow leaves the fixed mapping valid")
 }
 
-func TestAgentPythonSnapshotStrategyNameReportsCowFallbackAsMemcpy(t *testing.T) {
+func TestShimmyPythonSnapshotStrategyNameReportsCowFallbackAsMemcpy(t *testing.T) {
 	cfg := Config{
 		ModulePath:     echoModulePath(t),
 		MaxInstances:   1,

@@ -30,7 +30,7 @@ const (
 	// Use FUNCTION_PYODIDE_SCRIPT to specify the Python eval script path.
 	PyodideIO IOInterface = "pyodide"
 
-	// ReactorPythonIO is the legacy interface name for Agent Python Runtime v1.
+	// ReactorPythonIO is the legacy interface name for the Shimmy Python runtime.
 	// It compiles the reactor artifact once and serves each request in a fresh,
 	// single-use wazero module instance.
 	ReactorPythonIO IOInterface = "reactor-python"

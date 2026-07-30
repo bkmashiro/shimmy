@@ -5,9 +5,9 @@ import (
 	"os"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
-	"github.com/stretchr/testify/require"
 )
 
 // echoWasmBytes reads the pre-compiled echo fixture from testdata/echo.wasm.

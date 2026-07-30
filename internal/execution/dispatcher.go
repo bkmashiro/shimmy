@@ -66,7 +66,7 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 			return nil, err
 		}
 		cfg.PythonScriptPath = pythonScriptPath
-		d := wasm.NewAgentPythonDispatcher(cfg, params.Log)
+		d := wasm.NewShimmyPythonDispatcher(cfg, params.Log)
 		if err := d.Start(params.Context); err != nil {
 			return nil, err
 		}
@@ -82,7 +82,7 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 		return d, nil
 	}
 
-	validWasmProfiles := []string{"agent-python", "generic", "python-reactor", "reactor-python"}
+	validWasmProfiles := []string{"shimmy-python", "generic", "python-reactor", "reactor-python"}
 	wasmProfile := strings.ToLower(strings.TrimSpace(os.Getenv("FUNCTION_WASM_PROFILE")))
 
 	switch supervisorCfg.IO.Interface {
@@ -94,7 +94,7 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 		switch wasmProfile {
 		case "generic":
 			return newGenericWasmDispatcher()
-		case "agent-python", "python-reactor", "reactor-python":
+		case "shimmy-python", "python-reactor", "reactor-python":
 			return newReactorPythonDispatcher()
 		default:
 			sort.Strings(validWasmProfiles)
@@ -237,7 +237,7 @@ func reactorPythonLambdaFeedbackConfig() (lambdaFeedbackBundleConfig, bool, erro
 		sysPath = envSysPath
 	}
 	if len(sysPath) > 0 {
-		return lambdaFeedbackBundleConfig{}, true, fmt.Errorf("agent-python does not expose Host filesystem paths to the guest; embed dependencies at startup with FUNCTION_LF_INCLUDE_ROOTS")
+		return lambdaFeedbackBundleConfig{}, true, fmt.Errorf("shimmy-python does not expose Host filesystem paths to the guest; embed dependencies at startup with FUNCTION_LF_INCLUDE_ROOTS")
 	}
 
 	return lambdaFeedbackBundleConfig{

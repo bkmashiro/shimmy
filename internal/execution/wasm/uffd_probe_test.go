@@ -39,14 +39,14 @@ import (
 
 // O_CLOEXEC / O_NONBLOCK flags for userfaultfd(2).
 const (
-	uffdOCloexec  = 0x80000  // syscall.O_CLOEXEC on linux/amd64
-	uffdONonblock = 0x800    // syscall.O_NONBLOCK on linux/amd64
+	uffdOCloexec  = 0x80000 // syscall.O_CLOEXEC on linux/amd64
+	uffdONonblock = 0x800   // syscall.O_NONBLOCK on linux/amd64
 )
 
 // UFFD API version handshake.
 const (
-	uffdioAPI      = 0xaa   // _UFFDIO_API magic
-	uffdFeatureWP  = 1 << 2 // UFFD_FEATURE_PAGEFAULT_FLAG_WP
+	uffdioAPI     = 0xaa   // _UFFDIO_API magic
+	uffdFeatureWP = 1 << 2 // UFFD_FEATURE_PAGEFAULT_FLAG_WP
 )
 
 // ioctl request numbers (linux/userfaultfd.h, x86-64).
@@ -153,7 +153,7 @@ func TestUserfaultfdProbe(t *testing.T) {
 	// MAP_ANONYMOUS | MAP_PRIVATE
 	addr, _, merr := syscall.RawSyscall6(
 		syscall.SYS_MMAP,
-		0,          // let kernel choose address
+		0, // let kernel choose address
 		regionSize,
 		syscall.PROT_READ|syscall.PROT_WRITE,
 		syscall.MAP_ANON|syscall.MAP_PRIVATE,

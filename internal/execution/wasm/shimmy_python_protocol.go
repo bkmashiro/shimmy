@@ -100,7 +100,7 @@ type shimmyPythonManifest struct {
 
 func verifyShimmyPythonArtifact(modulePath, manifestPath, expectedCommit string) (*ShimmyPythonArtifact, error) {
 	if modulePath == "" {
-		return nil, errors.New("shimmy-python: module path must be set")
+		return nil, errors.New("shimmy-python: ModulePath must be set")
 	}
 	if !shimmyPythonCommitPattern.MatchString(expectedCommit) {
 		return nil, errors.New("shimmy-python: expected Host commit must be 40 lowercase hex characters")

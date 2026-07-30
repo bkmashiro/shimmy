@@ -19,10 +19,14 @@ type Config struct {
 	// .wasm file path when FUNCTION_INTERFACE=wasm).
 	ModulePath string `conf:"cmd"`
 
-	// AgentPythonManifestPath binds the clean Python reactor artifact to its
-	// producer manifest. When empty, the agent-python dispatcher reads
+	// ShimmyPythonManifestPath binds the Shimmy Python artifact to its producer
+	// manifest. When empty, the dispatcher reads
 	// manifest.json next to ModulePath. FUNCTION_WASM_MANIFEST overrides it.
-	AgentPythonManifestPath string `conf:"wasm_manifest"`
+	ShimmyPythonManifestPath string `conf:"wasm_manifest"`
+
+	// ShimmyPythonExpectedCommit binds the producer artifact to an explicitly
+	// selected clean Shimmy commit.
+	ShimmyPythonExpectedCommit string `conf:"-"`
 
 	// MaxInstances is the maximum number of concurrently active module
 	// instances. When the pool is exhausted requests block until a slot is
@@ -78,16 +82,11 @@ type Config struct {
 	SnapshotMode string `conf:"wasm_snapshot_mode"`
 
 	// PythonScriptPath is the host path to the trusted Python evaluation script.
-	// Used by Agent Python and the independent resident Python compatibility path.
+	// Used by Shimmy Python and the independent resident Python compatibility path.
 	// The script must define evaluation_function(response, answer, params=None).
 	PythonScriptPath string `conf:"wasm_python_script"`
 
-	// PythonPreloadMode controls whether Agent Python passes the trusted evaluator
-	// through runtime_prepare. "evaluator" is the default; "off" executes the
-	// trusted script in each fresh request namespace.
-	PythonPreloadMode string `conf:"wasm_python_preload"`
-
-	// PythonLifecycle selects whether Agent Python modules are initialized for
+	// PythonLifecycle selects whether Shimmy Python modules are initialized for
 	// every request, consumed once from a prepared pool, or restored to their
 	// prepared linear-memory snapshot and reused.
 	PythonLifecycle string `conf:"wasm_python_lifecycle"`
@@ -107,10 +106,10 @@ type Config struct {
 	// after the first compile.
 	CompileCacheDir string `conf:"wasm_compile_cache"`
 
-	// AgentPythonObserver receives optional phase evidence. Callbacks may be
+	// ShimmyPythonObserver receives optional phase evidence. Callbacks may be
 	// concurrent during refill and must return promptly. It is never populated
 	// from operator configuration.
-	AgentPythonObserver func(AgentPythonPhaseEvent) `conf:"-"`
+	ShimmyPythonObserver func(ShimmyPythonPhaseEvent) `conf:"-"`
 }
 
 // applyDefaults fills in zero-value fields with sensible defaults.
@@ -123,9 +122,6 @@ func (c *Config) applyDefaults() {
 	if c.MaxMemoryPages == 0 {
 		c.MaxMemoryPages = 256 // 16 MB
 	}
-	if c.PythonPreloadMode == "" {
-		c.PythonPreloadMode = "evaluator"
-	}
 
 	// Resolve deprecated UseUffd → SnapshotMode so downstream code never
 	// needs to check both fields.
@@ -134,16 +130,7 @@ func (c *Config) applyDefaults() {
 	}
 }
 
-func (c *Config) validatePythonPreloadMode() error {
-	switch c.PythonPreloadMode {
-	case "evaluator", "off":
-		return nil
-	default:
-		return fmt.Errorf("python preload mode %q is invalid; use \"evaluator\" or \"off\"", c.PythonPreloadMode)
-	}
-}
-
-func (c *Config) applyAgentPythonDefaults() {
+func (c *Config) applyShimmyPythonDefaults() {
 	if c.PythonLifecycle == "" {
 		c.PythonLifecycle = "snapshot"
 	}
@@ -162,7 +149,7 @@ func (c *Config) applyAgentPythonDefaults() {
 	}
 }
 
-func (c *Config) validateAgentPythonLifecycle() error {
+func (c *Config) validateShimmyPythonLifecycle() error {
 	switch c.PythonLifecycle {
 	case "fresh", "single-use", "snapshot":
 	default:
@@ -215,7 +202,10 @@ func (c *Config) applyEnv() {
 		c.ModulePath = v
 	}
 	if v := os.Getenv("FUNCTION_WASM_MANIFEST"); v != "" {
-		c.AgentPythonManifestPath = v
+		c.ShimmyPythonManifestPath = v
+	}
+	if v := os.Getenv("FUNCTION_WASM_SHIMMY_PYTHON_EXPECTED_COMMIT"); v != "" {
+		c.ShimmyPythonExpectedCommit = strings.TrimSpace(v)
 	}
 	if v := os.Getenv("FUNCTION_WASM_MAX_MEMORY_PAGES"); v != "" {
 		if n, err := strconv.ParseUint(v, 10, 32); err == nil {
@@ -237,9 +227,7 @@ func (c *Config) applyEnv() {
 	if v := os.Getenv("FUNCTION_WASM_PYTHON_SCRIPT"); v != "" {
 		c.PythonScriptPath = v
 	}
-	if v := os.Getenv("FUNCTION_WASM_PYTHON_PRELOAD"); v != "" {
-		c.PythonPreloadMode = v
-	}
+
 	if v := os.Getenv("FUNCTION_WASM_PYTHON_LIFECYCLE"); v != "" {
 		c.PythonLifecycle = strings.TrimSpace(v)
 	}

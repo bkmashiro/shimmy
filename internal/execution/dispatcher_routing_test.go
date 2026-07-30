@@ -96,7 +96,7 @@ func TestNewDispatcher_Wasm_UnknownProfileErrorsWithValidValues(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `unsupported FUNCTION_WASM_PROFILE "ultra-bad-profile"`)
 	assert.Contains(t, err.Error(), "generic")
-	assert.Contains(t, err.Error(), "agent-python")
+	assert.Contains(t, err.Error(), "shimmy-python")
 	assert.Contains(t, err.Error(), "python-reactor")
 	assert.Contains(t, err.Error(), "reactor-python")
 }
@@ -211,7 +211,7 @@ func TestNewDispatcher_ReactorPython_RejectsPackageEntrypoints(t *testing.T) {
 	assert.Contains(t, err.Error(), "FUNCTION_INTERFACE=pyodide")
 }
 
-func TestNewDispatcher_AgentPythonRejectsRuntimeSysPath(t *testing.T) {
+func TestNewDispatcher_ShimmyPythonRejectsRuntimeSysPath(t *testing.T) {
 	t.Setenv("FUNCTION_LF_ROOT", t.TempDir())
 	t.Setenv("FUNCTION_LF_SYS_PATH", "/opt/runtime-deps.zip")
 

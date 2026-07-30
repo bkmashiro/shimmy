@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pathlib
 import re
+import stat
 import unittest
 
 
@@ -34,6 +35,8 @@ class ShimmyPythonWorkflowTests(unittest.TestCase):
         self.assertIn("inputs.mode == 'shimmy-python'", body)
 
     def test_source_bound_artifact_is_built_and_uploaded(self) -> None:
+        launcher = ROOT / "build/python-reactor/producer/build/build-base.sh"
+        self.assertTrue(launcher.stat().st_mode & stat.S_IXUSR)
         self.assertIn("build/python-reactor/producer/build/build-base.sh", self.text)
         self.assertIn("actions/upload-artifact@v4", self.text)
         self.assertIn("retention-days: 7", self.text)

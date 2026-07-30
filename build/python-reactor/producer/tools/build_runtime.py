@@ -180,10 +180,12 @@ def _apply_cpython_policy(cpython_root: pathlib.Path) -> list[pathlib.Path]:
     policy = PRODUCER_ROOT / "patches" / "cpython" / "relative-nanosleep.site"
     original = target.read_text()
     additions = policy.read_text()
-    for setting in ("ac_cv_func_clock_nanosleep", "ac_cv_lib_rt_clock_nanosleep"):
-        if setting in original:
-            raise ValueError(f"upstream config already defines {setting}; policy needs review")
-    target.write_text(original.rstrip() + "\n\n" + additions)
+    settings = ("ac_cv_func_clock_nanosleep", "ac_cv_lib_rt_clock_nanosleep")
+    present = [setting in original for setting in settings]
+    if not any(present):
+        target.write_text(original.rstrip() + "\n\n" + additions)
+    elif not all(present) or additions.strip() not in original:
+        raise ValueError("upstream timer policy is partial or no longer matches")
 
     jobs_patch = PRODUCER_ROOT / "patches" / "cpython" / "bounded-build-jobs.json"
     replacement = json.loads(jobs_patch.read_text())
@@ -191,9 +193,12 @@ def _apply_cpython_policy(cpython_root: pathlib.Path) -> list[pathlib.Path]:
         raise ValueError("bounded build jobs patch has unknown fields")
     helper = cpython_root / replacement["path"]
     helper_source = helper.read_text()
-    if helper_source.count(replacement["old"]) != 1:
-        raise ValueError("bounded build jobs patch no longer matches official helper exactly once")
-    helper.write_text(helper_source.replace(replacement["old"], replacement["new"]))
+    old_count = helper_source.count(replacement["old"])
+    new_count = helper_source.count(replacement["new"])
+    if old_count == 1 and new_count == 0:
+        helper.write_text(helper_source.replace(replacement["old"], replacement["new"]))
+    elif old_count != 0 or new_count != 1:
+        raise ValueError("bounded build jobs patch is partial or no longer matches")
     return [policy, jobs_patch]
 
 
@@ -210,7 +215,7 @@ def _copy_stdlib(cpython_root: pathlib.Path, target_build: pathlib.Path, stage: 
     if stage.exists():
         shutil.rmtree(stage)
     shutil.copytree(cpython_root / "Lib", stage, ignore=ignore)
-    (stage / "site-packages").mkdir()
+    (stage / "site-packages").mkdir(exist_ok=True)
     sysconfig_files = sorted(target_build.glob("build/lib.wasi-wasm32-3.14/_sysconfigdata*.py"))
     if len(sysconfig_files) != 1:
         raise ValueError(f"expected one target sysconfig module, found {len(sysconfig_files)}")

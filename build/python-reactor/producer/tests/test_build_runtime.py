@@ -49,9 +49,13 @@ class BuildRuntimeTests(unittest.TestCase):
             helper.write_text("import os\n" + replacement["old"] + "print('ok')\n")
 
             applied = self.module._apply_cpython_policy(root)
+            first_source = helper.read_text()
+            applied_again = self.module._apply_cpython_policy(root)
 
             self.assertEqual(len(applied), 2)
-            patched = helper.read_text()
+            self.assertEqual(applied_again, applied)
+            self.assertEqual(helper.read_text(), first_source)
+            patched = first_source
             self.assertIn("SHIMMY_BUILD_JOBS", patched)
             self.assertNotIn(replacement["old"], patched)
 
@@ -110,6 +114,7 @@ class BuildRuntimeTests(unittest.TestCase):
 
     def test_source_contains_no_external_runtime_dependency(self) -> None:
         source = MODULE_PATH.read_text().lower()
+        self.assertIn('(stage / "site-packages").mkdir(exist_ok=true)', source)
         self.assertIn('wasmtime_root / "wasmtime"', source)
         self.assertNotIn('wasmtime_root / "bin" / "wasmtime"', source)
         self.assertNotIn("agent-python-runtime", source)

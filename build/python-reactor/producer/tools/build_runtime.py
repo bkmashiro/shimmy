@@ -9,6 +9,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import posixpath
 import shutil
 import stat
 import subprocess
@@ -63,6 +64,16 @@ def _safe_member(name: str) -> None:
         raise ValueError(f"unsafe archive member: {name}")
 
 
+def _safe_link(name: str, linkname: str, *, relative_to_parent: bool) -> None:
+    link = pathlib.PurePosixPath(linkname)
+    if link.is_absolute():
+        raise ValueError(f"unsafe archive link: {name} -> {linkname}")
+    base = pathlib.PurePosixPath(name).parent if relative_to_parent else pathlib.PurePosixPath()
+    normalized = posixpath.normpath(str(base / link))
+    if normalized == ".." or normalized.startswith("../"):
+        raise ValueError(f"unsafe archive link: {name} -> {linkname}")
+
+
 def extract_archive(archive: pathlib.Path, destination: pathlib.Path) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     if tarfile.is_tarfile(archive):
@@ -70,9 +81,16 @@ def extract_archive(archive: pathlib.Path, destination: pathlib.Path) -> None:
             members = handle.getmembers()
             for member in members:
                 _safe_member(member.name)
-                if member.issym() or member.islnk() or member.isdev():
+                if member.issym():
+                    _safe_link(member.name, member.linkname, relative_to_parent=True)
+                elif member.islnk():
+                    _safe_link(member.name, member.linkname, relative_to_parent=False)
+                elif member.isdev():
                     raise ValueError(f"unsafe archive member: {member.name}")
-            handle.extractall(destination, members=members)
+            if sys.version_info >= (3, 12):
+                handle.extractall(destination, members=members, filter="fully_trusted")
+            else:
+                handle.extractall(destination, members=members)
         return
     if zipfile.is_zipfile(archive):
         with zipfile.ZipFile(archive) as handle:

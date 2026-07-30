@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import pathlib
 import sys
 import tarfile
@@ -58,6 +59,34 @@ class BuildRuntimeTests(unittest.TestCase):
             with tarfile.open(archive, "w") as handle:
                 handle.add(payload, arcname="../escape")
             with self.assertRaisesRegex(ValueError, "unsafe archive member"):
+                self.module.extract_archive(archive, root / "out")
+
+    def test_safe_tar_allows_relative_link_within_archive_root(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            archive = root / "sdk.tar"
+            with tarfile.open(archive, "w") as handle:
+                target = tarfile.TarInfo("sdk/share/man/man3/el_init.3")
+                target.size = 2
+                handle.addfile(target, io.BytesIO(b"ok"))
+                link = tarfile.TarInfo("sdk/share/man/man3/el_tok_init.3")
+                link.type = tarfile.SYMTYPE
+                link.linkname = "el_init.3"
+                handle.addfile(link)
+            output = root / "out"
+            self.module.extract_archive(archive, output)
+            self.assertEqual((output / "sdk/share/man/man3/el_tok_init.3").read_text(), "ok")
+
+    def test_safe_tar_rejects_link_escaping_archive_root(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            archive = root / "bad-link.tar"
+            with tarfile.open(archive, "w") as handle:
+                link = tarfile.TarInfo("sdk/link")
+                link.type = tarfile.SYMTYPE
+                link.linkname = "../../escape"
+                handle.addfile(link)
+            with self.assertRaisesRegex(ValueError, "unsafe archive link"):
                 self.module.extract_archive(archive, root / "out")
 
     def test_source_contains_no_external_runtime_dependency(self) -> None:

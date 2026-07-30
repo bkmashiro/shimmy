@@ -13,5 +13,10 @@
     "path": "numpy/_core/include/numpy/npy_cpu.h",
     "old": "#elif defined(__EMSCRIPTEN__)\n    /* __EMSCRIPTEN__ is defined by emscripten: an LLVM-to-Web compiler */\n    #define NPY_CPU_WASM\n",
     "new": "#elif defined(__EMSCRIPTEN__) || defined(__wasm__)\n    /* Both Emscripten and WASI clang target WebAssembly. */\n    #define NPY_CPU_WASM\n"
+  },
+  {
+    "path": "numpy/_core/meson.build",
+    "old": "if cc.has_function('strtold_l', include_directories: inc_curdir, prefix: _strtold_prefix)\n  cdata.set10('HAVE_STRTOLD_L', true)\nendif\n",
+    "new": "# wasi-libc exports strtold_l but aborts when it is called because long\n# double parsing is unsupported. Keep NumPy's existing strtod fallback on WASI.\nif host_machine.cpu_family() != 'wasm32' and cc.has_function('strtold_l', include_directories: inc_curdir, prefix: _strtold_prefix)\n  cdata.set10('HAVE_STRTOLD_L', true)\nendif\n"
   }
 ]

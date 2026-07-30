@@ -35,13 +35,17 @@ type ShimmyPythonArtifact struct {
 }
 
 type shimmyPythonManifest struct {
-	Schema           string `json:"schema"`
-	ArtifactContract string `json:"artifact_contract"`
-	Profile          string `json:"profile"`
-	Target           string `json:"target"`
-	ExecutionModel   string `json:"execution_model"`
-	IdentityU32      uint32 `json:"identity_u32"`
-	Producer         struct {
+	Schema             string `json:"schema"`
+	ArtifactContract   string `json:"artifact_contract"`
+	Profile            string `json:"profile"`
+	ProfileConstraints struct {
+		LongDoubleParsing      string `json:"longdouble_parsing"`
+		LongDoubleNativeParser bool   `json:"longdouble_native_parser"`
+	} `json:"profile_constraints"`
+	Target         string `json:"target"`
+	ExecutionModel string `json:"execution_model"`
+	IdentityU32    uint32 `json:"identity_u32"`
+	Producer       struct {
 		Project    string `json:"project"`
 		Repository string `json:"repository"`
 		Commit     string `json:"commit"`
@@ -126,6 +130,11 @@ func verifyShimmyPythonArtifact(modulePath, manifestPath, expectedCommit string)
 	}
 	if manifest.Profile != "base" && manifest.Profile != "numpy-core" {
 		return nil, fmt.Errorf("shimmy-python: unsupported artifact profile %q", manifest.Profile)
+	}
+	if manifest.Profile == "numpy-core" &&
+		(manifest.ProfileConstraints.LongDoubleParsing != "binary64-fallback-on-wasi" ||
+			manifest.ProfileConstraints.LongDoubleNativeParser) {
+		return nil, errors.New("shimmy-python: NumPy profile constraints are invalid")
 	}
 	if manifest.Target != "wasm32-wasip1" || manifest.ExecutionModel != "reactor" || manifest.IdentityU32 != shimmyPythonArtifactIdentityV1 {
 		return nil, errors.New("shimmy-python: manifest target, execution model, or identity is invalid")

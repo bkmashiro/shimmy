@@ -47,6 +47,13 @@ func TestVerifyShimmyPythonArtifactRejectsDrift(t *testing.T) {
 			match: "contract",
 		},
 		{
+			name: "numpy profile missing constraints",
+			mutate: func(manifest map[string]any) {
+				manifest["profile"] = "numpy-core"
+			},
+			match: "NumPy profile constraints",
+		},
+		{
 			name: "wrong commit",
 			mutate: func(manifest map[string]any) {
 				manifest["producer"].(map[string]any)["commit"] = strings.Repeat("b", 40)

@@ -36,7 +36,7 @@ class ManifestTests(unittest.TestCase):
             artifact.write_bytes(b"wasm-bytes")
             manifest = self.module.build_manifest(
                 artifact=artifact,
-                profile="base",
+                profile="numpy-core",
                 repository="bkmashiro/shimmy",
                 commit="a" * 40,
                 source_date_epoch=1234567890,
@@ -48,6 +48,10 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(manifest["schema"], "shimmy-python-runtime-artifact/v1")
         self.assertEqual(manifest["patches"][0]["path"], "patches/cpython/relative-nanosleep.site")
         self.assertEqual(manifest["artifact_contract"], "shimmy-python-runtime/v1")
+        self.assertEqual(
+            manifest["profile_constraints"]["longdouble_parsing"],
+            "binary64-fallback-on-wasi",
+        )
         self.assertEqual(manifest["producer"], {"project": "shimmy", "repository": "bkmashiro/shimmy", "commit": "a" * 40, "dirty": False})
         self.assertEqual(manifest["artifact"]["size"], 10)
         self.assertRegex(manifest["artifact"]["sha256"], r"^[0-9a-f]{64}$")

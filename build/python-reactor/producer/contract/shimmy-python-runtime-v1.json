@@ -38,6 +38,12 @@
   "response_layout": "u32le-length-prefixed-json",
   "request_max_bytes": 1048576,
   "response_max_bytes": 1048576,
+  "profile_constraints": {
+    "numpy-core": {
+      "longdouble_parsing": "binary64-fallback-on-wasi",
+      "longdouble_native_parser": false
+    }
+  },
   "capabilities": {
     "environment": false,
     "filesystem_preopens": false,

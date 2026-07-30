@@ -58,6 +58,7 @@ def build_manifest(
         "schema": "shimmy-python-runtime-artifact/v1",
         "artifact_contract": contract["artifact_contract"],
         "profile": profile,
+        "profile_constraints": contract.get("profile_constraints", {}).get(profile, {}),
         "target": contract["target"],
         "execution_model": contract["execution_model"],
         "identity_u32": contract["identity_u32"],

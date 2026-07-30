@@ -33,10 +33,13 @@ class NumPyBuilderTests(unittest.TestCase):
         patches = json.loads(PATCH_PATH.read_text())
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
+            source_fragments: dict[pathlib.Path, list[str]] = {}
             for patch in patches:
                 target = root / patch["path"]
                 target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text("prefix\n" + patch["old"] + "suffix\n")
+                source_fragments.setdefault(target, []).append(patch["old"])
+            for target, fragments in source_fragments.items():
+                target.write_text("prefix\n" + "\n".join(fragments) + "suffix\n")
             applied = self.module.apply_patch_set(root, PATCH_PATH)
             first = {path: (root / path).read_text() for path in (item["path"] for item in patches)}
             applied_again = self.module.apply_patch_set(root, PATCH_PATH)
@@ -45,6 +48,7 @@ class NumPyBuilderTests(unittest.TestCase):
             core = (root / patches[0]["path"]).read_text()
             self.assertIn("shimmy_numpy_multiarray_umath", core)
             self.assertNotIn("py.extension_module('_multiarray_umath'", core)
+            self.assertIn("host_machine.cpu_family() != 'wasm32'", core)
 
     def test_cross_file_uses_wasi_compilers_and_target_python_shim(self) -> None:
         text = self.module.render_cross_file(

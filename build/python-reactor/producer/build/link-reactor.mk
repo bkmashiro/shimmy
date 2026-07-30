@@ -2,6 +2,17 @@
 
 .PHONY: shimmy-python-runtime
 
+SHIMMY_RUNTIME_CFLAGS :=
+SHIMMY_LINKER := $(LINKCC)
+SHIMMY_NUMPY_LINK :=
+SHIMMY_CXX_LIBS :=
+ifneq ($(strip $(SHIMMY_NUMPY_ARCHIVES)),)
+SHIMMY_RUNTIME_CFLAGS += -DSHIMMY_NUMPY_CORE=1
+SHIMMY_LINKER := $(CXX)
+SHIMMY_NUMPY_LINK := -Wl,--whole-archive $(SHIMMY_NUMPY_ARCHIVES) -Wl,--no-whole-archive
+SHIMMY_CXX_LIBS := -lc++ -lc++abi
+endif
+
 shimmy-python-runtime:
 	@test -n "$(SHIMMY_RUNTIME_SOURCE)"
 	@test -n "$(SHIMMY_RUNTIME_INCLUDE)"
@@ -9,11 +20,12 @@ shimmy-python-runtime:
 	@test -n "$(SHIMMY_WASI_VFS_LIBRARY)"
 	@test -n "$(SHIMMY_OUTPUT)"
 	$(CC) $(PY_CORE_CFLAGS) \
+		$(SHIMMY_RUNTIME_CFLAGS) \
 		-I$(SHIMMY_RUNTIME_INCLUDE) \
 		-I$(SHIMMY_GENERATED_INCLUDE) \
 		-c $(SHIMMY_RUNTIME_SOURCE) \
 		-o shimmy_python_runtime.o
-	$(LINKCC) $(PY_CORE_LDFLAGS) $(LINKFORSHARED) \
+	$(SHIMMY_LINKER) $(PY_CORE_LDFLAGS) $(LINKFORSHARED) \
 		-mexec-model=reactor \
 		-Wl,-z,stack-size=16777216 \
 		-Wl,--stack-first \
@@ -28,5 +40,9 @@ shimmy-python-runtime:
 		-Wl,--export=evaluate \
 		-o $(SHIMMY_OUTPUT) \
 		shimmy_python_runtime.o \
+		-Wl,--start-group \
 		$(BLDLIBRARY) $(LIBS) $(MODLIBS) $(SYSLIBS) \
-		$(SHIMMY_WASI_VFS_LIBRARY)
+		$(SHIMMY_NUMPY_LINK) \
+		$(SHIMMY_WASI_VFS_LIBRARY) \
+		-Wl,--end-group \
+		$(SHIMMY_CXX_LIBS)

@@ -94,6 +94,8 @@ class BuildRuntimeTests(unittest.TestCase):
 
     def test_source_contains_no_external_runtime_dependency(self) -> None:
         source = MODULE_PATH.read_text().lower()
+        self.assertIn('wasmtime_root / "wasmtime"', source)
+        self.assertNotIn('wasmtime_root / "bin" / "wasmtime"', source)
         self.assertNotIn("agent-python-runtime", source)
         self.assertNotIn("webassembly-language-runtimes", source)
         self.assertNotIn("latest", source)

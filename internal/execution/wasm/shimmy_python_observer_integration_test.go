@@ -67,8 +67,8 @@ def evaluation_function(response, answer, params=None):
 		ShimmyPythonPhaseCompile,
 		ShimmyPythonPhaseInstantiate,
 		ShimmyPythonPhaseInitialize,
-		ShimmyPythonPhaseRuntimeInit,
-		ShimmyPythonPhaseRuntimePrepare,
+		ShimmyPythonPhaseGuestInit,
+		ShimmyPythonPhasePrepare,
 		ShimmyPythonPhaseHeadroom,
 		ShimmyPythonPhaseSnapshotTake,
 	})

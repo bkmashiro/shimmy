@@ -566,7 +566,7 @@ func (d *ShimmyPythonDispatcher) newInitializedModule(
 		err = callShimmyPythonNoArgsStatus(ctx, module, "shimmy_python_init")
 	}
 	d.observeShimmyPythonPhase(ShimmyPythonPhaseObservation{
-		Phase: ShimmyPythonPhaseRuntimeInit, Purpose: purpose, RequestID: requestID, SlotID: slotID,
+		Phase: ShimmyPythonPhaseGuestInit, Purpose: purpose, RequestID: requestID, SlotID: slotID,
 		Started: phaseStart, MemoryBytes: uint64(module.Memory().Size()), Outcome: shimmyPythonPhaseOutcome(err), Err: err,
 	})
 	if err != nil {
@@ -576,7 +576,7 @@ func (d *ShimmyPythonDispatcher) newInitializedModule(
 		phaseStart = time.Now()
 		err = callShimmyPythonStatus(ctx, module, "shimmy_python_prepare", []byte(d.script))
 		d.observeShimmyPythonPhase(ShimmyPythonPhaseObservation{
-			Phase: ShimmyPythonPhaseRuntimePrepare, Purpose: purpose, RequestID: requestID, SlotID: slotID,
+			Phase: ShimmyPythonPhasePrepare, Purpose: purpose, RequestID: requestID, SlotID: slotID,
 			Started: phaseStart, MemoryBytes: uint64(module.Memory().Size()), Outcome: shimmyPythonPhaseOutcome(err), Err: err,
 		})
 		if err != nil {

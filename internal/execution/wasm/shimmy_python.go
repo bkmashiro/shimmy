@@ -21,9 +21,10 @@ import (
 )
 
 const (
-	shimmyPythonDefaultMemoryPages = 8192
-	shimmyPythonMaxMemoryPages     = 16384
-	shimmyPythonDiagnosticMax      = 16 * 1024
+	shimmyPythonDefaultMemoryPages  = 8192
+	shimmyPythonMaxMemoryPages      = 16384
+	shimmyPythonDiagnosticMax       = 16 * 1024
+	shimmyPythonRefillShutdownGrace = 3 * time.Second
 )
 
 // ShimmyPythonDispatcher consumes the owned Shimmy Python Runtime v1 artifact.
@@ -39,6 +40,10 @@ type ShimmyPythonDispatcher struct {
 	closed   bool
 	closedCh chan struct{}
 	pending  sync.WaitGroup
+	// shutdownDone is closed only after the single teardown owner has drained
+	// requests/refills and released every slot, module, runtime, and cache.
+	shutdownDone chan struct{}
+	shutdownErr  error
 
 	runtime          wazero.Runtime
 	compiled         wazero.CompiledModule
@@ -49,14 +54,15 @@ type ShimmyPythonDispatcher struct {
 	prepared         chan *shimmyPythonModuleSlot
 	snapshotSelected string
 
-	refillCtx       context.Context
-	refillCancel    context.CancelFunc
-	refillMu        sync.Mutex
-	refillInFlight  int
-	refills         sync.WaitGroup
-	preparedHits    atomic.Uint64
-	preparedMisses  atomic.Uint64
-	preparedRefills atomic.Uint64
+	refillCtx           context.Context
+	refillCancel        context.CancelFunc
+	refillMu            sync.Mutex
+	refillInFlight      int
+	refills             sync.WaitGroup
+	refillShutdownGrace time.Duration
+	preparedHits        atomic.Uint64
+	preparedMisses      atomic.Uint64
+	preparedRefills     atomic.Uint64
 
 	runCounter  atomic.Uint64
 	slotCounter atomic.Uint64
@@ -817,33 +823,99 @@ func (d *ShimmyPythonDispatcher) scheduleSingleUseRefill(requestID uint64) {
 			}
 			return
 		}
-		select {
-		case d.prepared <- slot:
-			d.preparedRefills.Add(1)
-		case <-refillCtx.Done():
+		if !d.publishSingleUseRefill(slot) {
 			_ = slot.close(context.Background())
 		}
 	}()
 }
 
-func (d *ShimmyPythonDispatcher) Shutdown(ctx context.Context) error {
-	d.mu.Lock()
-	if d.closed {
-		d.mu.Unlock()
-		return nil
-	}
-	d.closed = true
-	close(d.closedCh)
-	if d.refillCancel != nil {
-		d.refillCancel()
-	}
-	d.mu.Unlock()
-
-	d.pending.Wait()
-	d.refills.Wait()
+func (d *ShimmyPythonDispatcher) publishSingleUseRefill(slot *shimmyPythonModuleSlot) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.closeRuntime(ctx)
+	if d.closed || d.prepared == nil || d.refillCtx == nil || d.refillCtx.Err() != nil {
+		return false
+	}
+	select {
+	case d.prepared <- slot:
+		d.preparedRefills.Add(1)
+		return true
+	default:
+		return false
+	}
+}
+
+// Shutdown starts teardown exactly once. ctx bounds how long this caller waits;
+// the teardown owner keeps draining resources so a deadline cannot orphan an
+// in-flight refill, and a later Shutdown call can wait for the same result.
+func (d *ShimmyPythonDispatcher) Shutdown(ctx context.Context) error {
+	d.mu.Lock()
+	if !d.closed {
+		d.closed = true
+		close(d.closedCh)
+		d.shutdownDone = make(chan struct{})
+		go d.finishShutdown()
+	}
+	done := d.shutdownDone
+	d.mu.Unlock()
+
+	select {
+	case <-done:
+		return d.completedShutdownError()
+	default:
+	}
+	select {
+	case <-done:
+		return d.completedShutdownError()
+	case <-ctx.Done():
+		select {
+		case <-done:
+			return d.completedShutdownError()
+		default:
+			return ctx.Err()
+		}
+	}
+}
+
+func (d *ShimmyPythonDispatcher) finishShutdown() {
+	// Every refill is scheduled while its Send holds a pending count, so after
+	// pending.Wait returns no refill can race a new Add against refills.Wait.
+	d.pending.Wait()
+	refillsDone := make(chan struct{})
+	go func() {
+		d.refills.Wait()
+		close(refillsDone)
+	}()
+
+	grace := d.refillShutdownGrace
+	if grace <= 0 {
+		grace = shimmyPythonRefillShutdownGrace
+	}
+	// Healthy CPython refills finish faster when allowed to complete than when
+	// wazero cancellation sends them through its compiled termination path.
+	timer := time.NewTimer(grace)
+	select {
+	case <-refillsDone:
+		timer.Stop()
+	case <-timer.C:
+		d.mu.Lock()
+		cancel := d.refillCancel
+		d.mu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+		<-refillsDone
+	}
+
+	d.mu.Lock()
+	d.shutdownErr = d.closeRuntime(context.Background())
+	close(d.shutdownDone)
+	d.mu.Unlock()
+}
+
+func (d *ShimmyPythonDispatcher) completedShutdownError() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.shutdownErr
 }
 
 func (d *ShimmyPythonDispatcher) closeRuntime(ctx context.Context) error {

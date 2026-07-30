@@ -32,9 +32,12 @@ class BuildRuntimeTests(unittest.TestCase):
         command = self.module.cpython_build_command(
             pathlib.Path("/work/Python-3.14.6"),
             pathlib.Path("/work/wasi-sdk"),
+            8,
         )
         self.assertEqual(command[:3], [sys.executable, "Tools/wasm/wasi", "build"])
-        self.assertEqual(command[-2:], ["--wasi-sdk", "/work/wasi-sdk"])
+        self.assertEqual(
+            command[-4:], ["--wasi-sdk", "/work/wasi-sdk", "--parallel", "8"]
+        )
 
     def test_verify_blob_checks_size_and_digest(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

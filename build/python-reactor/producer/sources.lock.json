@@ -1,0 +1,55 @@
+{
+  "schema": "shimmy-python-runtime-sources/v1",
+  "sources": [
+    {
+      "name": "cpython",
+      "version": "3.14.6",
+      "kind": "source",
+      "url": "https://www.python.org/ftp/python/3.14.6/Python-3.14.6.tar.xz",
+      "sha256": "143b1dddefaec3bd2e21e3b839b34a2b7fb9842272883c576420d605e9f30c63",
+      "size": 23921184,
+      "archive_root": "Python-3.14.6",
+      "license": "Python-2.0"
+    },
+    {
+      "name": "numpy",
+      "version": "2.4.2",
+      "kind": "source",
+      "url": "https://files.pythonhosted.org/packages/57/fd/0005efbd0af48e55eb3c7208af93f2862d4b1a56cd78e84309a2d959208d/numpy-2.4.2.tar.gz",
+      "sha256": "659a6107e31a83c4e33f763942275fd278b21d095094044eb35569e86a21ddae",
+      "size": 20723651,
+      "archive_root": "numpy-2.4.2",
+      "license": "BSD-3-Clause"
+    },
+    {
+      "name": "wasi-sdk",
+      "version": "33.0",
+      "kind": "toolchain",
+      "url": "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-33/wasi-sdk-33.0-x86_64-linux.tar.gz",
+      "sha256": "0ba8b5bfaeb2adf3f29bab5841d76cf5318ab8e1642ea195f88baba1abd47bce",
+      "size": 193563606,
+      "archive_root": "wasi-sdk-33.0-x86_64-linux",
+      "license": "Apache-2.0 WITH LLVM-exception"
+    },
+    {
+      "name": "wasi-vfs-library",
+      "version": "0.6.3",
+      "kind": "library",
+      "url": "https://github.com/kateinoigakukun/wasi-vfs/releases/download/v0.6.3/libwasi_vfs-wasm32-unknown-unknown.zip",
+      "sha256": "f94dc7fdabdefc0fed78b70f1ab100207db0558cbabb004dd9e5a0bdeec4256f",
+      "size": 3380336,
+      "archive_root": ".",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "wasi-vfs-cli-linux-x86-64",
+      "version": "0.6.3",
+      "kind": "tool",
+      "url": "https://github.com/kateinoigakukun/wasi-vfs/releases/download/v0.6.3/wasi-vfs-cli-x86_64-unknown-linux-gnu.zip",
+      "sha256": "c9ee8179f6f0882abc37024fbe0cd678311aa8a29083fa364915ed4d29a69485",
+      "size": 7055605,
+      "archive_root": ".",
+      "license": "Apache-2.0"
+    }
+  ]
+}

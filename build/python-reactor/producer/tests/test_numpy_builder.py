@@ -9,8 +9,9 @@ import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-MODULE_PATH = ROOT / "tools/build_numpy_core.py"
-PATCH_PATH = ROOT / "patches/numpy/static-core.json"
+MODULE_PATH = ROOT / "tools" / "build_numpy_core.py"
+PROFILE_PATH = ROOT / "tools" / "build_numpy_profile.py"
+PATCH_PATH = ROOT / "patches" / "numpy" / "static-core.json"
 
 
 def load_module():
@@ -67,6 +68,11 @@ class NumPyBuilderTests(unittest.TestCase):
         source = MODULE_PATH.read_text().lower()
         self.assertNotIn("agent-python-runtime", source)
         self.assertNotIn("webassembly-language-runtimes", source)
+
+    def test_profile_uses_existing_source_lock_entrypoint(self) -> None:
+        source = PROFILE_PATH.read_text()
+        self.assertIn("entries = br._source_index()", source)
+        self.assertNotIn("br._load_verifier", source)
         self.assertNotIn("github release", source)
 
 

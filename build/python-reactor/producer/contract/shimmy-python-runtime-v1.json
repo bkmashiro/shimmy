@@ -41,7 +41,8 @@
   "profile_constraints": {
     "numpy-core": {
       "longdouble_parsing": "binary64-fallback-on-wasi",
-      "longdouble_native_parser": false
+      "longdouble_native_parser": false,
+      "package_surface": "numpy-core-only"
     }
   },
   "capabilities": {

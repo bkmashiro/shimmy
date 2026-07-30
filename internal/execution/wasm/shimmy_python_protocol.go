@@ -41,6 +41,7 @@ type shimmyPythonManifest struct {
 	ProfileConstraints struct {
 		LongDoubleParsing      string `json:"longdouble_parsing"`
 		LongDoubleNativeParser bool   `json:"longdouble_native_parser"`
+		PackageSurface         string `json:"package_surface"`
 	} `json:"profile_constraints"`
 	Target         string `json:"target"`
 	ExecutionModel string `json:"execution_model"`
@@ -133,7 +134,8 @@ func verifyShimmyPythonArtifact(modulePath, manifestPath, expectedCommit string)
 	}
 	if manifest.Profile == "numpy-core" &&
 		(manifest.ProfileConstraints.LongDoubleParsing != "binary64-fallback-on-wasi" ||
-			manifest.ProfileConstraints.LongDoubleNativeParser) {
+			manifest.ProfileConstraints.LongDoubleNativeParser ||
+			manifest.ProfileConstraints.PackageSurface != "numpy-core-only") {
 		return nil, errors.New("shimmy-python: NumPy profile constraints are invalid")
 	}
 	if manifest.Target != "wasm32-wasip1" || manifest.ExecutionModel != "reactor" || manifest.IdentityU32 != shimmyPythonArtifactIdentityV1 {

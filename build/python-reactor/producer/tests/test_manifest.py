@@ -52,6 +52,10 @@ class ManifestTests(unittest.TestCase):
             manifest["profile_constraints"]["longdouble_parsing"],
             "binary64-fallback-on-wasi",
         )
+        self.assertEqual(
+            manifest["profile_constraints"]["package_surface"],
+            "numpy-core-only",
+        )
         self.assertEqual(manifest["producer"], {"project": "shimmy", "repository": "bkmashiro/shimmy", "commit": "a" * 40, "dirty": False})
         self.assertEqual(manifest["artifact"]["size"], 10)
         self.assertRegex(manifest["artifact"]["sha256"], r"^[0-9a-f]{64}$")

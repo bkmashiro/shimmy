@@ -47,6 +47,10 @@ def stage_numpy(numpy_root: pathlib.Path, numpy_build: pathlib.Path, site_packag
         ]
 
     shutil.copytree(numpy_root / "numpy", destination, dirs_exist_ok=True, ignore=ignore)
+    shutil.copy2(
+        PRODUCER_ROOT / "guest/bootstrap/numpy_core_init.py",
+        destination / "__init__.py",
+    )
     config = numpy_build / "numpy" / "__config__.py"
     if not config.is_file():
         raise ValueError("NumPy build did not generate numpy/__config__.py")

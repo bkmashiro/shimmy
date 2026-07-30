@@ -12,6 +12,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 MODULE_PATH = ROOT / "tools" / "build_numpy_core.py"
 PROFILE_PATH = ROOT / "tools" / "build_numpy_profile.py"
 PATCH_PATH = ROOT / "patches" / "numpy" / "static-core.json"
+FACADE_PATH = ROOT / "guest" / "bootstrap" / "numpy_core_init.py"
 
 
 def load_module():
@@ -85,6 +86,14 @@ class NumPyBuilderTests(unittest.TestCase):
             source,
         )
         self.assertNotIn("github release", source)
+
+    def test_core_facade_does_not_claim_optional_subpackages(self) -> None:
+        facade = FACADE_PATH.read_text()
+        profile = PROFILE_PATH.read_text()
+        self.assertIn("from ._core import *", facade)
+        self.assertNotIn("import numpy.linalg", facade)
+        self.assertNotIn("from . import lib", facade)
+        self.assertIn("numpy_core_init.py", profile)
 
 
 if __name__ == "__main__":

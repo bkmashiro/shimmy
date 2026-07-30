@@ -34,7 +34,7 @@ class SourceLockTests(unittest.TestCase):
     def test_lock_uses_stable_official_sources(self) -> None:
         entries = {entry["name"]: entry for entry in self.lock["sources"]}
         self.assertEqual(entries["cpython"]["version"], "3.14.6")
-        self.assertEqual(entries["numpy"]["version"], "2.4.2")
+        self.assertEqual(entries["numpy"]["version"], "2.2.6")
         self.assertEqual(entries["wasi-sdk"]["version"], "33.0")
         self.assertEqual(entries["wasi-vfs-library"]["version"], "0.6.3")
         self.assertEqual(entries["wasi-vfs-cli-linux-x86-64"]["version"], "0.6.3")

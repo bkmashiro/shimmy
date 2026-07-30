@@ -18,12 +18,12 @@ on:
       - "scripts/smoke-pyodide-package-http.sh"
       - "scripts/python-runtime-handoff/**"
       - "tools/lf-bundle-python/**"
-      - "build/python-reactor/artifacts/**"
+      - "build/python-reactor/producer/**"
       - "docs/python-runtime-handoff.md"
       - "docs/lambda-feedback-handoff.md"
       - "docs/README.md"
       - "internal/execution/dispatcher*.go"
-      - "internal/execution/wasm/agent_python*.go"
+      - "internal/execution/wasm/shimmy_python*.go"
       - "internal/execution/wasm/config.go"
       - "internal/execution/supervisor/adapter_rpc*.go"
       - "internal/execution/worker/**"
@@ -46,12 +46,12 @@ on:
       - "scripts/smoke-pyodide-package-http.sh"
       - "scripts/python-runtime-handoff/**"
       - "tools/lf-bundle-python/**"
-      - "build/python-reactor/artifacts/**"
+      - "build/python-reactor/producer/**"
       - "docs/python-runtime-handoff.md"
       - "docs/lambda-feedback-handoff.md"
       - "docs/README.md"
       - "internal/execution/dispatcher*.go"
-      - "internal/execution/wasm/agent_python*.go"
+      - "internal/execution/wasm/shimmy_python*.go"
       - "internal/execution/wasm/config.go"
       - "internal/execution/supervisor/adapter_rpc*.go"
       - "internal/execution/worker/**"
@@ -98,41 +98,6 @@ jobs:
               ast.parse(path.read_text(), filename=str(path))
           print("PASS: handoff Python sources parse without importing the guest canary")
           PY
-
-  agent-python-runtime-e2e:
-    name: Agent Python NumPy runtime E2E
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout without unrelated LFS objects
-        uses: actions/checkout@v7
-        env:
-          GIT_LFS_SKIP_SMUDGE: "1"
-
-      - name: Pull the pinned Agent Python artifact
-        run: |
-          git lfs pull \
-            --include="build/python-reactor/artifacts/agent-python-runtime-numpy-core.wasm" \
-            --exclude=""
-
-      - name: Verify the complete producer bundle
-        working-directory: build/python-reactor/artifacts
-        run: sha256sum --check SHA256SUMS
-
-      - name: Setup Go
-        uses: actions/setup-go@v7
-        with:
-          go-version-file: ./go.mod
-          cache: true
-
-      - name: Run real snapshot, COW, single-use, binary128, denial, and timeout recovery tests
-        env:
-          AGENT_PYTHON_RUNTIME_WASM: ${{ github.workspace }}/build/python-reactor/artifacts/agent-python-runtime-numpy-core.wasm
-          AGENT_PYTHON_RUNTIME_MANIFEST: ${{ github.workspace }}/build/python-reactor/artifacts/manifest.json
-        run: |
-          go test ./internal/execution/wasm \
-            -run='^TestAgentPythonDispatcher(RealNumPyArtifactCompatibility|RealNumPyCOWRestoresState|SingleUsePreparedRefillsNeverServedCandidates|TimeoutDoesNotPoisonRuntime|RealLambdaFeedbackBundle)$' \
-            -count=1 -v -timeout=15m
 
   pyodide-compatibility:
     name: Pyodide script/package compatibility

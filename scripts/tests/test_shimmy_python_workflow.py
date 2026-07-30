@@ -59,6 +59,15 @@ class ShimmyPythonWorkflowTests(unittest.TestCase):
         self.assertNotIn("release", artifact_jobs.lower())
         self.assertNotRegex(artifact_jobs, r"checkout@[^\n]+\n(?:.*\n){0,8}\s+repository:")
 
+    def test_no_workflow_consumes_legacy_python_artifacts(self) -> None:
+        workflows = "\n".join(
+            path.read_text()
+            for path in sorted((ROOT / ".github/workflows").glob("*.yml"))
+        ).lower()
+        self.assertNotIn("agent-python-runtime", workflows)
+        self.assertNotIn("agent_runtime_v1", workflows)
+        self.assertNotIn("git lfs pull", workflows)
+        self.assertNotIn("agent_python", workflows)
 
 if __name__ == "__main__":
     unittest.main()

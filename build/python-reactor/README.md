@@ -1,32 +1,37 @@
-# Agent Python Runtime bundle
+# Shimmy Python Runtime
 
-This directory contains Shimmy's pinned, consumer-verified Agent Python Runtime
-`numpy-core` bundle.
+Shimmy owns the CPython/WASI guest producer, artifact contract, source lock, and
+consumer verifier under `build/python-reactor/producer/`.
 
-## Canonical files
+Artifacts are generated, never committed. The canonical local output directory is:
 
 ```text
-artifacts/agent-python-runtime-numpy-core.wasm
-artifacts/manifest.json
-artifacts/SHA256SUMS
-artifacts/sbom.spdx.json
-artifacts/THIRD_PARTY_NOTICES.md
-artifacts/extension-selection.json
+dist/shimmy-python/
+  shimmy-python-runtime-base.wasm
+  shimmy-python-runtime-numpy-core.wasm
+  manifest.json
+  sources.lock.json
+  wasm-shape.json
+  SHA256SUMS
+  THIRD_PARTY_NOTICES.md
 ```
 
-Verify the complete bundle with:
+Build from locked official sources:
 
 ```bash
-cd build/python-reactor/artifacts
-sha256sum --check SHA256SUMS
+build/python-reactor/producer/build/build-base.sh \
+  --work-dir /tmp/shimmy-python-work \
+  --dist-dir "$PWD/dist/shimmy-python" \
+  --repository "$(git config --get remote.origin.url | sed -E 's#.*github.com[:/]([^/]+/[^/.]+)(\.git)?#\1#')" \
+  --commit "$(git rev-parse HEAD)"
 ```
 
-The manifest binds the artifact to producer commit
-`76b49158cc6c4824491561531bfe7e34872cb820`, ABI v1, the `numpy-core` profile,
-and SHA-256
-`90c27951b2d8c2c7a8b42705b365cb4231c6dad207aad5260d55d2f9a85f1034`.
+The GitHub artifact lane is manual-only through `build.yml` with
+`mode=shimmy-python`. Verify a downloaded bundle with:
 
-Shimmy does not build the CPython/NumPy artifact in this directory. Artifact
-production remains isolated in `bkmashiro/agent-python-runtime`; this repository
-owns the Host adapter, manifest verification, protocol compatibility, and final
-consumer E2E gates.
+```bash
+scripts/verify-python-reactor-artifact.sh
+```
+
+No Python runtime artifact, external project ABI, or custom Host capability
+module is stored or consumed from the repository tree.

@@ -29,19 +29,21 @@ class NumPyBuilderTests(unittest.TestCase):
         cls.module = load_module()
 
     def test_exact_static_core_patch_is_idempotent(self) -> None:
-        patch = json.loads(PATCH_PATH.read_text())[0]
+        patches = json.loads(PATCH_PATH.read_text())
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
-            target = root / patch["path"]
-            target.parent.mkdir(parents=True)
-            target.write_text("prefix\n" + patch["old"] + "suffix\n")
+            for patch in patches:
+                target = root / patch["path"]
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text("prefix\n" + patch["old"] + "suffix\n")
             applied = self.module.apply_patch_set(root, PATCH_PATH)
-            first = target.read_text()
+            first = {path: (root / path).read_text() for path in (item["path"] for item in patches)}
             applied_again = self.module.apply_patch_set(root, PATCH_PATH)
             self.assertEqual(applied, applied_again)
-            self.assertEqual(target.read_text(), first)
-            self.assertIn("shimmy_numpy_multiarray_umath", first)
-            self.assertNotIn("py.extension_module('_multiarray_umath'", first)
+            self.assertEqual({path: (root / path).read_text() for path in first}, first)
+            core = (root / patches[0]["path"]).read_text()
+            self.assertIn("shimmy_numpy_multiarray_umath", core)
+            self.assertNotIn("py.extension_module('_multiarray_umath'", core)
 
     def test_cross_file_uses_wasi_compilers_and_target_python_shim(self) -> None:
         text = self.module.render_cross_file(
@@ -50,11 +52,15 @@ class NumPyBuilderTests(unittest.TestCase):
             native_python=pathlib.Path("/native/python"),
             cython=pathlib.Path("/native/cython"),
             target_python_shim=pathlib.Path("/producer/target_python_shim.py"),
+            target_python_include=pathlib.Path("/target/Include"),
+            target_python_platinclude=pathlib.Path("/target/build"),
         )
         self.assertIn("wasm32-wasip1-clang", text)
         self.assertIn("system = 'wasi'", text)
         self.assertIn("needs_exe_wrapper = true", text)
         self.assertIn("/producer/target_python_shim.py", text)
+        self.assertIn("/target/Include", text)
+        self.assertIn("/target/build", text)
         self.assertNotIn("agent", text.lower())
 
     def test_builder_contains_no_prebuilt_runtime_or_external_project(self) -> None:

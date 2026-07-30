@@ -51,6 +51,8 @@ def render_cross_file(
     native_python: pathlib.Path,
     cython: pathlib.Path,
     target_python_shim: pathlib.Path,
+    target_python_include: pathlib.Path,
+    target_python_platinclude: pathlib.Path,
 ) -> str:
     bin_dir = wasi_sdk / "bin"
     python_command = f"[{_quote(native_python)}, {_quote(target_python_shim)}]"
@@ -67,10 +69,12 @@ exe_wrapper = [{_quote(wasmtime)}, 'run']
 needs_exe_wrapper = true
 skip_sanity_check = true
 longdouble_format = 'IEEE_QUAD_LE'
+shimmy_python_include = {_quote(target_python_include)}
+shimmy_python_platinclude = {_quote(target_python_platinclude)}
 
 [built-in options]
-c_args = ['-O2', '-fno-exceptions']
-cpp_args = ['-O2', '-fno-exceptions', '-fno-rtti']
+c_args = ['-O2', '-fno-exceptions', '-D_POSIX_C_SOURCE=200809L']
+cpp_args = ['-O2', '-fno-exceptions', '-fno-rtti', '-D_POSIX_C_SOURCE=200809L']
 
 [host_machine]
 system = 'wasi'
@@ -112,6 +116,8 @@ def build_static_core(
             native_python=native_python,
             cython=cython,
             target_python_shim=TARGET_PYTHON_SHIM,
+            target_python_include=cpython_root / "Include",
+            target_python_platinclude=target_build,
         )
     )
     env = os.environ.copy()

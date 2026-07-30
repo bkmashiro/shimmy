@@ -72,6 +72,7 @@ class NumPyBuilderTests(unittest.TestCase):
     def test_profile_uses_existing_source_lock_entrypoint(self) -> None:
         source = PROFILE_PATH.read_text()
         self.assertIn("entries = br._source_index()", source)
+        self.assertIn("REPO_ROOT = PRODUCER_ROOT.parents[2]", source)
         self.assertNotIn("br._load_verifier", source)
         self.assertNotIn("github release", source)
 

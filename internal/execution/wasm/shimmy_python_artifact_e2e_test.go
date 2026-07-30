@@ -22,8 +22,13 @@ func TestShimmyPythonArtifactE2E(t *testing.T) {
 	if artifactPath == "" {
 		t.Skip("SHIMMY_PYTHON_RUNTIME_ARTIFACT is not set")
 	}
-	artifact, err := os.ReadFile(artifactPath)
+	manifestPath := os.Getenv("SHIMMY_PYTHON_RUNTIME_MANIFEST")
+	expectedCommit := os.Getenv("SHIMMY_PYTHON_EXPECTED_COMMIT")
+	require.NotEmpty(t, manifestPath)
+	require.NotEmpty(t, expectedCommit)
+	verified, err := verifyShimmyPythonArtifact(artifactPath, manifestPath, expectedCommit)
 	require.NoError(t, err)
+	artifact := verified.WasmBytes
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
@@ -35,29 +40,7 @@ func TestShimmyPythonArtifactE2E(t *testing.T) {
 	compiled, err := rt.CompileModule(ctx, artifact)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, compiled.Close(ctx)) })
-	for _, definition := range compiled.ImportedFunctions() {
-		moduleName, _, imported := definition.Import()
-		require.True(t, imported)
-		require.Equal(t, wasi_snapshot_preview1.ModuleName, moduleName)
-	}
-	for _, definition := range compiled.ImportedMemories() {
-		moduleName, _, imported := definition.Import()
-		require.True(t, imported)
-		require.Equal(t, wasi_snapshot_preview1.ModuleName, moduleName)
-	}
-	for _, name := range []string{
-		"shimmy_python_runtime_identity",
-		"shimmy_python_init",
-		"shimmy_python_prepare",
-		"alloc",
-		"dealloc",
-		"evaluate",
-	} {
-		_, ok := compiled.ExportedFunctions()[name]
-		require.Truef(t, ok, "missing function export %s", name)
-	}
-	_, ok := compiled.ExportedMemories()["memory"]
-	require.True(t, ok, "missing memory export")
+	require.NoError(t, verifyShimmyPythonCompiledModule(compiled))
 
 	moduleConfig := wazero.NewModuleConfig().
 		WithName("").
@@ -117,7 +100,7 @@ def evaluation_function(response, answer, params):
 	require.Equal(t, "ValueError", invalid.Error.Type)
 }
 
-type shimmyPythonResponse struct {
+type shimmyPythonE2EResponse struct {
 	Status string         `json:"status"`
 	Result map[string]any `json:"result"`
 	Error  struct {
@@ -153,7 +136,7 @@ func callShimmyPythonEvaluate(
 	ctx context.Context,
 	mod api.Module,
 	request []byte,
-) shimmyPythonResponse {
+) shimmyPythonE2EResponse {
 	t.Helper()
 	responsePointer := callShimmyPythonWithBytes(t, ctx, mod, "evaluate", request)
 	prefix, ok := mod.Memory().Read(uint32(responsePointer), 4)
@@ -162,7 +145,7 @@ func callShimmyPythonEvaluate(
 	require.LessOrEqual(t, responseLength, uint32(1<<20))
 	body, ok := mod.Memory().Read(uint32(responsePointer)+4, responseLength)
 	require.True(t, ok)
-	var response shimmyPythonResponse
+	var response shimmyPythonE2EResponse
 	require.NoError(t, json.Unmarshal(append([]byte(nil), body...), &response))
 	return response
 }

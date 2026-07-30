@@ -260,4 +260,6 @@ jobs:
       - name: Execute real artifact through wazero
         env:
           SHIMMY_PYTHON_RUNTIME_ARTIFACT: ${{ github.workspace }}/dist/shimmy-python/shimmy-python-runtime-base.wasm
+          SHIMMY_PYTHON_RUNTIME_MANIFEST: ${{ github.workspace }}/dist/shimmy-python/manifest.json
+          SHIMMY_PYTHON_EXPECTED_COMMIT: ${{ github.sha }}
         run: go test ./internal/execution/wasm -run '^TestShimmyPythonArtifactE2E$' -count=1 -v

@@ -41,6 +41,8 @@ class ShimmyPythonWorkflowTests(unittest.TestCase):
         self.assertIn("actions/download-artifact@v8", self.text)
         self.assertIn("sha256sum -c SHA256SUMS", self.text)
         self.assertIn("SHIMMY_PYTHON_RUNTIME_ARTIFACT", self.text)
+        self.assertIn("SHIMMY_PYTHON_RUNTIME_MANIFEST", self.text)
+        self.assertIn("SHIMMY_PYTHON_EXPECTED_COMMIT", self.text)
         self.assertIn("TestShimmyPythonArtifactE2E", self.text)
 
     def test_no_cross_project_or_release_path(self) -> None:

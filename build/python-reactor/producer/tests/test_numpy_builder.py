@@ -90,6 +90,7 @@ class NumPyBuilderTests(unittest.TestCase):
     def test_core_facade_does_not_claim_optional_subpackages(self) -> None:
         facade = FACADE_PATH.read_text()
         profile = PROFILE_PATH.read_text()
+        self.assertIn("from ._globals import _CopyMode, _NoValue", facade)
         self.assertIn("from ._core import *", facade)
         self.assertNotIn("import numpy.linalg", facade)
         self.assertNotIn("from . import lib", facade)

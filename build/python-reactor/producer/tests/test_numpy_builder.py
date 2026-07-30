@@ -74,6 +74,12 @@ class NumPyBuilderTests(unittest.TestCase):
         self.assertIn("entries = br._source_index()", source)
         self.assertIn("REPO_ROOT = PRODUCER_ROOT.parents[2]", source)
         self.assertNotIn("br._load_verifier", source)
+        self.assertNotIn("wc.validate_shape", source)
+        self.assertIn("wc.verify_shape(", source)
+        self.assertIn(
+            'br._write_notices(dist / "THIRD_PARTY_NOTICES.md", entries)',
+            source,
+        )
         self.assertNotIn("github release", source)
 
 

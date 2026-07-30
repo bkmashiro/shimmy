@@ -191,11 +191,15 @@ def main(argv: list[str] | None = None) -> int:
         cwd=REPO_ROOT,
     )
 
+    contract = json.loads(br.CONTRACT_PATH.read_text())
     shape = wc.inspect_wasm(artifact.read_bytes())
-    wc.validate_shape(shape)
+    wc.verify_shape(
+        shape,
+        required_exports=contract["required_exports"],
+        allowed_import_modules=contract["allowed_import_modules"],
+    )
     shape_path = dist / "wasm-shape.json"
     shape_path.write_text(json.dumps(shape, indent=2, sort_keys=True) + "\n")
-    contract = json.loads(br.CONTRACT_PATH.read_text())
     patch_paths = sorted((PRODUCER_ROOT / "patches").rglob("*.*"))
     manifest = wm.build_manifest(
         artifact=artifact,
@@ -212,7 +216,7 @@ def main(argv: list[str] | None = None) -> int:
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     bundled_lock = dist / br.LOCK_PATH.name
     shutil.copy2(br.LOCK_PATH, bundled_lock)
-    br._write_notices(json.loads(br.LOCK_PATH.read_text()), dist / "THIRD_PARTY_NOTICES.md")
+    br._write_notices(dist / "THIRD_PARTY_NOTICES.md", entries)
     paths = [artifact, raw_artifact, manifest_path, shape_path, bundled_lock]
     (dist / "SHA256SUMS").write_text(
         "".join(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n" for path in paths)

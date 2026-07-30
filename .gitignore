@@ -29,6 +29,11 @@ go.work
 # Local .env files
 *.local
 
+# Local OS / agent / generated runtime artifacts
+.DS_Store
+.hermes/
+dist/
+
 # Local demo artifacts
 .demo-wasm-server.log
 .demo-logs/

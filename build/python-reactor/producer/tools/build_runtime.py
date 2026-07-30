@@ -105,7 +105,7 @@ def extract_archive(archive: pathlib.Path, destination: pathlib.Path) -> None:
 
 
 def cpython_build_command(
-    cpython_root: pathlib.Path, wasi_sdk_root: pathlib.Path, jobs: int = 1
+    cpython_root: pathlib.Path, wasi_sdk_root: pathlib.Path
 ) -> list[str]:
     del cpython_root
     return [
@@ -114,8 +114,6 @@ def cpython_build_command(
         "build",
         "--wasi-sdk",
         os.fspath(wasi_sdk_root),
-        "--parallel",
-        str(jobs),
     ]
 
 
@@ -177,7 +175,7 @@ def _extract_entry(entry: dict, archive: pathlib.Path, sources_dir: pathlib.Path
     return destination / entry["archive_root"] if entry["archive_root"] != "." else destination
 
 
-def _apply_cpython_policy(cpython_root: pathlib.Path) -> pathlib.Path:
+def _apply_cpython_policy(cpython_root: pathlib.Path) -> list[pathlib.Path]:
     target = cpython_root / "Tools" / "wasm" / "wasi" / "config.site-wasm32-wasi"
     policy = PRODUCER_ROOT / "patches" / "cpython" / "relative-nanosleep.site"
     original = target.read_text()
@@ -186,7 +184,17 @@ def _apply_cpython_policy(cpython_root: pathlib.Path) -> pathlib.Path:
         if setting in original:
             raise ValueError(f"upstream config already defines {setting}; policy needs review")
     target.write_text(original.rstrip() + "\n\n" + additions)
-    return policy
+
+    jobs_patch = PRODUCER_ROOT / "patches" / "cpython" / "bounded-build-jobs.json"
+    replacement = json.loads(jobs_patch.read_text())
+    if set(replacement) != {"path", "old", "new"}:
+        raise ValueError("bounded build jobs patch has unknown fields")
+    helper = cpython_root / replacement["path"]
+    helper_source = helper.read_text()
+    if helper_source.count(replacement["old"]) != 1:
+        raise ValueError("bounded build jobs patch no longer matches official helper exactly once")
+    helper.write_text(helper_source.replace(replacement["old"], replacement["new"]))
+    return [policy, jobs_patch]
 
 
 def _copy_stdlib(cpython_root: pathlib.Path, target_build: pathlib.Path, stage: pathlib.Path) -> None:
@@ -266,7 +274,7 @@ def build_base(
     if len(libraries) != 1:
         raise ValueError(f"expected one libwasi_vfs.a, found {len(libraries)}")
 
-    patch_path = _apply_cpython_policy(cpython_root)
+    patch_paths = _apply_cpython_policy(cpython_root)
     env = os.environ.copy()
     env.update(
         {
@@ -274,11 +282,10 @@ def build_base(
             "WASMTIME": os.fspath(wasmtime),
             "SOURCE_DATE_EPOCH": str(source_date_epoch),
             "PYTHONHASHSEED": "0",
+            "SHIMMY_BUILD_JOBS": str(jobs),
         }
     )
-    _run(
-        cpython_build_command(cpython_root, wasi_sdk_root, jobs), cwd=cpython_root, env=env
-    )
+    _run(cpython_build_command(cpython_root, wasi_sdk_root), cwd=cpython_root, env=env)
 
     target_build = cpython_root / "cross-build" / "wasm32-wasip1"
     if not (target_build / "libpython3.14.a").is_file():
@@ -353,7 +360,7 @@ def build_base(
         contract=contract,
         source_lock_path=LOCK_PATH,
         wasm_shape=shape,
-        patch_paths=[patch_path],
+        patch_paths=patch_paths,
     )
     manifest_path = dist_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
@@ -402,7 +409,7 @@ def main(argv: list[str] | None = None) -> int:
                     "jobs": args.jobs,
                     "source_lock": os.fspath(LOCK_PATH.relative_to(REPO_ROOT)),
                     "cpython_command": cpython_build_command(
-                        pathlib.Path("<cpython>"), pathlib.Path("<wasi-sdk>"), args.jobs
+                        pathlib.Path("<cpython>"), pathlib.Path("<wasi-sdk>")
                     ),
                 },
                 indent=2,

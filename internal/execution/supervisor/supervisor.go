@@ -127,6 +127,13 @@ func New(params Params) (Supervisor, error) {
 
 	// the worker is persistent if the IO interface is RPC
 	persistent := config.IO.Interface == RpcIO
+	switch config.WorkerLifecycle {
+	case WorkerLifecycleAutomatic:
+	case WorkerLifecycleInvocation:
+		persistent = false
+	default:
+		return nil, fmt.Errorf("unsupported worker lifecycle %q", config.WorkerLifecycle)
+	}
 
 	return &WorkerSupervisor{
 		createWorker: createAdapter,

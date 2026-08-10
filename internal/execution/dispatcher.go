@@ -37,7 +37,7 @@ type Params struct {
 }
 
 func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
-	supervisorCfg, err := applyDBISecurityConfig(params.Config.Supervisor)
+	supervisorCfg, err := applyExecutionWrappers(params.Config.Supervisor)
 	if err != nil {
 		return nil, err
 	}

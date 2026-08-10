@@ -16,7 +16,7 @@ import venv
 
 
 PRODUCER_ROOT = pathlib.Path(__file__).resolve().parents[1]
-REPO_ROOT = PRODUCER_ROOT.parents[3]
+REPO_ROOT = PRODUCER_ROOT.parents[2]
 
 
 def load_tool(name: str):
@@ -72,17 +72,9 @@ def main(argv: list[str] | None = None) -> int:
     wc = load_tool("wasm_contract")
     wm = load_tool("write_manifest")
 
-    commit = args.commit or subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True
-    ).strip()
-    epoch = args.source_date_epoch or int(
-        subprocess.check_output(
-            ["git", "show", "-s", "--format=%ct", commit], cwd=REPO_ROOT, text=True
-        ).strip()
-    )
-    if subprocess.check_output(
-        ["git", "status", "--porcelain", "--untracked-files=no"], cwd=REPO_ROOT, text=True
-    ).strip():
+    commit = args.commit or br._git_value("rev-parse", "HEAD")
+    epoch = args.source_date_epoch or int(br._git_value("show", "-s", "--format=%ct", commit))
+    if br._git_value("status", "--porcelain", "--untracked-files=no"):
         raise ValueError("tracked producer tree must be clean")
 
     work = args.work_dir.resolve()

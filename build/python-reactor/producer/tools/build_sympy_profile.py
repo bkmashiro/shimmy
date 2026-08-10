@@ -16,7 +16,7 @@ import zipfile
 
 
 PRODUCER_ROOT = pathlib.Path(__file__).resolve().parents[1]
-REPO_ROOT = PRODUCER_ROOT.parents[3]
+REPO_ROOT = PRODUCER_ROOT.parents[2]
 NATIVE_SUFFIXES = (".so", ".pyd", ".dylib", ".dll", ".a")
 
 

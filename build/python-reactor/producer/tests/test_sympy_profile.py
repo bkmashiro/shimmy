@@ -73,6 +73,7 @@ class SymPyProfileBuilderTests(unittest.TestCase):
         self.assertIn("wc.verify_shape(", source)
         self.assertNotIn("wc.validate_shape(", source)
         self.assertIn('br._write_notices(dist / "third_party_notices.md", entries)', source)
+        self.assertIn("repo_root = producer_root.parents[2]", source)
 
 
 if __name__ == "__main__":

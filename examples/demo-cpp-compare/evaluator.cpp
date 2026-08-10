@@ -5,7 +5,7 @@
 // Shimmy's internal WASM ABI:
 //   - export memory
 //   - alloc(size) -> request pointer
-//   - evaluate(ptr, len) -> pointer to [u32 little-endian length][JSON bytes]
+//   - dispatch(ptr, len) -> pointer to [u32 little-endian length][JSON bytes]
 //
 // The business logic is deliberately Lambda Feedback-shaped: compare the
 // submitted response with the answer and return feedback from params.
@@ -159,7 +159,7 @@ extern "C" i32 alloc(i32 size) {
   return i32(uintptr(request_buffer));
 }
 
-extern "C" i32 evaluate(i32 req_ptr, i32 req_len) {
+extern "C" i32 dispatch(i32 req_ptr, i32 req_len) {
   if (req_ptr == 0 || req_len <= 0) return write_error("empty request");
 
   const char *json = reinterpret_cast<const char *>(uintptr(req_ptr));

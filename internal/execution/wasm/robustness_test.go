@@ -41,10 +41,10 @@ func wasmName(s string) []byte {
 	return out
 }
 
-func malformedABIWasm(allocReturnsValue, evaluateReturnsValue bool) []byte {
+func malformedABIWasm(allocReturnsValue, dispatchReturnsValue bool) []byte {
 	module := []byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00}
 
-	// Types: alloc(i32) [-> i32], evaluate(i32, i32) [-> i32].
+	// Types: alloc(i32) [-> i32], dispatch(i32, i32) [-> i32].
 	var types []byte
 	types = append(types, 0x02)
 	types = append(types, 0x60, 0x01, 0x7f)
@@ -54,27 +54,27 @@ func malformedABIWasm(allocReturnsValue, evaluateReturnsValue bool) []byte {
 		types = append(types, 0x00)
 	}
 	types = append(types, 0x60, 0x02, 0x7f, 0x7f)
-	if evaluateReturnsValue {
+	if dispatchReturnsValue {
 		types = append(types, 0x01, 0x7f)
 	} else {
 		types = append(types, 0x00)
 	}
 	module = append(module, wasmSection(1, types)...)
 
-	// Two functions: alloc uses type 0; evaluate uses type 1.
+	// Two functions: alloc uses type 0; dispatch uses type 1.
 	module = append(module, wasmSection(3, []byte{0x02, 0x00, 0x01})...)
 
 	// One memory page.
 	module = append(module, wasmSection(5, []byte{0x01, 0x00, 0x01})...)
 
-	// Export memory, alloc, evaluate.
+	// Export memory, alloc, dispatch.
 	var exports []byte
 	exports = append(exports, 0x03)
 	exports = append(exports, wasmName("memory")...)
 	exports = append(exports, 0x02, 0x00)
 	exports = append(exports, wasmName("alloc")...)
 	exports = append(exports, 0x00, 0x00)
-	exports = append(exports, wasmName("evaluate")...)
+	exports = append(exports, wasmName("dispatch")...)
 	exports = append(exports, 0x00, 0x01)
 	module = append(module, wasmSection(7, exports)...)
 
@@ -89,13 +89,13 @@ func malformedABIWasm(allocReturnsValue, evaluateReturnsValue bool) []byte {
 	code = append(code, wasmULEB(uint32(len(allocBody)))...)
 	code = append(code, allocBody...)
 
-	evaluateBody := []byte{0x00}
-	if evaluateReturnsValue {
-		evaluateBody = append(evaluateBody, 0x41, 0x08) // i32.const 8
+	dispatchBody := []byte{0x00}
+	if dispatchReturnsValue {
+		dispatchBody = append(dispatchBody, 0x41, 0x08) // i32.const 8
 	}
-	evaluateBody = append(evaluateBody, 0x0b) // end
-	code = append(code, wasmULEB(uint32(len(evaluateBody)))...)
-	code = append(code, evaluateBody...)
+	dispatchBody = append(dispatchBody, 0x0b) // end
+	code = append(code, wasmULEB(uint32(len(dispatchBody)))...)
+	code = append(code, dispatchBody...)
 	module = append(module, wasmSection(10, code)...)
 
 	return module
@@ -119,7 +119,7 @@ func TestDispatcher_Send_ReturnsErrorForAllocWithoutReturnValue(t *testing.T) {
 	assert.Contains(t, err.Error(), "alloc returned 0 values")
 }
 
-func TestDispatcher_Send_ReturnsErrorForEvaluateWithoutReturnValue(t *testing.T) {
+func TestDispatcher_Send_ReturnsErrorForDispatchWithoutReturnValue(t *testing.T) {
 	path := writeTempWasm(t, malformedABIWasm(true, false))
 	d := NewDispatcher(Config{ModulePath: path, MaxInstances: 1, Timeout: time.Second}, newTestLogger(t))
 	require.NoError(t, d.Start(context.Background()))
@@ -127,7 +127,7 @@ func TestDispatcher_Send_ReturnsErrorForEvaluateWithoutReturnValue(t *testing.T)
 
 	_, err := d.Send(context.Background(), "eval", nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "evaluate returned 0 values")
+	assert.Contains(t, err.Error(), "dispatch returned 0 values")
 }
 
 func TestDispatcher_StartRejectsInvalidMaxMemoryPagesEnv(t *testing.T) {

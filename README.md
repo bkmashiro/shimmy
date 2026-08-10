@@ -264,7 +264,7 @@ A generic WASM evaluator module must export:
 |--------|---------|
 | `memory` | Guest linear memory. |
 | `alloc(size: i32) -> i32` | Reserves memory where Shimmy writes the request JSON. |
-| `evaluate(ptr: i32, len: i32) -> i32` | Executes one command and returns a response pointer. |
+| `dispatch(ptr: i32, len: i32) -> i32` | Dispatches one opaque request envelope and returns a response pointer. |
 
 Shimmy writes this internal adapter envelope into guest memory:
 
@@ -279,7 +279,7 @@ Shimmy writes this internal adapter envelope into guest memory:
 }
 ```
 
-The response pointer returned by `evaluate` must point at:
+The response pointer returned by `dispatch` must point at:
 
 ```text
 [p:p+4]       little-endian uint32 JSON length

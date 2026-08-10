@@ -39,10 +39,10 @@ still need to expose the same Shimmy WASM ABI:
 ```text
 memory
 alloc(size: i32) -> i32
-evaluate(req_ptr: i32, req_len: i32) -> i32
+dispatch(req_ptr: i32, req_len: i32) -> i32
 ```
 
-`evaluate` returns a pointer to `[uint32 little-endian response_len][response JSON bytes]`.
+`dispatch` returns a pointer to `[uint32 little-endian response_len][response JSON bytes]`.
 
 ## Test
 

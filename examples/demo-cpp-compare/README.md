@@ -30,7 +30,7 @@ zig c++ \
   -fno-rtti \
   -Wl,--no-entry \
   -Wl,--export=alloc \
-  -Wl,--export=evaluate \
+  -Wl,--export=dispatch \
   -Wl,--export-memory \
   -Wl,--initial-memory=2097152 \
   -o eval.wasm \
@@ -45,10 +45,10 @@ need to expose the same Shimmy WASM ABI:
 ```text
 memory
 alloc(size: i32) -> i32
-evaluate(req_ptr: i32, req_len: i32) -> i32
+dispatch(req_ptr: i32, req_len: i32) -> i32
 ```
 
-`evaluate` returns a pointer to `[uint32 little-endian response_len][response JSON bytes]`.
+`dispatch` returns a pointer to `[uint32 little-endian response_len][response JSON bytes]`.
 
 ## Run the end-to-end demo
 

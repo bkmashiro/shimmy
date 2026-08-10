@@ -44,7 +44,7 @@ zig c++ \
   -fno-rtti \
   -Wl,--no-entry \
   -Wl,--export=alloc \
-  -Wl,--export=evaluate \
+  -Wl,--export=dispatch \
   -Wl,--export-memory \
   -Wl,--initial-memory=2097152 \
   -o "${WASM}" \

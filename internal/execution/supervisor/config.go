@@ -36,7 +36,7 @@ type IOConfig struct {
 	// to the worker process.
 	//
 	// If "wasm", Shimmy loads a pre-built WASI module from FUNCTION_COMMAND
-	// or FUNCTION_WASM_MODULE and calls its internal alloc/evaluate adapter ABI.
+	// or FUNCTION_WASM_MODULE and calls its internal alloc/dispatch adapter ABI.
 	//
 	// Default is "rpc".
 	Interface IOInterface `conf:"interface"`

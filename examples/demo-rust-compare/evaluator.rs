@@ -21,7 +21,7 @@ pub extern "C" fn alloc(_size: i32) -> i32 {
 }
 
 #[no_mangle]
-pub extern "C" fn evaluate(_req_ptr: i32, req_len: i32) -> i32 {
+pub extern "C" fn dispatch(_req_ptr: i32, req_len: i32) -> i32 {
     unsafe {
         INVOCATION_COUNT += 1;
     }

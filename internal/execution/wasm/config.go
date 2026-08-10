@@ -20,7 +20,7 @@ type Config struct {
 	// MaxInstances is the number of warm module instances in the pool.
 	MaxInstances int
 
-	// Timeout is the per-request deadline passed to the guest evaluate call.
+	// Timeout is the per-request deadline passed to the guest dispatch call.
 	Timeout time.Duration
 
 	// MaxMemoryPages limits WASM linear memory (1 page = 64 KiB). The default is

@@ -62,7 +62,7 @@ GLOBAL OPTIONS:
    --command value, -c value                        the command to invoke to start the worker process. [$FUNCTION_COMMAND]
    --cwd value, -d value                            the working directory for the worker process. [$FUNCTION_WORKING_DIR]
    --env value, -e value [ --env value, -e value ]  additional environment variables for the worker process. [$FUNCTION_ENV]
-   --interface value, -i value                      the interface to use for worker process communication. Options: rpc, file. (default: "rpc") [$FUNCTION_INTERFACE]
+   --interface value, -i value                      the execution interface. Options: rpc, file, wasm, pyodide. (default: "rpc") [$FUNCTION_INTERFACE]
    --max-workers value, -n value                    the maximum number of worker processes to run concurrently. (default: number of CPU cores) [$FUNCTION_MAX_PROCS]
 
    rpc
@@ -201,6 +201,10 @@ The shim keeps the evaluation function running as a persistent process and commu
 | `http` | HTTP POST to a local URL. Experimental — custom TLS and timeout configuration is not yet supported. |
 | `tcp` | Raw TCP connection. |
 | `ws` | WebSocket connection. Experimental — custom dialer configuration is not yet supported. |
+
+Generic WASM, Python Reactor, Pyodide, DBI, and QEMU are explicit opt-in
+execution paths. See [Execution paths](docs/execution-paths.md) for their
+environment contracts, lifecycle behavior, and compatibility boundaries.
 
 The shim injects the following environment variables into the evaluation function process so it can identify the transport it should listen on:
 

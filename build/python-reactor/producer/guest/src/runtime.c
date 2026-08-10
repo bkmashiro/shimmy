@@ -10,6 +10,7 @@
 
 #ifdef SHIMMY_NUMPY_CORE
 PyMODINIT_FUNC PyInit__multiarray_umath(void);
+PyMODINIT_FUNC PyInit__umath_linalg(void);
 #endif
 
 static unsigned char shimmy_response[
@@ -76,6 +77,9 @@ int32_t shimmy_python_init(void) {
 #ifdef SHIMMY_NUMPY_CORE
     if (PyImport_AppendInittab("numpy._core._multiarray_umath", PyInit__multiarray_umath) < 0) {
         return -6;
+    }
+    if (PyImport_AppendInittab("numpy.linalg._umath_linalg", PyInit__umath_linalg) < 0) {
+        return -7;
     }
 #endif
 

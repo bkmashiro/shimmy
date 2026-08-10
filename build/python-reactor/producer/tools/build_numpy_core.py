@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build NumPy's real _multiarray_umath core as WASI static archives."""
+"""Build NumPy's required native core modules as WASI static archives."""
 
 from __future__ import annotations
 
@@ -161,17 +161,22 @@ def build_static_core(
             "npymath",
             "_multiarray_umath_mtargets",
             "shimmy_numpy_multiarray_umath",
+            "shimmy_numpy_umath_linalg",
         ],
         cwd=numpy_root,
         env=env,
     )
     libraries = sorted(build_dir.rglob("*.a"))
-    main = [path for path in libraries if path.name == "libshimmy_numpy_multiarray_umath.a"]
-    if len(main) != 1:
-        raise ValueError(f"expected one NumPy core archive, found {len(main)}")
+    main_names = {
+        "libshimmy_numpy_multiarray_umath.a",
+        "libshimmy_numpy_umath_linalg.a",
+    }
+    main = [path for path in libraries if path.name in main_names]
+    if {path.name for path in main} != main_names:
+        raise ValueError(f"required NumPy core archives missing: {sorted(main_names - {path.name for path in main})}")
     inventory = {
         "schema": "shimmy-numpy-static-libraries/v1",
-        "main": os.fspath(main[0]),
+        "main": [os.fspath(path) for path in main],
         "libraries": [os.fspath(path) for path in libraries],
     }
     inventory_path = output_dir / "numpy-static-libraries.json"

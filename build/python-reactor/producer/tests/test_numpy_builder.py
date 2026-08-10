@@ -46,6 +46,14 @@ class NumPyBuilderTests(unittest.TestCase):
             core = (root / patches[0]["path"]).read_text()
             self.assertIn("shimmy_numpy_multiarray_umath", core)
             self.assertNotIn("py.extension_module('_multiarray_umath'", core)
+            linalg = (root / "numpy/linalg/meson.build").read_text()
+            self.assertIn("shimmy_numpy_umath_linalg", linalg)
+            self.assertNotIn("py.extension_module('_umath_linalg'", linalg)
+
+    def test_builder_compiles_both_required_numpy_native_modules(self) -> None:
+        source = MODULE_PATH.read_text()
+        self.assertIn('"shimmy_numpy_multiarray_umath"', source)
+        self.assertIn('"shimmy_numpy_umath_linalg"', source)
 
     def test_profile_builder_uses_contract_shape_verifier(self) -> None:
         source = PROFILE_BUILDER_PATH.read_text()

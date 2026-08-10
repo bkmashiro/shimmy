@@ -13,5 +13,10 @@
     "path": "numpy/_core/include/numpy/npy_cpu.h",
     "old": "#elif defined(__EMSCRIPTEN__)\n    /* __EMSCRIPTEN__ is defined by emscripten: an LLVM-to-Web compiler */\n    #define NPY_CPU_WASM\n",
     "new": "#elif defined(__EMSCRIPTEN__) || defined(__wasm__)\n    /* Both Emscripten and WASI clang target WebAssembly. */\n    #define NPY_CPU_WASM\n"
+  },
+  {
+    "path": "numpy/linalg/meson.build",
+    "old": "py.extension_module('_umath_linalg',\n  [\n    'umath_linalg.cpp',\n    python_xerbla_sources,\n    lapack_lite_sources,\n  ],\n  dependencies: [np_core_dep, blas_dep, lapack_dep],\n  link_with: npymath_lib,\n  install: true,\n  subdir: 'numpy/linalg',\n)\n",
+    "new": "static_library('shimmy_numpy_umath_linalg',\n  [\n    'umath_linalg.cpp',\n    python_xerbla_sources,\n    lapack_lite_sources,\n  ],\n  dependencies: [py_dep, np_core_dep, blas_dep, lapack_dep],\n  link_with: npymath_lib,\n  install: false,\n  subdir: 'numpy/linalg',\n)\n"
   }
 ]

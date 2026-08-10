@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -70,6 +71,10 @@ class BundleTests(unittest.TestCase):
                 bundle.dispatch("eval", {"response": "2", "answer": "2", "params": {}}),
             )
             self.assertEqual(
+                {"is_correct": True},
+                bundle.evaluation_function("2", "2", {}),
+            )
+            self.assertEqual(
                 {"preview": {"sympy": "x + 1"}},
                 bundle.dispatch("preview", {"response": "x + 1", "params": {}}),
             )
@@ -121,7 +126,7 @@ class BundleTests(unittest.TestCase):
             self.assertIn("--include-root", result.stderr)
             self.assertFalse(out.exists())
 
-    def test_runtime_module_declaration_is_explicit(self) -> None:
+    def test_runtime_modules_come_from_bound_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             tmp = Path(td)
             fixture = tmp / "fixture"
@@ -131,11 +136,18 @@ class BundleTests(unittest.TestCase):
                 "def evaluation_function(response, answer, params):\n"
                 "    return {'is_correct': np.allclose(response, answer)}\n",
             )
+            manifest = tmp / "manifest.json"
+            manifest.write_text(json.dumps({
+                "schema": "shimmy-python-runtime-artifact/v1",
+                "artifact_contract": "shimmy-python-runtime/v1",
+                "profile": "numpy-core",
+                "python_modules": ["numpy"],
+            }))
             out = tmp / "bundle.py"
             result = run_bundler(
                 "--root", str(fixture),
                 "--adapter-root", str(ADAPTER),
-                "--runtime-module", "numpy",
+                "--runtime-manifest", str(manifest),
                 "--eval-entrypoint", "evaluation_function.evaluation:evaluation_function",
                 "--out", str(out),
             )

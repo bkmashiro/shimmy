@@ -5,6 +5,8 @@ trusted script consumed by the Python Reactor Host profile:
 
 ```python
 def dispatch(method: str, payload: dict) -> dict: ...
+def evaluation_function(response, answer, params): ...
+def preview_function(response, params): ...  # when configured
 ```
 
 It is a deployment-time tool. Shimmy does not invoke it, inspect package
@@ -16,6 +18,7 @@ structure, install dependencies, or read `FUNCTION_LF_*` settings at runtime.
 python3 tools/lf-bundle-python/lf_bundle_python.py \
   --root /src/evaluation-function \
   --adapter-root tools/lf-bundle-python/adapter \
+  --runtime-manifest /opt/runtime/manifest.json \
   --eval-entrypoint evaluation_function.evaluation:evaluation_function \
   --preview-entrypoint evaluation_function.preview:preview_function \
   --out /tmp/evaluator.bundle.py
@@ -48,18 +51,18 @@ python3 tools/lf-bundle-python/lf_bundle_python.py \
   --include-root /tmp/pure-python-dependencies
 ```
 
-Modules supplied by the selected Reactor artifact must be declared explicitly:
+Modules supplied by the selected Reactor artifact come from its bound manifest:
 
 ```bash
 python3 tools/lf-bundle-python/lf_bundle_python.py \
   ... \
-  --runtime-module numpy
+  --runtime-manifest /opt/runtime/numpy-core/manifest.json
 ```
 
-`--runtime-module` is a build assertion, not an installer. The Linux E2E must
-still import and execute that module from the real artifact. Native CPython
-wheels are not accepted as WASI dependencies merely because they appear in an
-evaluator's `requirements.txt`.
+The manifest's profile and `python_modules` must agree with the frozen Runtime
+contract (`base`, `numpy-core`, or `sympy`). This is not an installer. Native
+CPython wheels are not accepted as WASI dependencies merely because they appear
+in an evaluator's `requirements.txt`.
 
 The adapter provides the evaluator-facing `lf_toolkit` result/parameter surface
 without starting the toolkit's process server. It normalizes toolkit objects,
@@ -86,11 +89,15 @@ SHIMMY_LF_COMPARE_BOOLEAN_ROOT=/src/compareBoolean \
 SHIMMY_LF_COMPARE_BOOLEAN_SHA=<commit> \
 SHIMMY_LF_EVALUATION_UTILS_WHEEL=/deps/evaluation_function_utils.whl \
 SHIMMY_LF_EVALUATION_UTILS_SHA256=<sha256> \
-SHIMMY_PYTHON_REACTOR_WASM=/opt/runtime/agent-python-runtime-numpy-core.wasm \
-SHIMMY_PYTHON_REACTOR_MANIFEST=/opt/runtime/manifest.json \
+SHIMMY_PYTHON_REACTOR_BASE_WASM=/opt/runtime/base/runtime.wasm \
+SHIMMY_PYTHON_REACTOR_BASE_MANIFEST=/opt/runtime/base/manifest.json \
+SHIMMY_PYTHON_REACTOR_NUMPY_WASM=/opt/runtime/numpy-core/runtime.wasm \
+SHIMMY_PYTHON_REACTOR_NUMPY_MANIFEST=/opt/runtime/numpy-core/manifest.json \
+SHIMMY_PYTHON_REACTOR_SYMPY_WASM=/opt/runtime/sympy/runtime.wasm \
+SHIMMY_PYTHON_REACTOR_SYMPY_MANIFEST=/opt/runtime/sympy/manifest.json \
   scripts/e2e-python-reactor-lf-packages.sh
 ```
 
-This starts real Shimmy HTTP servers for the current boilerplate and ArrayEqual
-packages. It also verifies that compareBoolean fails packaging with an explicit
-missing-SymPy report rather than producing a broken bundle.
+This starts real Shimmy HTTP servers for boilerplate, ArrayEqual, and
+compareBoolean. It also verifies that the base profile rejects compareBoolean
+before packaging while the SymPy profile executes it successfully.

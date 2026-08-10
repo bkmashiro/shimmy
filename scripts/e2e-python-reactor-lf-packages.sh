@@ -12,11 +12,20 @@ COMPARE_BOOLEAN="${SHIMMY_LF_COMPARE_BOOLEAN_ROOT:?set SHIMMY_LF_COMPARE_BOOLEAN
 COMPARE_BOOLEAN_SHA="${SHIMMY_LF_COMPARE_BOOLEAN_SHA:?set SHIMMY_LF_COMPARE_BOOLEAN_SHA}"
 UTILS_WHEEL="${SHIMMY_LF_EVALUATION_UTILS_WHEEL:?set SHIMMY_LF_EVALUATION_UTILS_WHEEL}"
 UTILS_SHA256="${SHIMMY_LF_EVALUATION_UTILS_SHA256:?set SHIMMY_LF_EVALUATION_UTILS_SHA256}"
+BASE_WASM="${SHIMMY_PYTHON_REACTOR_BASE_WASM:?set SHIMMY_PYTHON_REACTOR_BASE_WASM}"
+BASE_MANIFEST="${SHIMMY_PYTHON_REACTOR_BASE_MANIFEST:?set SHIMMY_PYTHON_REACTOR_BASE_MANIFEST}"
+NUMPY_WASM="${SHIMMY_PYTHON_REACTOR_NUMPY_WASM:?set SHIMMY_PYTHON_REACTOR_NUMPY_WASM}"
+NUMPY_MANIFEST="${SHIMMY_PYTHON_REACTOR_NUMPY_MANIFEST:?set SHIMMY_PYTHON_REACTOR_NUMPY_MANIFEST}"
+SYMPY_WASM="${SHIMMY_PYTHON_REACTOR_SYMPY_WASM:?set SHIMMY_PYTHON_REACTOR_SYMPY_WASM}"
+SYMPY_MANIFEST="${SHIMMY_PYTHON_REACTOR_SYMPY_MANIFEST:?set SHIMMY_PYTHON_REACTOR_SYMPY_MANIFEST}"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/shimmy-lf-package-e2e.XXXXXX")"
 trap 'rm -rf "${TMP}"' EXIT
 
 for cmd in git python3 sha256sum; do
   command -v "${cmd}" >/dev/null 2>&1 || { echo "missing required command: ${cmd}" >&2; exit 1; }
+done
+for input in "${BASE_WASM}" "${BASE_MANIFEST}" "${NUMPY_WASM}" "${NUMPY_MANIFEST}" "${SYMPY_WASM}" "${SYMPY_MANIFEST}"; do
+  [[ -r "${input}" ]] || { echo "unreadable runtime input: ${input}" >&2; exit 1; }
 done
 
 verify_checkout() {
@@ -27,6 +36,18 @@ verify_checkout() {
   actual="$(git -C "${path}" rev-parse HEAD)"
   [[ "${actual}" == "${expected}" ]] || { echo "checkout ${path} is ${actual}, expected ${expected}" >&2; exit 1; }
   [[ -z "$(git -C "${path}" status --porcelain)" ]] || { echo "checkout is dirty: ${path}" >&2; exit 1; }
+}
+
+run_http_e2e() {
+  local wasm="$1"
+  local manifest="$2"
+  local evaluator="$3"
+  local expectation="$4"
+  SHIMMY_PYTHON_REACTOR_WASM="${wasm}" \
+  SHIMMY_PYTHON_REACTOR_MANIFEST="${manifest}" \
+  SHIMMY_E2E_EVALUATOR="${evaluator}" \
+  SHIMMY_E2E_EXPECTATION="${expectation}" \
+    "${ROOT}/scripts/e2e-python-reactor.sh"
 }
 
 verify_checkout "${BOILERPLATE}" "${BOILERPLATE_SHA}"
@@ -42,44 +63,50 @@ BOILERPLATE_BUNDLE="${TMP}/boilerplate.bundle.py"
 python3 "${BUNDLER}" \
   --root "${BOILERPLATE}" \
   --adapter-root "${ADAPTER}" \
+  --runtime-manifest "${BASE_MANIFEST}" \
   --eval-entrypoint evaluation_function.evaluation:evaluation_function \
   --preview-entrypoint evaluation_function.preview:preview_function \
   --out "${BOILERPLATE_BUNDLE}"
-
-SHIMMY_E2E_EVALUATOR="${BOILERPLATE_BUNDLE}" \
-SHIMMY_E2E_EXPECTATION=boilerplate \
-  "${ROOT}/scripts/e2e-python-reactor.sh"
+run_http_e2e "${BASE_WASM}" "${BASE_MANIFEST}" "${BOILERPLATE_BUNDLE}" boilerplate
 
 ARRAY_BUNDLE="${TMP}/array-equal.bundle.py"
 python3 "${BUNDLER}" \
   --root "${ARRAY_EQUAL}/app" \
   --adapter-root "${ADAPTER}" \
   --include-root "${UTILS_ROOT}" \
-  --runtime-module numpy \
+  --runtime-manifest "${NUMPY_MANIFEST}" \
   --eval-entrypoint evaluation:evaluation_function \
   --out "${ARRAY_BUNDLE}"
+run_http_e2e "${NUMPY_WASM}" "${NUMPY_MANIFEST}" "${ARRAY_BUNDLE}" array-equal
 
-SHIMMY_E2E_EVALUATOR="${ARRAY_BUNDLE}" \
-SHIMMY_E2E_EXPECTATION=array-equal \
-  "${ROOT}/scripts/e2e-python-reactor.sh"
-
-COMPARE_BUNDLE="${TMP}/compare-boolean.bundle.py"
+COMPARE_REJECTED="${TMP}/compare-boolean-base.bundle.py"
 set +e
 COMPARE_OUTPUT="$(python3 "${BUNDLER}" \
   --root "${COMPARE_BOOLEAN}" \
   --adapter-root "${ADAPTER}" \
+  --runtime-manifest "${BASE_MANIFEST}" \
   --eval-entrypoint evaluation_function.evaluation:evaluation_function \
   --preview-entrypoint evaluation_function.preview:preview_function \
-  --out "${COMPARE_BUNDLE}" 2>&1)"
+  --out "${COMPARE_REJECTED}" 2>&1)"
 COMPARE_STATUS=$?
 set -e
-[[ ${COMPARE_STATUS} -ne 0 ]] || { echo "compareBoolean unexpectedly bundled without SymPy" >&2; exit 1; }
-[[ ! -e "${COMPARE_BUNDLE}" ]] || { echo "failed dependency check still wrote a bundle" >&2; exit 1; }
+[[ ${COMPARE_STATUS} -ne 0 ]] || { echo "base profile unexpectedly satisfied SymPy" >&2; exit 1; }
+[[ ! -e "${COMPARE_REJECTED}" ]] || { echo "failed dependency check still wrote a bundle" >&2; exit 1; }
 case "${COMPARE_OUTPUT}" in
   *"unresolved imports: sympy"*) ;;
-  *) printf '%s\n' "${COMPARE_OUTPUT}" >&2; echo "compareBoolean did not report missing SymPy" >&2; exit 1 ;;
+  *) printf '%s\n' "${COMPARE_OUTPUT}" >&2; echo "base profile did not report missing SymPy" >&2; exit 1 ;;
 esac
 printf '%s\n' "${COMPARE_OUTPUT}"
+
+COMPARE_BUNDLE="${TMP}/compare-boolean.bundle.py"
+python3 "${BUNDLER}" \
+  --root "${COMPARE_BOOLEAN}" \
+  --adapter-root "${ADAPTER}" \
+  --runtime-manifest "${SYMPY_MANIFEST}" \
+  --eval-entrypoint evaluation_function.evaluation:evaluation_function \
+  --preview-entrypoint evaluation_function.preview:preview_function \
+  --out "${COMPARE_BUNDLE}"
+run_http_e2e "${SYMPY_WASM}" "${SYMPY_MANIFEST}" "${COMPARE_BUNDLE}" compare-boolean
 
 printf 'PASS: real Lambda Feedback package E2E\n'
 printf 'sources: boilerplate=%s array-equal=%s compare-boolean=%s\n' \

@@ -27,9 +27,17 @@ FUNCTION_WASM_MANIFEST=/opt/runtime/manifest.json
 FUNCTION_WASM_PYTHON_SCRIPT=/opt/evaluator/evaluator.py
 ```
 
-The manifest, artifact digest, imports, exports, and function signatures are
-verified before startup. The prepared script owns `dispatch(method, payload)`;
-Shimmy does not bundle evaluator source at production startup.
+The manifest, artifact digest, imports, exports, function signatures, producer
+identity, and declared Python modules are verified before startup. Canonical
+Shimmy-produced artifacts use `shimmy_python_init`, `shimmy_python_prepare`, and
+`evaluate`; the previous `runtime_init`, `runtime_prepare`, and `execute` ABI
+remains accepted for existing pinned artifacts. The prepared script exposes
+`evaluation_function`/`preview_function` for the producer ABI and `dispatch` for
+the compatibility ABI.
+
+Producer profiles are capability-specific: `base` contains the standard
+library, `numpy-core` adds NumPy, and `sympy` adds pure-Python SymPy and mpmath.
+SciPy and Pandas remain on the Pyodide compatibility path.
 
 On Linux, run the full HTTP startup and request-flow check against a real
 Producer artifact and manifest:
@@ -47,10 +55,11 @@ between requests.
 Package-shaped evaluators remain external inputs. Build a single trusted script
 with [`lf-bundle-python`](../tools/lf-bundle-python/README.md), then point
 `FUNCTION_WASM_PYTHON_SCRIPT` at that output. The bundler embeds reachable
-pure-Python modules, requires artifact-provided modules such as NumPy to be
-declared explicitly, and fails before writing output when a required module is
-unresolved. `scripts/e2e-python-reactor-lf-packages.sh` exercises pinned external
-repositories without copying their source into this repository.
+pure-Python modules, reads artifact-provided modules from the bound manifest,
+and fails before writing output when a required module is unresolved.
+`scripts/e2e-python-reactor-lf-packages.sh` exercises pinned external
+repositories against the base, NumPy, and SymPy profiles without copying their
+source into this repository.
 
 ## Pyodide compatibility
 
@@ -62,7 +71,8 @@ FUNCTION_PYODIDE_SCRIPT=/opt/evaluator/evaluator.py
 
 Package mode uses `FUNCTION_PYODIDE_ROOT` together with
 `FUNCTION_PYODIDE_EVAL_ENTRYPOINT`. Pyodide remains a Node.js subprocess using
-framed JSON-RPC over stdio; it is not a wazero profile.
+framed JSON-RPC over stdio; it is not a wazero profile. Evaluators requiring
+SciPy or other unported native-extension stacks select this path explicitly.
 
 ## DBI security wrapper
 

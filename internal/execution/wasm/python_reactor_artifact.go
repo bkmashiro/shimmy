@@ -73,13 +73,24 @@ func verifyPythonReactorModuleShape(shape pythonReactorModuleShape, artifact *Ag
 		return fmt.Errorf("python-reactor: artifact contract is nil")
 	}
 
+	initExport := artifact.InitExport
+	prepareExport := artifact.PrepareExport
+	executeExport := artifact.ExecuteExport
+	if initExport == "" {
+		initExport, prepareExport, executeExport = "runtime_init", "runtime_prepare", "execute"
+	}
+	i32 := api.ValueTypeI32
 	required := map[string]pythonReactorFunctionSignature{
-		"_initialize":     {},
-		"runtime_init":    {Params: []api.ValueType{api.ValueTypeI32, api.ValueTypeI32}, Results: []api.ValueType{api.ValueTypeI32}},
-		"runtime_prepare": {Params: []api.ValueType{api.ValueTypeI32, api.ValueTypeI32}, Results: []api.ValueType{api.ValueTypeI32}},
-		"alloc":           {Params: []api.ValueType{api.ValueTypeI32}, Results: []api.ValueType{api.ValueTypeI32}},
-		"dealloc":         {Params: []api.ValueType{api.ValueTypeI32}},
-		"execute":         {Params: []api.ValueType{api.ValueTypeI32, api.ValueTypeI32}, Results: []api.ValueType{api.ValueTypeI32}},
+		"_initialize": {},
+		initExport:    {Params: []api.ValueType{i32, i32}, Results: []api.ValueType{i32}},
+		prepareExport: {Params: []api.ValueType{i32, i32}, Results: []api.ValueType{i32}},
+		"alloc":       {Params: []api.ValueType{i32}, Results: []api.ValueType{i32}},
+		"dealloc":     {Params: []api.ValueType{i32}},
+		executeExport: {Params: []api.ValueType{i32, i32}, Results: []api.ValueType{i32}},
+	}
+	if artifact.ABI == "shimmy-python-runtime/v1" {
+		required[initExport] = pythonReactorFunctionSignature{Results: []api.ValueType{i32}}
+		required["shimmy_python_runtime_identity"] = pythonReactorFunctionSignature{Results: []api.ValueType{i32}}
 	}
 	for name, expected := range required {
 		actual, ok := shape.Exports[name]

@@ -192,6 +192,9 @@ func (d *AgentPythonDispatcher) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if artifact.ABI == "shimmy-python-runtime/v1" && d.cfg.PythonPreloadMode == "off" {
+		return errors.New("python-reactor: Shimmy producer ABI requires prepared evaluator preload")
+	}
 
 	runtimeConfig := wazero.NewRuntimeConfig().
 		WithCloseOnContextDone(true).
@@ -359,12 +362,18 @@ func (d *AgentPythonDispatcher) Send(ctx context.Context, method string, params 
 	}
 
 	requestID := d.runCounter.Add(1)
-	runID := fmt.Sprintf("shimmy-%s-%d", d.artifact.SHA256[:12], requestID)
-	scriptInRequest := ""
-	if d.cfg.PythonPreloadMode == "off" {
-		scriptInRequest = d.script
+	var request []byte
+	var err error
+	if d.artifact.ABI == "shimmy-python-runtime/v1" {
+		request, err = buildShimmyPythonRunRequest(method, params)
+	} else {
+		runID := fmt.Sprintf("shimmy-%s-%d", d.artifact.SHA256[:12], requestID)
+		scriptInRequest := ""
+		if d.cfg.PythonPreloadMode == "off" {
+			scriptInRequest = d.script
+		}
+		request, err = buildAgentPythonRunRequest(runID, method, params, scriptInRequest)
 	}
-	request, err := buildAgentPythonRunRequest(runID, method, params, scriptInRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -430,7 +439,7 @@ func (d *AgentPythonDispatcher) Send(ctx context.Context, method string, params 
 	}
 
 	phaseStart := time.Now()
-	payload, callErr := callAgentPythonExecute(runContext, slot.module, request)
+	payload, callErr := callAgentPythonExecute(runContext, slot.module, d.artifact.ExecuteExport, request)
 	if callErr != nil && runContext.Err() != nil {
 		callErr = errors.Join(callErr, runContext.Err())
 	}
@@ -466,7 +475,12 @@ func (d *AgentPythonDispatcher) Send(ctx context.Context, method string, params 
 		return nil, withAgentPythonDiagnostic(callErr, slot.diagnostic.String())
 	}
 	phaseStart = time.Now()
-	result, err := decodeAgentPythonResponse(payload)
+	var result map[string]any
+	if d.artifact.ABI == "shimmy-python-runtime/v1" {
+		result, err = decodeShimmyPythonResponse(payload)
+	} else {
+		result, err = decodeAgentPythonResponse(payload)
+	}
 	d.observeAgentPythonPhase(AgentPythonPhaseObservation{
 		Phase: AgentPythonPhaseDecode, Purpose: AgentPythonPurposeRequest,
 		RequestID: requestID, SlotID: slot.id, Started: phaseStart,
@@ -574,7 +588,14 @@ func (d *AgentPythonDispatcher) newInitializedModule(
 		return nil, diagnostic, err
 	}
 	phaseStart = time.Now()
-	err = callAgentPythonStatus(ctx, module, "runtime_init", []byte("{}"))
+	if d.artifact.ABI == "shimmy-python-runtime/v1" {
+		err = callAgentPythonNoArgsValue(ctx, module, "shimmy_python_runtime_identity", 0x53505231)
+		if err == nil {
+			err = callAgentPythonNoArgsValue(ctx, module, d.artifact.InitExport, 0)
+		}
+	} else {
+		err = callAgentPythonStatus(ctx, module, d.artifact.InitExport, []byte("{}"))
+	}
 	d.observeAgentPythonPhase(AgentPythonPhaseObservation{
 		Phase: AgentPythonPhaseRuntimeInit, Purpose: purpose, RequestID: requestID, SlotID: slotID,
 		Started: phaseStart, MemoryBytes: uint64(module.Memory().Size()), Outcome: agentPythonPhaseOutcome(err), Err: err,
@@ -584,7 +605,7 @@ func (d *AgentPythonDispatcher) newInitializedModule(
 	}
 	if prepare {
 		phaseStart = time.Now()
-		err = callAgentPythonStatus(ctx, module, "runtime_prepare", []byte(d.script))
+		err = callAgentPythonStatus(ctx, module, d.artifact.PrepareExport, []byte(d.script))
 		d.observeAgentPythonPhase(AgentPythonPhaseObservation{
 			Phase: AgentPythonPhaseRuntimePrepare, Purpose: purpose, RequestID: requestID, SlotID: slotID,
 			Started: phaseStart, MemoryBytes: uint64(module.Memory().Size()), Outcome: agentPythonPhaseOutcome(err), Err: err,
@@ -908,6 +929,21 @@ func callAgentPythonNoArgs(ctx context.Context, module api.Module, name string) 
 	return nil
 }
 
+func callAgentPythonNoArgsValue(ctx context.Context, module api.Module, name string, expected uint32) error {
+	function := module.ExportedFunction(name)
+	if function == nil {
+		return fmt.Errorf("python-reactor: required export %q is missing", name)
+	}
+	results, err := function.Call(ctx)
+	if err != nil {
+		return fmt.Errorf("python-reactor: call %s: %w", name, err)
+	}
+	if len(results) != 1 || uint32(results[0]) != expected {
+		return fmt.Errorf("python-reactor: %s returned identity/status %v; want %d", name, results, expected)
+	}
+	return nil
+}
+
 func callAgentPythonStatus(ctx context.Context, module api.Module, name string, data []byte) error {
 	results, release, err := callAgentPythonWithBytes(ctx, module, name, data)
 	if release != nil {
@@ -922,8 +958,11 @@ func callAgentPythonStatus(ctx context.Context, module api.Module, name string, 
 	return nil
 }
 
-func callAgentPythonExecute(ctx context.Context, module api.Module, request []byte) ([]byte, error) {
-	results, release, err := callAgentPythonWithBytes(ctx, module, "execute", request)
+func callAgentPythonExecute(ctx context.Context, module api.Module, name string, request []byte) ([]byte, error) {
+	if name == "" {
+		name = "execute"
+	}
+	results, release, err := callAgentPythonWithBytes(ctx, module, name, request)
 	if release != nil {
 		defer release()
 	}

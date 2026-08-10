@@ -116,6 +116,11 @@ case "${EXPECTATION}" in
     EVAL_BAD="$(request eval '{"response":[1,2,4],"answer":[1,2,3],"params":{}}')"
     PREVIEW=""
     ;;
+  compare-boolean)
+    EVAL_OK="$(request eval '{"response":"A ^ B","answer":"A & ~B | ~A & B","params":{}}')"
+    EVAL_BAD="$(request eval '{"response":"A | B","answer":"A & B","params":{}}')"
+    PREVIEW="$(request preview '{"response":"A & B","params":{}}')"
+    ;;
   *)
     echo "unsupported SHIMMY_E2E_EXPECTATION: ${EXPECTATION}" >&2
     exit 1
@@ -149,6 +154,8 @@ if expectation == "state-reset":
     ])
 elif expectation == "boilerplate":
     checks.append((preview == {"preview": {"sympy": "x + 1"}}, "boilerplate preview result"))
+elif expectation == "compare-boolean":
+    checks.append((preview.get("preview", {}).get("sympy") == "A & B", "compareBoolean preview result"))
 failed = [label for passed, label in checks if not passed]
 if failed:
     raise SystemExit("failed checks: " + ", ".join(failed))

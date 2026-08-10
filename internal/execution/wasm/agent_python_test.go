@@ -100,6 +100,63 @@ func TestVerifyAgentPythonArtifactRejectsDigestDrift(t *testing.T) {
 	assert.Contains(t, err.Error(), "artifact SHA-256")
 }
 
+func writeShimmyPythonManifestFixture(t *testing.T, profile string, modules []string) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	wasmPath := filepath.Join(dir, "shimmy-python-runtime-"+profile+".wasm")
+	wasmBytes := []byte("\x00asm\x01\x00\x00\x00producer")
+	require.NoError(t, os.WriteFile(wasmPath, wasmBytes, 0o644))
+	digest := sha256.Sum256(wasmBytes)
+	manifest := map[string]any{
+		"schema":            "shimmy-python-runtime-artifact/v1",
+		"artifact_contract": "shimmy-python-runtime/v1",
+		"profile":           profile, "target": "wasm32-wasip1", "execution_model": "reactor",
+		"python_modules": modules, "identity_u32": 1397772849,
+		"producer": map[string]any{
+			"project": "shimmy", "repository": "lambda-feedback/shimmy",
+			"commit": "a3b7c9d1e5f80123456789abcdef0123456789ab", "dirty": false,
+		},
+		"source_date_epoch": 1784781655,
+		"artifact": map[string]any{
+			"name": filepath.Base(wasmPath), "size": len(wasmBytes), "sha256": hex.EncodeToString(digest[:]),
+		},
+		"wasm": map[string]any{
+			"exports": []map[string]string{
+				{"name": "memory", "kind": "memory"}, {"name": "_initialize", "kind": "function"},
+				{"name": "shimmy_python_runtime_identity", "kind": "function"},
+				{"name": "shimmy_python_init", "kind": "function"},
+				{"name": "shimmy_python_prepare", "kind": "function"},
+				{"name": "alloc", "kind": "function"}, {"name": "dealloc", "kind": "function"},
+				{"name": "evaluate", "kind": "function"},
+			},
+			"imports": []map[string]string{{"module": "wasi_snapshot_preview1", "name": "fd_write", "kind": "function"}},
+		},
+	}
+	encoded, err := json.MarshalIndent(manifest, "", "  ")
+	require.NoError(t, err)
+	manifestPath := filepath.Join(dir, "manifest.json")
+	require.NoError(t, os.WriteFile(manifestPath, append(encoded, '\n'), 0o644))
+	return wasmPath, manifestPath
+}
+
+func TestVerifyAgentPythonArtifactAcceptsShimmyProducerContract(t *testing.T) {
+	wasmPath, manifestPath := writeShimmyPythonManifestFixture(t, "sympy", []string{"mpmath", "sympy"})
+	artifact, err := verifyAgentPythonArtifact(wasmPath, manifestPath)
+	require.NoError(t, err)
+	assert.Equal(t, "shimmy-python-runtime/v1", artifact.ABI)
+	assert.Equal(t, []string{"mpmath", "sympy"}, artifact.PythonModules)
+	assert.Equal(t, "shimmy_python_init", artifact.InitExport)
+	assert.Equal(t, "shimmy_python_prepare", artifact.PrepareExport)
+	assert.Equal(t, "evaluate", artifact.ExecuteExport)
+}
+
+func TestVerifyAgentPythonArtifactRejectsFalseProfileModules(t *testing.T) {
+	wasmPath, manifestPath := writeShimmyPythonManifestFixture(t, "base", []string{"sympy"})
+	_, err := verifyAgentPythonArtifact(wasmPath, manifestPath)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "python_modules")
+}
+
 func validPythonReactorModuleShape() pythonReactorModuleShape {
 	i32 := api.ValueTypeI32
 	return pythonReactorModuleShape{
@@ -127,6 +184,32 @@ func validPythonReactorArtifactContract() *AgentPythonArtifact {
 			{Module: "wasi_snapshot_preview1", Name: "fd_write"},
 		},
 	}
+}
+
+func TestVerifyPythonReactorModuleShapeAcceptsShimmyProducerABI(t *testing.T) {
+	i32 := api.ValueTypeI32
+	shape := pythonReactorModuleShape{
+		Exports: map[string]pythonReactorFunctionSignature{
+			"_initialize":                    {},
+			"shimmy_python_runtime_identity": {Results: []api.ValueType{i32}},
+			"shimmy_python_init":             {Results: []api.ValueType{i32}},
+			"shimmy_python_prepare":          {Params: []api.ValueType{i32, i32}, Results: []api.ValueType{i32}},
+			"alloc":                          {Params: []api.ValueType{i32}, Results: []api.ValueType{i32}},
+			"dealloc":                        {Params: []api.ValueType{i32}},
+			"evaluate":                       {Params: []api.ValueType{i32, i32}, Results: []api.ValueType{i32}},
+		},
+		ExportedMemories: map[string]struct{}{"memory": {}},
+		Imports: map[pythonReactorImport]struct{}{
+			{Module: "wasi_snapshot_preview1", Name: "fd_write"}: {},
+		},
+	}
+	artifact := &AgentPythonArtifact{
+		ABI: "shimmy-python-runtime/v1", InitExport: "shimmy_python_init",
+		PrepareExport: "shimmy_python_prepare", ExecuteExport: "evaluate",
+		DeclaredExports: []string{"memory", "_initialize", "shimmy_python_runtime_identity", "shimmy_python_init", "shimmy_python_prepare", "alloc", "dealloc", "evaluate"},
+		DeclaredImports: []pythonReactorImport{{Module: "wasi_snapshot_preview1", Name: "fd_write"}},
+	}
+	require.NoError(t, verifyPythonReactorModuleShape(shape, artifact))
 }
 
 func TestVerifyPythonReactorModuleShapeAcceptsExactContract(t *testing.T) {
@@ -181,6 +264,24 @@ func TestBuildAgentPythonRunRequestPreservesArbitraryMethodAndOpaqueParams(t *te
 	assert.NotContains(t, envelope.Code, "evaluation_function")
 	assert.NotContains(t, envelope.Code, "preview_function")
 	assert.NotContains(t, envelope.Code, "shimmy-run-1")
+}
+
+func TestShimmyProducerRequestAndResponseContract(t *testing.T) {
+	request, err := buildShimmyPythonRunRequest("preview", map[string]any{"response": "x", "params": map[string]any{}})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"method":"preview","params":{"response":"x","params":{}}}`, string(request))
+
+	result, err := decodeShimmyPythonResponse([]byte(`{"status":"ok","result":{"preview":{"sympy":"x"}}}`))
+	require.NoError(t, err)
+	assert.Equal(t, "x", result["preview"].(map[string]any)["sympy"])
+}
+
+func TestShimmyProducerResponsePreservesTypedError(t *testing.T) {
+	_, err := decodeShimmyPythonResponse([]byte(`{"status":"error","error":{"type":"ImportError","message":"No module named scipy"}}`))
+	var executionErr *PythonReactorExecutionError
+	require.ErrorAs(t, err, &executionErr)
+	assert.Equal(t, "ImportError", executionErr.ErrorType)
+	assert.Equal(t, "No module named scipy", executionErr.Message)
 }
 
 func TestBuildAgentPythonRunRequestSupportsExplicitPreloadOff(t *testing.T) {

@@ -250,16 +250,24 @@ For example, a Wolfram Language evaluation function in `evaluation.wl` would be 
 wolframscript -file evaluation.wl /tmp/shimmy/abc/request-data-123 /tmp/shimmy/abc/response-data-456
 ```
 
-### Sandboxed Execution (Linux only, experimental)
+### Sandboxed Execution (Linux host/container only, experimental)
 
-Shimmy can wrap each worker process in an [nsjail](https://github.com/google/nsjail) sandbox to safely execute arbitrary, untrusted code. The sandbox provides:
+On supported Linux hosts, Shimmy can wrap each worker process in an [nsjail](https://github.com/google/nsjail) sandbox to execute untrusted code with an additional OS boundary. The sandbox provides:
 
 - **Filesystem confinement** — the worker can only access explicitly bind-mounted paths
 - **Resource limits** — CPU time, memory, and file descriptor caps
 - **Network isolation** — optional; disables all outbound connections
 - **Unprivileged UID** — worker runs as `nobody` (uid 65534) inside the jail
 
-Sandboxing requires Linux and the `nsjail` binary. The Docker image built from the project's `Dockerfile` includes nsjail at `/usr/sbin/nsjail`. On the host, install it with `sudo apt install nsjail` (Ubuntu 22.04+) or build from source.
+Sandboxing requires Linux, the `nsjail` binary, and permission to create the
+required namespaces/capabilities. The Docker image built from the project's
+`Dockerfile` includes nsjail at `/usr/sbin/nsjail`. On the host, install it with
+`sudo apt install nsjail` (Ubuntu 22.04+) or build from source.
+
+> **AWS Lambda:** Lambda does not grant the namespace/capability controls needed
+> to enable this nsjail path. Shipping the binary in a Lambda container image
+> does not make it an available security boundary. Use the in-process WASM
+> execution profiles for Lambda-compatible isolation.
 
 Enable sandboxing with `--sandbox` and configure it with the flags below:
 

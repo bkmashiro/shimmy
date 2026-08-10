@@ -81,6 +81,26 @@ npm ci --prefix examples/eval-pyodide
 scripts/e2e-pyodide-scipy.sh
 ```
 
+### Isolated Python evaluation example
+
+[`examples/safe-eval-python`](../examples/safe-eval-python/README.md) is a
+backend-level Python Reactor example for executing student Python in `demo`,
+`io_test`, `unit_test`, and `preview` modes. It uses wazero's WASM capability
+boundary, request deadline, verified artifact manifest, and snapshot reset; it
+does not depend on nsjail, privileged Lambda configuration, Node, or Docker.
+
+Source checks are feedback and defense in depth, not the sandbox. Student code
+that needs NumPy or SymPy selects the corresponding verified Reactor artifact;
+trusted SciPy evaluator logic remains on the Pyodide compatibility path.
+Backend selection is explicit, and Shimmy never redirects an existing evaluator
+to this example automatically:
+
+```bash
+SHIMMY_PYTHON_REACTOR_WASM=/path/to/base.wasm \
+SHIMMY_PYTHON_REACTOR_MANIFEST=/path/to/base.manifest.json \
+scripts/e2e-safe-eval-python.sh
+```
+
 ## DBI security wrapper
 
 ```bash

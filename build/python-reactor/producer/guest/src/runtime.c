@@ -74,7 +74,7 @@ int32_t shimmy_python_init(void) {
     }
 
 #ifdef SHIMMY_NUMPY_CORE
-    if (PyImport_AppendInittab("_multiarray_umath", PyInit__multiarray_umath) < 0) {
+    if (PyImport_AppendInittab("numpy._core._multiarray_umath", PyInit__multiarray_umath) < 0) {
         return -6;
     }
 #endif

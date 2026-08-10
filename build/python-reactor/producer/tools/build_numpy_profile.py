@@ -17,6 +17,7 @@ import venv
 
 PRODUCER_ROOT = pathlib.Path(__file__).resolve().parents[1]
 REPO_ROOT = PRODUCER_ROOT.parents[2]
+NUMPY_PATCH_PATH = PRODUCER_ROOT / "patches/numpy/static-core.json"
 
 
 def load_tool(name: str):
@@ -192,7 +193,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     shape_path = dist / "wasm-shape.json"
     shape_path.write_text(json.dumps(shape, indent=2, sort_keys=True) + "\n")
-    patch_paths = sorted((PRODUCER_ROOT / "patches").rglob("*.*"))
+    patch_paths = sorted((PRODUCER_ROOT / "patches/cpython").glob("*.*"))
+    patch_paths.append(NUMPY_PATCH_PATH)
     manifest = wm.build_manifest(
         artifact=artifact,
         profile="numpy-core",

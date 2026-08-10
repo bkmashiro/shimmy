@@ -73,6 +73,13 @@ Package mode uses `FUNCTION_PYODIDE_ROOT` together with
 `FUNCTION_PYODIDE_EVAL_ENTRYPOINT`. Pyodide remains a Node.js subprocess using
 framed JSON-RPC over stdio; it is not a wazero profile. Evaluators requiring
 SciPy or other unported native-extension stacks select this path explicitly.
+The Linux smoke test installs the locked Pyodide Node package and executes a
+real SciPy function through Shimmy HTTP:
+
+```bash
+npm ci --prefix examples/eval-pyodide
+scripts/e2e-pyodide-scipy.sh
+```
 
 ## DBI security wrapper
 

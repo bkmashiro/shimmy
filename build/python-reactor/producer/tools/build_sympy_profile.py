@@ -18,6 +18,7 @@ import zipfile
 PRODUCER_ROOT = pathlib.Path(__file__).resolve().parents[1]
 REPO_ROOT = PRODUCER_ROOT.parents[2]
 NATIVE_SUFFIXES = (".so", ".pyd", ".dylib", ".dll", ".a")
+SYMPY_PATCH_PATH = PRODUCER_ROOT / "patches/sympy/wasi-compat.json"
 
 
 def load_tool(name: str):
@@ -67,6 +68,29 @@ def stage_pure_python_wheels(
             raise ValueError(f"wheel did not provide importable package {module!r}")
         staged.append(module)
     return staged
+
+
+def apply_compatibility_patches(site_packages: pathlib.Path) -> list[pathlib.Path]:
+    """Apply exact, idempotent WASI compatibility patches to staged packages."""
+    patches = json.loads(SYMPY_PATCH_PATH.read_text())
+    changed: list[pathlib.Path] = []
+    for item in patches:
+        if set(item) != {"path", "old", "new"}:
+            raise ValueError("SymPy patch entry has unknown fields")
+        relative = pathlib.PurePosixPath(item["path"])
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ValueError(f"unsafe SymPy patch path: {relative}")
+        target = site_packages / relative
+        source = target.read_text()
+        old_count = source.count(item["old"])
+        new_count = source.count(item["new"])
+        if old_count == 1 and new_count == 0:
+            target.write_text(source.replace(item["old"], item["new"]))
+        elif old_count != 0 or new_count != 1:
+            raise ValueError(f"SymPy patch no longer matches exactly: {relative}")
+        if target not in changed:
+            changed.append(target)
+    return changed
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -123,6 +147,7 @@ def main(argv: list[str] | None = None) -> int:
     modules = stage_pure_python_wheels(wheels, stage / "site-packages")
     if modules != ["mpmath", "sympy"]:
         raise ValueError(f"unexpected staged modules: {modules}")
+    apply_compatibility_patches(stage / "site-packages")
 
     sources = work / "sources"
     vfs_cli = next((sources / "wasi-vfs-cli-linux-x86-64").rglob("wasi-vfs"))
@@ -151,6 +176,7 @@ def main(argv: list[str] | None = None) -> int:
     shape_path = dist / "wasm-shape.json"
     shape_path.write_text(json.dumps(shape, indent=2, sort_keys=True) + "\n")
     patch_paths = [PRODUCER_ROOT / item["path"] for item in base_manifest.get("patches", [])]
+    patch_paths.append(SYMPY_PATCH_PATH)
     manifest = wm.build_manifest(
         artifact=artifact,
         profile="sympy",

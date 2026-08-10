@@ -64,6 +64,30 @@ class SymPyProfileBuilderTests(unittest.TestCase):
                     {"sympy": wheel}, root / "site-packages"
                 )
 
+    def test_wasi_compatibility_patch_removes_ctypes_dependency_exactly(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            site_packages = pathlib.Path(directory)
+            target = site_packages / "sympy/external/gmpy.py"
+            target.parent.mkdir(parents=True)
+            target.write_text(
+                "from __future__ import annotations\n"
+                "import os\n"
+                "from ctypes import c_long, sizeof\n"
+                "LONG_MAX = (1 << (8*sizeof(c_long) - 1)) - 1\n"
+            )
+            changed = self.module.apply_compatibility_patches(site_packages)
+            first = target.read_text()
+            changed_again = self.module.apply_compatibility_patches(site_packages)
+            self.assertEqual(changed, changed_again)
+            self.assertEqual(target.read_text(), first)
+            self.assertNotIn("ctypes", first)
+            self.assertIn('calcsize("l")', first)
+
+    def test_sympy_patch_is_bound_into_manifest_provenance(self) -> None:
+        source = MODULE_PATH.read_text()
+        self.assertIn("SYMPY_PATCH_PATH", source)
+        self.assertIn("patch_paths.append(SYMPY_PATCH_PATH)", source)
+
     def test_builder_does_not_use_pip_or_dynamic_installation(self) -> None:
         source = MODULE_PATH.read_text().lower()
         self.assertNotIn("pip install", source)

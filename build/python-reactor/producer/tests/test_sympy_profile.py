@@ -70,6 +70,8 @@ class SymPyProfileBuilderTests(unittest.TestCase):
         self.assertNotIn("pip", source)
         self.assertNotIn("subprocess", source)
         self.assertNotIn("_load_verifier", source)
+        self.assertIn("wc.verify_shape(", source)
+        self.assertNotIn("wc.validate_shape(", source)
 
 
 if __name__ == "__main__":

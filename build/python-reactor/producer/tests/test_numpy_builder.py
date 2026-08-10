@@ -12,6 +12,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 MODULE_PATH = ROOT / "tools/build_numpy_core.py"
 PATCH_PATH = ROOT / "patches/numpy/static-core.json"
 LINK_PATH = ROOT / "build/link-reactor.mk"
+PROFILE_BUILDER_PATH = ROOT / "tools/build_numpy_profile.py"
 
 
 def load_module():
@@ -45,6 +46,12 @@ class NumPyBuilderTests(unittest.TestCase):
             core = (root / patches[0]["path"]).read_text()
             self.assertIn("shimmy_numpy_multiarray_umath", core)
             self.assertNotIn("py.extension_module('_multiarray_umath'", core)
+
+    def test_profile_builder_uses_contract_shape_verifier(self) -> None:
+        source = PROFILE_BUILDER_PATH.read_text()
+        self.assertIn("wc.verify_shape(", source)
+        self.assertNotIn("wc.validate_shape(", source)
+        self.assertNotIn("_load_verifier", source)
 
     def test_cross_file_uses_wasi_compilers_and_target_python_shim(self) -> None:
         text = self.module.render_cross_file(

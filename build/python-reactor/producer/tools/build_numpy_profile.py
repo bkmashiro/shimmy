@@ -71,7 +71,6 @@ def main(argv: list[str] | None = None) -> int:
     bn = load_tool("build_numpy_core")
     wc = load_tool("wasm_contract")
     wm = load_tool("write_manifest")
-    br._load_verifier().validate_lock(br.LOCK_PATH)
 
     commit = args.commit or subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True
@@ -192,11 +191,15 @@ def main(argv: list[str] | None = None) -> int:
         cwd=REPO_ROOT,
     )
 
+    contract = json.loads(br.CONTRACT_PATH.read_text())
     shape = wc.inspect_wasm(artifact.read_bytes())
-    wc.validate_shape(shape)
+    wc.verify_shape(
+        shape,
+        required_exports=contract["required_exports"],
+        allowed_import_modules=contract["allowed_import_modules"],
+    )
     shape_path = dist / "wasm-shape.json"
     shape_path.write_text(json.dumps(shape, indent=2, sort_keys=True) + "\n")
-    contract = json.loads(br.CONTRACT_PATH.read_text())
     patch_paths = sorted((PRODUCER_ROOT / "patches").rglob("*.*"))
     manifest = wm.build_manifest(
         artifact=artifact,

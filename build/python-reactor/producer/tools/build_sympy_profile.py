@@ -141,11 +141,15 @@ def main(argv: list[str] | None = None) -> int:
         env=os.environ.copy(),
     )
 
+    contract = json.loads(br.CONTRACT_PATH.read_text())
     shape = wc.inspect_wasm(artifact.read_bytes())
-    wc.validate_shape(shape)
+    wc.verify_shape(
+        shape,
+        required_exports=contract["required_exports"],
+        allowed_import_modules=contract["allowed_import_modules"],
+    )
     shape_path = dist / "wasm-shape.json"
     shape_path.write_text(json.dumps(shape, indent=2, sort_keys=True) + "\n")
-    contract = json.loads(br.CONTRACT_PATH.read_text())
     patch_paths = [PRODUCER_ROOT / item["path"] for item in base_manifest.get("patches", [])]
     manifest = wm.build_manifest(
         artifact=artifact,

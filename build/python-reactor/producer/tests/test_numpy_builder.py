@@ -49,6 +49,8 @@ class NumPyBuilderTests(unittest.TestCase):
             linalg = (root / "numpy/linalg/meson.build").read_text()
             self.assertIn("shimmy_numpy_umath_linalg", linalg)
             self.assertNotIn("py.extension_module('_umath_linalg'", linalg)
+            linalg_patch = next(item for item in patches if item["path"] == "numpy/linalg/meson.build")
+            self.assertNotIn("subdir:", linalg_patch["new"])
 
     def test_builder_compiles_both_required_numpy_native_modules(self) -> None:
         source = MODULE_PATH.read_text()

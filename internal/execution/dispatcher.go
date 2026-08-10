@@ -32,21 +32,27 @@ type Params struct {
 }
 
 func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
-	if params.Config.Supervisor.IO.Interface == supervisor.RpcIO {
+	supervisorCfg, err := applyQEMUFallbackConfig(params.Config.Supervisor)
+	if err != nil {
+		return nil, err
+	}
+
+	switch supervisorCfg.IO.Interface {
+	case supervisor.RpcIO:
 		return dispatcher.NewDedicatedDispatcher(
 			dispatcher.DedicatedDispatcherParams{
 				Config: dispatcher.DedicatedDispatcherConfig{
-					Supervisor: params.Config.Supervisor,
+					Supervisor: supervisorCfg,
 				},
 				Context: params.Context,
 				Log:     params.Log,
 			},
 		)
-	} else {
+	default:
 		return dispatcher.NewPooledDispatcher(
 			dispatcher.PooledDispatcherParams{
 				Config: dispatcher.PooledDispatcherConfig{
-					Supervisor: params.Config.Supervisor,
+					Supervisor: supervisorCfg,
 					MaxWorkers: params.Config.MaxWorkers,
 				},
 				Context: params.Context,

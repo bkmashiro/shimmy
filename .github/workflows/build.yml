@@ -248,6 +248,15 @@ jobs:
             --repository "$GITHUB_REPOSITORY" \
             --commit "$GITHUB_SHA"
 
+      - name: Build source-bound SymPy artifact
+        run: |
+          build/python-reactor/producer/build/build-sympy.sh \
+            --work-dir "$RUNNER_TEMP/shimmy-python-work" \
+            --base-dist-dir "$GITHUB_WORKSPACE/dist/shimmy-python/base" \
+            --dist-dir "$GITHUB_WORKSPACE/dist/shimmy-python/sympy" \
+            --repository "$GITHUB_REPOSITORY" \
+            --commit "$GITHUB_SHA"
+
       - name: Build source-bound NumPy core artifact
         run: |
           build/python-reactor/producer/build/build-numpy-core.sh \
@@ -260,6 +269,7 @@ jobs:
       - name: Verify bundle checksums
         run: |
           (cd dist/shimmy-python/base && sha256sum -c SHA256SUMS)
+          (cd dist/shimmy-python/sympy && sha256sum -c SHA256SUMS)
           (cd dist/shimmy-python/numpy-core && sha256sum -c SHA256SUMS)
 
       - name: Upload exact runtime bundle

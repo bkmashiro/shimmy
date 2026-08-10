@@ -5,8 +5,19 @@
   "execution_model": "reactor",
   "profiles": [
     "base",
-    "numpy-core"
+    "numpy-core",
+    "sympy"
   ],
+  "profile_python_modules": {
+    "base": [],
+    "numpy-core": [
+      "numpy"
+    ],
+    "sympy": [
+      "mpmath",
+      "sympy"
+    ]
+  },
   "identity_u32": 1397772849,
   "allowed_import_modules": [
     "wasi_snapshot_preview1"

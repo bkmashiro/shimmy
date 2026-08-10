@@ -52,6 +52,28 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(manifest["artifact"]["size"], 10)
         self.assertRegex(manifest["artifact"]["sha256"], r"^[0-9a-f]{64}$")
         self.assertRegex(manifest["source_lock_sha256"], r"^[0-9a-f]{64}$")
+        self.assertEqual(manifest["python_modules"], [])
+        self.assertIn("SciPy", manifest["unsupported"])
+        self.assertIn("Pandas", manifest["unsupported"])
+        self.assertNotIn("SymPy", manifest["unsupported"])
+
+    def test_profile_modules_come_from_contract(self) -> None:
+        contract = json.loads(CONTRACT_PATH.read_text())
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = pathlib.Path(directory) / "runtime.wasm"
+            artifact.write_bytes(b"wasm-bytes")
+            manifest = self.module.build_manifest(
+                artifact=artifact,
+                profile="sympy",
+                repository="bkmashiro/shimmy",
+                commit="a" * 40,
+                source_date_epoch=1234567890,
+                contract=contract,
+                source_lock_path=LOCK_PATH,
+                wasm_shape={"imports": [], "exports": []},
+                patch_paths=[],
+            )
+        self.assertEqual(manifest["python_modules"], ["mpmath", "sympy"])
 
     def test_rejects_non_full_commit(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

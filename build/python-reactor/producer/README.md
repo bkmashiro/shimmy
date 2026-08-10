@@ -20,8 +20,15 @@ the instance.
 
 - `base`: CPython and the selected standard library only.
 - `numpy-core`: `base` plus a source-built, statically registered NumPy subset.
+- `sympy`: `base` plus pinned pure-Python SymPy and mpmath packages in the
+  read-only artifact VFS. No native port or runtime package installation is
+  involved.
 
-Neither profile grants environment variables, filesystem preopens, networking,
+Each artifact manifest declares its importable top-level Python modules.
+SciPy and Pandas remain outside the Reactor profiles and use the Pyodide
+compatibility path.
+
+No profile grants environment variables, filesystem preopens, networking,
 or custom Host calls.
 
 ## Provenance rules

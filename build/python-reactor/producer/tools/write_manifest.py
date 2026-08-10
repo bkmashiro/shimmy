@@ -41,6 +41,12 @@ def build_manifest(
         raise ValueError("producer repository must be owner/name")
     if profile not in contract["profiles"]:
         raise ValueError("profile is not declared by the contract")
+    profile_modules = contract.get("profile_python_modules")
+    if not isinstance(profile_modules, dict) or set(profile_modules) != set(contract["profiles"]):
+        raise ValueError("profile_python_modules must cover every declared profile")
+    python_modules = profile_modules[profile]
+    if not isinstance(python_modules, list) or any(not isinstance(name, str) or not name for name in python_modules):
+        raise ValueError("profile python modules must be non-empty strings")
     if source_date_epoch <= 0:
         raise ValueError("source date epoch must be positive")
     sources_document = json.loads(source_lock_path.read_text())
@@ -60,6 +66,7 @@ def build_manifest(
         "profile": profile,
         "target": contract["target"],
         "execution_model": contract["execution_model"],
+        "python_modules": python_modules,
         "identity_u32": contract["identity_u32"],
         "producer": {
             "project": "shimmy",
@@ -93,7 +100,8 @@ def build_manifest(
             "filesystem preopens",
             "network",
             "dynamic package installation",
-            "SciPy/Pandas/SymPy",
+            "SciPy",
+            "Pandas",
         ],
     }
 

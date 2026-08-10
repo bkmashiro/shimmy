@@ -46,6 +46,17 @@ class ShimmyPythonContractTests(unittest.TestCase):
         self.assertEqual(self.contract["response_max_bytes"], 1 << 20)
         self.assertEqual(self.contract["response_layout"], "u32le-length-prefixed-json")
 
+    def test_profiles_declare_importable_python_modules(self) -> None:
+        self.assertEqual(
+            self.contract["profile_python_modules"],
+            {
+                "base": [],
+                "numpy-core": ["numpy"],
+                "sympy": ["mpmath", "sympy"],
+            },
+        )
+        self.assertEqual(sorted(self.contract["profiles"]), ["base", "numpy-core", "sympy"])
+
     def test_contract_contains_no_external_producer_identity(self) -> None:
         encoded = json.dumps(self.contract, sort_keys=True).lower()
         self.assertNotIn("agent-python-runtime", encoded)

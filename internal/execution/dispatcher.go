@@ -80,6 +80,37 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 			return nil, fmt.Errorf("unsupported FUNCTION_WASM_PROFILE %q; supported values: %s", wasmProfile, strings.Join(validProfiles, ", "))
 		}
 
+	case supervisor.PyodideIO:
+		runnerPath := os.Getenv("FUNCTION_PYODIDE_RUNNER")
+		if runnerPath == "" {
+			runnerPath = "runner.js"
+		}
+		scriptPath := os.Getenv("FUNCTION_PYODIDE_SCRIPT")
+		rootPath := os.Getenv("FUNCTION_PYODIDE_ROOT")
+		entrypoint := os.Getenv("FUNCTION_PYODIDE_EVAL_ENTRYPOINT")
+		packageMode := rootPath != "" && entrypoint != ""
+
+		cfg := params.Config.Supervisor
+		cfg.IO.Interface = supervisor.RpcIO
+		cfg.IO.Rpc.Transport = supervisor.StdioTransport
+		cfg.StartParams.Cmd = "node"
+		if packageMode {
+			cfg.StartParams.Args = []string{runnerPath}
+		} else {
+			if scriptPath == "" {
+				return nil, fmt.Errorf("pyodide: FUNCTION_PYODIDE_SCRIPT must be set (or provide FUNCTION_PYODIDE_ROOT + FUNCTION_PYODIDE_EVAL_ENTRYPOINT)")
+			}
+			cfg.StartParams.Args = []string{runnerPath, scriptPath}
+		}
+
+		return dispatcher.NewDedicatedDispatcher(
+			dispatcher.DedicatedDispatcherParams{
+				Config:  dispatcher.DedicatedDispatcherConfig{Supervisor: cfg},
+				Context: params.Context,
+				Log:     params.Log,
+			},
+		)
+
 	default:
 		return dispatcher.NewPooledDispatcher(
 			dispatcher.PooledDispatcherParams{

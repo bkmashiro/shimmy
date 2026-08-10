@@ -19,6 +19,9 @@ const (
 
 	// WasmIO describes in-process execution of a pre-built WASI module.
 	WasmIO IOInterface = "wasm"
+
+	// PyodideIO runs a Node.js/Pyodide worker over framed stdio JSON-RPC.
+	PyodideIO IOInterface = "pyodide"
 )
 
 // IOTransport describes the transport mechanism used to communicate with

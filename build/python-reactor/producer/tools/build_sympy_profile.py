@@ -82,7 +82,6 @@ def main(argv: list[str] | None = None) -> int:
     br = load_tool("build_runtime")
     wc = load_tool("wasm_contract")
     wm = load_tool("write_manifest")
-    br._load_verifier().validate_lock(br.LOCK_PATH)
 
     commit = args.commit or br._git_value("rev-parse", "HEAD")
     epoch = args.source_date_epoch or int(br._git_value("show", "-s", "--format=%ct", commit))

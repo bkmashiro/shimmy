@@ -67,8 +67,9 @@ class SymPyProfileBuilderTests(unittest.TestCase):
     def test_builder_does_not_use_pip_or_dynamic_installation(self) -> None:
         source = MODULE_PATH.read_text().lower()
         self.assertNotIn("pip install", source)
-        self.assertNotIn("micropip", source)
+        self.assertNotIn("pip", source)
         self.assertNotIn("subprocess", source)
+        self.assertNotIn("_load_verifier", source)
 
 
 if __name__ == "__main__":

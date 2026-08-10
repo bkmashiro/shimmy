@@ -158,6 +158,8 @@ def build_static_core(
             os.fspath(build_dir),
             "-j",
             str(jobs),
+            "npymath",
+            "_multiarray_umath_mtargets",
             "shimmy_numpy_multiarray_umath",
         ],
         cwd=numpy_root,

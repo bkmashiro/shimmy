@@ -38,6 +38,9 @@ class ShimmyPythonWorkflowTests(unittest.TestCase):
         launcher = ROOT / "build/python-reactor/producer/build/build-base.sh"
         self.assertTrue(launcher.stat().st_mode & stat.S_IXUSR)
         self.assertIn("build/python-reactor/producer/build/build-base.sh", self.text)
+        self.assertIn("build/python-reactor/producer/build/build-numpy-core.sh", self.text)
+        self.assertIn("dist/shimmy-python/base", self.text)
+        self.assertIn("dist/shimmy-python/numpy-core", self.text)
         self.assertIn("actions/upload-artifact@v4", self.text)
         self.assertIn("retention-days: 7", self.text)
         self.assertIn("sha256sum -c SHA256SUMS", self.text)

@@ -244,13 +244,23 @@ jobs:
         run: |
           build/python-reactor/producer/build/build-base.sh \
             --work-dir "$RUNNER_TEMP/shimmy-python-work" \
-            --dist-dir "$GITHUB_WORKSPACE/dist/shimmy-python" \
+            --dist-dir "$GITHUB_WORKSPACE/dist/shimmy-python/base" \
             --repository "$GITHUB_REPOSITORY" \
             --commit "$GITHUB_SHA"
 
+      - name: Build source-bound NumPy core artifact
+        run: |
+          build/python-reactor/producer/build/build-numpy-core.sh \
+            --work-dir "$RUNNER_TEMP/shimmy-python-work" \
+            --dist-dir "$GITHUB_WORKSPACE/dist/shimmy-python/numpy-core" \
+            --repository "$GITHUB_REPOSITORY" \
+            --commit "$GITHUB_SHA" \
+            --jobs 2
+
       - name: Verify bundle checksums
-        working-directory: dist/shimmy-python
-        run: sha256sum -c SHA256SUMS
+        run: |
+          (cd dist/shimmy-python/base && sha256sum -c SHA256SUMS)
+          (cd dist/shimmy-python/numpy-core && sha256sum -c SHA256SUMS)
 
       - name: Upload exact runtime bundle
         uses: actions/upload-artifact@v4

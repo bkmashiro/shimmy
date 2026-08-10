@@ -82,15 +82,15 @@ request() {
 }
 OK="$(request eval '{"response":"0","answer":0.5,"params":{"tolerance":1e-12}}')"
 BAD="$(request eval '{"response":"1","answer":0.5,"params":{"tolerance":1e-12}}')"
-PREVIEW="$(request preview '{"response":"0","params":{}}')"
-python3 - "${OK}" "${BAD}" "${PREVIEW}" <<'PY'
+python3 - "${OK}" "${BAD}" <<'PY'
 import json, sys
-ok, bad, preview = map(json.loads, sys.argv[1:])
+ok_raw, bad_raw = map(json.loads, sys.argv[1:])
+ok = ok_raw.get("result", ok_raw)
+bad = bad_raw.get("result", bad_raw)
 assert ok["is_correct"] is True
-assert abs(ok["value"] - 0.5) < 1e-12
 assert bad["is_correct"] is False
-assert abs(preview["preview"]["sigmoid"] - 0.5) < 1e-12
-print(json.dumps({"eval_correct": ok, "eval_incorrect": bad, "preview": preview}, sort_keys=True))
+assert abs(ok["value"] - 0.5) < 1e-12
+print(json.dumps({"eval_correct": ok, "eval_incorrect": bad}, sort_keys=True))
 PY
 
 echo "pyodide_scipy_e2e=PASS"

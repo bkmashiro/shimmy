@@ -31,6 +31,19 @@ The manifest, artifact digest, imports, exports, and function signatures are
 verified before startup. The prepared script owns `dispatch(method, payload)`;
 Shimmy does not bundle evaluator source at production startup.
 
+On Linux, run the full HTTP startup and request-flow check against a real
+Producer artifact and manifest:
+
+```bash
+SHIMMY_PYTHON_REACTOR_WASM=/opt/runtime/python-reactor.wasm \
+SHIMMY_PYTHON_REACTOR_MANIFEST=/opt/runtime/manifest.json \
+  scripts/e2e-python-reactor.sh
+```
+
+The check starts Shimmy with the configuration above, sends two `eval` requests
+and one `preview` request, and verifies that prepared guest state is restored
+between requests.
+
 ## Pyodide compatibility
 
 ```bash

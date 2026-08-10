@@ -1,0 +1,7 @@
+{
+  "response": "print(6 * 7)",
+  "answer": "",
+  "params": {
+    "mode": "demo"
+  }
+}

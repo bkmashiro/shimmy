@@ -13,6 +13,105 @@ Shimmy HTTP
   → student code
 ```
 
+## Start here: first successful evaluation
+
+You need a Shimmy Python Reactor artifact and its matching manifest. Producer
+artifacts are immutable CI outputs rather than Git blobs: obtain both files from
+the same trusted Producer build, verify the bundle's published checksums and
+provenance, and keep them together.
+
+From the repository root, start the evaluator:
+
+```bash
+examples/safe-eval-python/serve.sh \
+  /path/to/shimmy-python-runtime-base.wasm \
+  /path/to/manifest.json
+```
+
+The launcher validates the artifact/manifest contract before starting Shimmy.
+It uses `go run` by default, so contributors do not need a preinstalled Shimmy
+binary. It requires Bash, Python 3, and curl; Go is only required when the two
+prebuilt Shimmy binaries are not supplied. In another terminal, run the guided examples:
+
+```bash
+examples/safe-eval-python/try.sh base
+```
+
+This sends real HTTP requests for:
+
+1. captured demo output;
+2. passing public and hidden input/output tests;
+3. a failing test and its student-facing feedback;
+4. evaluator-defined unit tests; and
+5. preview rejection of a blocked host capability.
+
+Every response is printed and checked. `try.sh` waits up to 90 seconds for the
+listener, so it can be started while the Reactor is still preparing. The command
+exits non-zero if the running system does not match the documented contract.
+
+For a richer artifact, use the same flow and name its profile when trying it:
+
+```bash
+examples/safe-eval-python/serve.sh /path/to/numpy-core.wasm /path/to/manifest.json
+examples/safe-eval-python/try.sh numpy-core
+
+examples/safe-eval-python/serve.sh /path/to/sympy.wasm /path/to/manifest.json
+examples/safe-eval-python/try.sh sympy
+```
+
+The onboarding launcher uses a 5-second worker deadline for `base` and
+`numpy-core`, and 30 seconds for SymPy's heavier first import. Override it with
+`SHIMMY_SAFE_EVAL_TIMEOUT`. These are demonstration defaults, not production
+SLOs: measure the chosen profile on the deployment platform and set the shortest
+deadline that supports legitimate exercises.
+
+The request bodies are ordinary JSON files under [`requests/`](requests/).
+Copy one and change `response`, `mode`, and `tests` to prototype a real exercise;
+no client SDK is required.
+
+## What to hand to another team
+
+The smallest useful handoff bundle is:
+
+```text
+shimmy-safe-eval/
+├── shimmy
+├── shimmy-artifact-check
+├── runtime.wasm
+├── manifest.json
+├── SHA256SUMS
+└── examples/safe-eval-python/
+    ├── safe_eval.py
+    ├── serve.sh
+    ├── try.sh
+    └── requests/
+```
+
+Set `SHIMMY_BIN` and `SHIMMY_ARTIFACT_CHECK_BIN` to the two shipped binaries;
+then `serve.sh` needs no Go toolchain. The deployment owner must still verify
+the bundle's signature/provenance and apply platform memory, concurrency, and
+request-deadline policy. Do not give users a loose WASM file without its exact
+manifest and provenance receipt.
+
+### Keep the roles separate
+
+| Role | Starts from | Usually changes | Must not control |
+|---|---|---|---|
+| Platform owner | `serve.sh`, artifact, manifest | deployment paths, signatures, memory/concurrency/deadlines | per-request capability expansion |
+| Evaluator author | `safe_eval.py` and its tests | trusted grading modes and fixed limits | artifact provenance or host mounts |
+| Exercise author | a file in `requests/` | student starter code, public/hidden tests, expected output | trusted evaluator source or runtime limits |
+| Student/client | HTTP `response` field | submitted Python | tests, manifest, filesystem/network policy |
+
+For a first workshop, the platform owner starts one `base` instance and runs
+`try.sh` once. Exercise authors then copy `io-tests-pass.json` or
+`unit-tests.json`; they should not need to understand WASI or modify deployment
+environment variables. Move to `numpy-core` or `sympy` only when an exercise
+actually requires those packages.
+
+`serve.sh` is a contributor/onboarding launcher. Production should use the same
+validated inputs with a pinned Shimmy binary and platform-managed process,
+logging, authentication, resource limits, and artifact provenance policy.
+
 ## Why this path
 
 AWS Lambda cannot grant the namespaces or capabilities required to make nsjail

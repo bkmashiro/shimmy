@@ -1,0 +1,18 @@
+{
+  "response": "n = int(input())\nprint(n * n)",
+  "answer": "",
+  "params": {
+    "mode": "io_test",
+    "tests": [
+      {
+        "input": "5\n",
+        "expected_output": "25\n"
+      },
+      {
+        "input": "3\n",
+        "expected_output": "9\n",
+        "hidden": true
+      }
+    ]
+  }
+}

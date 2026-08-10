@@ -1,0 +1,8 @@
+{
+  "response": "def square(n):\n    return n * n",
+  "answer": "",
+  "params": {
+    "mode": "unit_test",
+    "test_code": "def test_positive():\n    assert square(5) == 25\n\ndef test_negative():\n    assert square(-4) == 16"
+  }
+}

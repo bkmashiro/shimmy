@@ -206,6 +206,11 @@ Generic WASM, Python Reactor, Pyodide, DBI, and QEMU are explicit opt-in
 execution paths. See [Execution paths](docs/execution-paths.md) for their
 environment contracts, lifecycle behavior, and compatibility boundaries.
 
+To try Python Reactor without assembling requests by hand, follow the
+[`safe-eval-python` three-command quick start](examples/safe-eval-python/README.md#start-here-first-successful-evaluation).
+It includes runnable base, NumPy, and SymPy fixtures plus both passing and
+failing student-code examples.
+
 The shim injects the following environment variables into the evaluation function process so it can identify the transport it should listen on:
 
 | Variable | Value |

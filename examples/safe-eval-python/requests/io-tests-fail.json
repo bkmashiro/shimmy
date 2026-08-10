@@ -1,0 +1,17 @@
+{
+  "response": "print(input().strip().upper())",
+  "answer": "",
+  "params": {
+    "mode": "io_test",
+    "tests": [
+      {
+        "input": "hello\n",
+        "expected_output": "HELLO\n"
+      },
+      {
+        "input": "shimmy\n",
+        "expected_output": "NOT-SHIMMY\n"
+      }
+    ]
+  }
+}

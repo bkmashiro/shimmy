@@ -1,0 +1,8 @@
+{
+  "response": "import numpy as np\n\ndef vector_norm(values):\n    return float(np.linalg.norm(np.array(values)))",
+  "answer": "",
+  "params": {
+    "mode": "unit_test",
+    "test_code": "def test_vector_norm():\n    assert abs(vector_norm([3, 4]) - 5.0) < 1e-9"
+  }
+}

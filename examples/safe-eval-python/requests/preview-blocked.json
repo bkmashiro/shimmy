@@ -1,0 +1,4 @@
+{
+  "response": "import socket\nsocket.create_connection(('example.com', 80))",
+  "params": {}
+}

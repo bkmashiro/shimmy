@@ -1,0 +1,8 @@
+{
+  "response": "import sympy as sp\n\ndef derivative_at_two():\n    x = sp.symbols('x')\n    return sp.diff(x ** 3, x).subs(x, 2)",
+  "answer": "",
+  "params": {
+    "mode": "unit_test",
+    "test_code": "def test_derivative():\n    assert derivative_at_two() == 12"
+  }
+}

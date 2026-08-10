@@ -5,11 +5,13 @@
 SHIMMY_RUNTIME_CFLAGS :=
 SHIMMY_LINKER := $(LINKCC)
 SHIMMY_NUMPY_LINK :=
+SHIMMY_NUMPY_LIBC_LINK :=
 SHIMMY_CXX_LIBS :=
 ifneq ($(strip $(SHIMMY_NUMPY_ARCHIVES)),)
 SHIMMY_RUNTIME_CFLAGS += -DSHIMMY_NUMPY_CORE=1
 SHIMMY_LINKER := $(CXX)
 SHIMMY_NUMPY_LINK := -Wl,--whole-archive $(SHIMMY_NUMPY_ARCHIVES) -Wl,--no-whole-archive
+SHIMMY_NUMPY_LIBC_LINK := -lc-printscan-long-double
 SHIMMY_CXX_LIBS := -lc++ -lc++abi
 endif
 
@@ -41,6 +43,7 @@ shimmy-python-runtime:
 		-o $(SHIMMY_OUTPUT) \
 		shimmy_python_runtime.o \
 		$(SHIMMY_NUMPY_LINK) \
+		$(SHIMMY_NUMPY_LIBC_LINK) \
 		$(BLDLIBRARY) $(LIBS) $(MODLIBS) $(SYSLIBS) \
 		$(SHIMMY_WASI_VFS_LIBRARY) \
 		$(SHIMMY_CXX_LIBS)

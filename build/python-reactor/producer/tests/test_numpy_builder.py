@@ -85,6 +85,8 @@ class NumPyBuilderTests(unittest.TestCase):
         self.assertLess(text.index("$(SHIMMY_NUMPY_LINK)"), text.index("$(BLDLIBRARY)"))
         self.assertNotIn("--start-group", text)
         self.assertNotIn("--end-group", text)
+        self.assertIn("-lc-printscan-long-double", text)
+        self.assertLess(text.index("$(SHIMMY_NUMPY_LINK)"), text.index("$(SHIMMY_NUMPY_LIBC_LINK)"))
 
 
 if __name__ == "__main__":

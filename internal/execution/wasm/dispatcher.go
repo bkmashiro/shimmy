@@ -2,6 +2,7 @@ package wasm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -27,11 +28,13 @@ var ErrDispatcherClosed = fmt.Errorf("wasm: dispatcher is shut down")
 type Dispatcher struct {
 	cfg      Config
 	rt       wazero.Runtime
-	cache    wazero.CompilationCache
 	compiled wazero.CompiledModule
 	modCfg   wazero.ModuleConfig
-	pool     chan *wasmSupervisor
-	log      *zap.Logger
+	// cowCoordinator owns the dispatcher-scoped sealed prepared-memory image.
+	// It must outlive every module instance because reset remaps from its fd.
+	cowCoordinator *cowImageCoordinator
+	pool           chan *wasmSupervisor
+	log            *zap.Logger
 
 	// mu protects closed and serialises the closed/push transitions so that a
 	// replacement supervisor cannot land in the pool after Shutdown has begun
@@ -90,9 +93,7 @@ func (d *Dispatcher) Start(ctx context.Context) error {
 	// Pick up sandbox overrides from FUNCTION_WASM_* env vars (including
 	// FUNCTION_WASM_MODULE as an alternative to FUNCTION_COMMAND), then apply
 	// sensible defaults for any fields still at their zero values.
-	if err := d.cfg.applyEnv(); err != nil {
-		return fmt.Errorf("wasm: invalid environment configuration: %w", err)
-	}
+	d.cfg.applyEnv()
 	d.cfg.applyDefaults()
 
 	if d.cfg.ModulePath == "" {
@@ -135,7 +136,6 @@ func (d *Dispatcher) Start(ctx context.Context) error {
 				zap.Error(err))
 		} else {
 			rtCfg = rtCfg.WithCompilationCache(cache)
-			d.cache = cache
 			d.log.Info("wazero compilation cache enabled", zap.String("dir", d.cfg.CompileCacheDir))
 		}
 	}
@@ -184,16 +184,29 @@ func (d *Dispatcher) Start(ctx context.Context) error {
 	}
 	d.modCfg = modCfg
 
+	// Guard: snapshot modes that use process-wide state are only safe with a
+	// single WASM instance.
+	if err := d.cfg.validateSnapshotMode(maxInstances); err != nil {
+		_ = rt.Close(ctx)
+		d.rt = nil
+		return fmt.Errorf("wasm: %w", err)
+	}
+	if d.cfg.SnapshotMode == "cow" {
+		d.cowCoordinator = newCowImageCoordinator()
+	}
+
 	// Build the pool.
 	d.pool = make(chan *wasmSupervisor, maxInstances)
 
 	for i := 0; i < maxInstances; i++ {
-		sv := newWasmSupervisor(rt, compiled, modCfg, d.cfg.Timeout, d.log)
+		sv := newWasmSupervisor(rt, compiled, modCfg, d.cfg.Timeout, d.cfg.SnapshotMode, d.log, d.cowCoordinator)
 
 		if err := sv.Start(ctx); err != nil {
 			// Clean up already-started supervisors.
-			_ = drainBufferedPool(ctx, d.pool, d.log)
+			drainPool(ctx, d.pool, d.log)
 			_ = rt.Close(ctx)
+			d.rt = nil
+			_ = d.closeCowCoordinator()
 			return fmt.Errorf("wasm: start instance %d: %w", i, err)
 		}
 
@@ -312,7 +325,7 @@ func (d *Dispatcher) spawnOne() {
 	defer cancel()
 
 	d.log.Info("wasm: initialising replacement supervisor")
-	sv := newWasmSupervisor(d.rt, d.compiled, d.modCfg, d.cfg.Timeout, d.log)
+	sv := newWasmSupervisor(d.rt, d.compiled, d.modCfg, d.cfg.Timeout, d.cfg.SnapshotMode, d.log, d.cowCoordinator)
 	if err := sv.Start(ctx); err != nil {
 		d.log.Error("wasm: replacement supervisor init failed", zap.Error(err))
 		return
@@ -369,18 +382,25 @@ func (d *Dispatcher) Shutdown(ctx context.Context) error {
 	}
 drained:
 
+	var closeErr error
 	if d.rt != nil {
 		if err := d.rt.Close(ctx); err != nil {
-			return fmt.Errorf("wasm: close runtime: %w", err)
+			closeErr = errors.Join(closeErr, fmt.Errorf("wasm: close runtime: %w", err))
 		}
 		d.rt = nil
 	}
-	if d.cache != nil {
-		if err := d.cache.Close(ctx); err != nil {
-			return fmt.Errorf("wasm: close compilation cache: %w", err)
-		}
-		d.cache = nil
-	}
+	closeErr = errors.Join(closeErr, d.closeCowCoordinator())
+	return closeErr
+}
 
+func (d *Dispatcher) closeCowCoordinator() error {
+	if d.cowCoordinator == nil {
+		return nil
+	}
+	err := d.cowCoordinator.Close()
+	d.cowCoordinator = nil
+	if err != nil {
+		return fmt.Errorf("wasm: close COW image coordinator: %w", err)
+	}
 	return nil
 }

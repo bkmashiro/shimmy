@@ -32,10 +32,15 @@ type wasmSupervisor struct {
 	mod     api.Module
 	adapter *wasmAdapter
 
-	// strategy implements snapshot/restore. The generic backend intentionally
-	// uses the portable full-memory copy strategy; dirty-page optimisation is a
-	// separate future concern.
+	// strategy implements the snapshot/restore mechanism. The default is
+	// FullMemcpyStrategy; on Linux with the appropriate kernel features,
+	// UffdStrategy, MprotectStrategy, or SoftDirtyStrategy may be used.
 	strategy SnapshotStrategy
+
+	// snapshotMode selects the snapshot strategy. See Config.SnapshotMode for
+	// valid values. Resolved from Config.UseUffd by Config.applyDefaults().
+	snapshotMode string
+	cowSupport   *cowRuntimeSupport
 
 	// healthy is true when the supervisor is in a known-good state and can be
 	// safely returned to the pool. It is set to false when restoreSnapshot fails,
@@ -57,14 +62,22 @@ func newWasmSupervisor(
 	compiled wazero.CompiledModule,
 	modCfg wazero.ModuleConfig,
 	timeout time.Duration,
+	snapshotMode string,
 	log *zap.Logger,
+	cowCoordinator ...*cowImageCoordinator,
 ) *wasmSupervisor {
+	var coordinator *cowImageCoordinator
+	if len(cowCoordinator) > 0 {
+		coordinator = cowCoordinator[0]
+	}
 	return &wasmSupervisor{
-		runtime:  rt,
-		compiled: compiled,
-		modCfg:   modCfg,
-		timeout:  timeout,
-		log:      log.Named("supervisor_wasm"),
+		runtime:      rt,
+		compiled:     compiled,
+		modCfg:       modCfg,
+		snapshotMode: snapshotMode,
+		cowSupport:   newCowRuntimeSupport(snapshotMode, coordinator),
+		timeout:      timeout,
+		log:          log.Named("supervisor_wasm"),
 	}
 }
 
@@ -83,22 +96,33 @@ func (s *wasmSupervisor) Start(ctx context.Context) error {
 	// Apply start functions on top of the provided (sandboxed) module config.
 	instCfg := s.modCfg.WithStartFunctions("_initialize", "_start")
 
-	mod, err := s.runtime.InstantiateModule(ctx, s.compiled, instCfg)
+	instantiateCtx := ctx
+	if s.cowSupport != nil {
+		instantiateCtx = s.cowSupport.instantiateContext(ctx)
+	}
+	mod, err := s.runtime.InstantiateModule(instantiateCtx, s.compiled, instCfg)
 	if err != nil {
-		return fmt.Errorf("wasm: instantiate module: %w", err)
+		releaseErr := s.closeResources(ctx)
+		return errors.Join(fmt.Errorf("wasm: instantiate module: %w", err), releaseErr)
 	}
 
 	s.mod = mod
 	s.adapter = newWasmAdapter(mod, s.log)
 	s.healthy = true
 
+	// Select snapshot strategy now that memory is available. COW construction
+	// needs the concrete backing returned by the per-instance allocator; other
+	// strategies continue through the shared api.Memory factory.
+	if s.cowSupport != nil {
+		s.strategy = s.cowSupport.snapshotStrategy(mod.Memory(), s.log)
+	} else {
+		s.strategy = s.selectStrategy(mod.Memory())
+	}
+
 	// Snapshot linear memory so we can restore it before each request.
-	s.strategy = NewFullMemcpyStrategy()
 	if err := s.takeSnapshot(); err != nil {
-		_ = s.strategy.Close()
-		_ = mod.Close(ctx)
-		s.mod = nil
-		return fmt.Errorf("wasm: snapshot memory: %w", err)
+		releaseErr := s.closeResources(ctx)
+		return errors.Join(fmt.Errorf("wasm: snapshot memory: %w", err), releaseErr)
 	}
 
 	memSize := uint32(0)
@@ -156,24 +180,33 @@ func (s *wasmSupervisor) Shutdown(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.mod == nil {
+	if s.mod == nil && s.strategy == nil && s.cowSupport == nil {
 		return nil
 	}
 
 	s.log.Debug("shutting down wasm module instance")
+	return s.closeResources(ctx)
+}
 
-	if err := s.mod.Close(ctx); err != nil {
-		return fmt.Errorf("wasm: close module: %w", err)
+// closeResources must run only after guest execution has stopped and while
+// s.mu is held. The COW allocator owns the virtual address range used by the
+// compiled module, so physical release is deliberately last.
+func (s *wasmSupervisor) closeResources(ctx context.Context) error {
+	var moduleErr, strategyErr, supportErr error
+	if s.mod != nil {
+		moduleErr = s.mod.Close(ctx)
+		s.mod = nil
+		s.adapter = nil
 	}
-
-	s.mod = nil
-	s.adapter = nil
-
-	if err := s.strategy.Close(); err != nil {
-		s.log.Warn("failed to close snapshot strategy", zap.Error(err))
+	if s.strategy != nil {
+		strategyErr = s.strategy.Close()
+		s.strategy = nil
 	}
-
-	return nil
+	if s.cowSupport != nil {
+		supportErr = s.cowSupport.Close()
+		s.cowSupport = nil
+	}
+	return errors.Join(moduleErr, strategyErr, supportErr)
 }
 
 // takeSnapshot captures the guest's linear memory via the active strategy and
@@ -206,16 +239,19 @@ func (s *wasmSupervisor) restoreSnapshot() error {
 	if mem == nil {
 		return nil
 	}
-	if err := s.strategy.Restore(mem); err != nil {
-		return err
-	}
 	if cur := mem.Size(); cur > s.snapshotSize {
 		tail := cur - s.snapshotSize
 		zeros := make([]byte, tail)
 		if !mem.Write(s.snapshotSize, zeros) {
 			return fmt.Errorf("wasm: memory grew by %d bytes; zero-fill failed: %w", tail, ErrMemoryGrew)
 		}
+		// The instance is discarded after this error, so restoring the captured
+		// prefix has no value. Returning before strategy.Restore also avoids
+		// asking pointer/size-sensitive strategies to touch a drifted backing.
 		return fmt.Errorf("wasm: memory grew by %d bytes (tail zero-filled): %w", tail, ErrMemoryGrew)
+	}
+	if err := s.strategy.Restore(mem); err != nil {
+		return err
 	}
 	return nil
 }

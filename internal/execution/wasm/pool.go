@@ -7,13 +7,16 @@ import (
 )
 
 // poolItem is the interface satisfied by any item that can be shut down when
-// draining a pool.
+// draining a pool (for example wasmSupervisor or ResidentPythonRunner).
 type poolItem interface {
 	Shutdown(ctx context.Context) error
 }
 
-// drainPool receives up to cap(pool) items from the channel and calls Shutdown
-// on each. This helper is only used when the caller knows the pool is full.
+// drainPool receives up to cap(pool) items from the channel and calls
+// Shutdown on each. If the context is cancelled before all items are drained,
+// it logs a warning and returns early, avoiding the deadlock that occurs when
+// an unhealthy item was discarded and its replacement goroutine hasn't
+// finished yet.
 func drainPool[T poolItem](ctx context.Context, pool chan T, log *zap.Logger) error {
 	if pool == nil {
 		return nil
@@ -36,27 +39,4 @@ func drainPool[T poolItem](ctx context.Context, pool chan T, log *zap.Logger) er
 		}
 	}
 	return firstErr
-}
-
-// drainBufferedPool shuts down only items currently buffered in the channel. It
-// is safe for startup-failure paths where the pool may be only partially filled.
-func drainBufferedPool[T poolItem](ctx context.Context, pool chan T, log *zap.Logger) error {
-	if pool == nil {
-		return nil
-	}
-
-	var firstErr error
-	for {
-		select {
-		case item := <-pool:
-			if err := item.Shutdown(ctx); err != nil {
-				log.Error("error shutting down pool item", zap.Error(err))
-				if firstErr == nil {
-					firstErr = err
-				}
-			}
-		default:
-			return firstErr
-		}
-	}
 }

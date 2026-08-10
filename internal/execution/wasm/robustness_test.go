@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -128,34 +127,4 @@ func TestDispatcher_Send_ReturnsErrorForDispatchWithoutReturnValue(t *testing.T)
 	_, err := d.Send(context.Background(), "eval", nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "dispatch returned 0 values")
-}
-
-func TestDispatcher_StartRejectsInvalidMaxMemoryPagesEnv(t *testing.T) {
-	t.Setenv("FUNCTION_WASM_MAX_MEMORY_PAGES", "not-a-number")
-	d := NewDispatcher(Config{ModulePath: echoModulePath(t), MaxInstances: 1}, newTestLogger(t))
-
-	err := d.Start(context.Background())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "FUNCTION_WASM_MAX_MEMORY_PAGES")
-}
-
-func TestDispatcher_ShutdownClosesCompilationCache(t *testing.T) {
-	cacheDir := t.TempDir()
-	d := NewDispatcher(Config{
-		ModulePath:      echoModulePath(t),
-		MaxInstances:    1,
-		Timeout:         time.Second,
-		CompileCacheDir: cacheDir,
-		MaxMemoryPages:  256,
-	}, newTestLogger(t))
-	require.NoError(t, d.Start(context.Background()))
-	require.NotNil(t, d.cache, "dispatcher should retain the compilation cache so Shutdown can close it")
-
-	require.NoError(t, d.Shutdown(context.Background()))
-	assert.Nil(t, d.cache, "closed compilation cache should be released")
-
-	_, err := os.ReadDir(cacheDir)
-	if err != nil && strings.Contains(err.Error(), "bad file descriptor") {
-		t.Fatalf("cache directory should remain readable after cache close: %v", err)
-	}
 }

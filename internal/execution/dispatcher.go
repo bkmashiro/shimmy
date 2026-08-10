@@ -54,22 +54,31 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 		if wasmProfile == "" {
 			wasmProfile = "generic"
 		}
-		if wasmProfile != "generic" {
-			validProfiles := []string{"generic"}
-			sort.Strings(validProfiles)
-			return nil, fmt.Errorf("unsupported FUNCTION_WASM_PROFILE %q; supported values: %s", wasmProfile, strings.Join(validProfiles, ", "))
-		}
 
 		cfg := wasm.Config{
 			ModulePath:   params.Config.Supervisor.StartParams.Cmd,
 			MaxInstances: params.Config.MaxWorkers,
 			Timeout:      params.Config.Supervisor.SendParams.Timeout,
 		}
-		d := wasm.NewDispatcher(cfg, params.Log)
-		if err := d.Start(params.Context); err != nil {
-			return nil, err
+		switch wasmProfile {
+		case "generic":
+			d := wasm.NewDispatcher(cfg, params.Log)
+			if err := d.Start(params.Context); err != nil {
+				return nil, err
+			}
+			return d, nil
+		case "python-reactor":
+			cfg.PythonScriptPath = os.Getenv("FUNCTION_WASM_PYTHON_SCRIPT")
+			d := wasm.NewAgentPythonDispatcher(cfg, params.Log)
+			if err := d.Start(params.Context); err != nil {
+				return nil, err
+			}
+			return d, nil
+		default:
+			validProfiles := []string{"generic", "python-reactor"}
+			sort.Strings(validProfiles)
+			return nil, fmt.Errorf("unsupported FUNCTION_WASM_PROFILE %q; supported values: %s", wasmProfile, strings.Join(validProfiles, ", "))
 		}
-		return d, nil
 
 	default:
 		return dispatcher.NewPooledDispatcher(

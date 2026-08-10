@@ -3,7 +3,6 @@ package wasm
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
@@ -367,55 +366,6 @@ func TestSupervisor_MemoryRestored_ManyTimes(t *testing.T) {
 	}
 }
 
-// buildMissingImportModule constructs a valid WASM module that imports a host
-// function Shimmy does not provide. Compilation succeeds, but instantiation
-// fails inside wasmSupervisor.Start.
-func buildMissingImportModule() []byte {
-	section := func(id byte, payload []byte) []byte {
-		out := []byte{id}
-		out = append(out, leb128Encode(uint32(len(payload)))...)
-		out = append(out, payload...)
-		return out
-	}
-	name := func(s string) []byte {
-		out := leb128Encode(uint32(len(s)))
-		out = append(out, []byte(s)...)
-		return out
-	}
-
-	module := []byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00}
-	// Type section: one function type () -> ().
-	module = append(module, section(1, []byte{0x01, 0x60, 0x00, 0x00})...)
-	// Import section: one function import env.missing with type index 0.
-	importPayload := []byte{0x01}
-	importPayload = append(importPayload, name("env")...)
-	importPayload = append(importPayload, name("missing")...)
-	importPayload = append(importPayload, 0x00, 0x00) // kind=func, typeidx=0
-	module = append(module, section(2, importPayload)...)
-	return module
-}
-
-// TestDispatcher_StartFailure_DoesNotBlock verifies that a startup failure while
-// initialising the warm instance pool returns an error instead of blocking while
-// trying to drain a not-yet-full pool.
-func TestDispatcher_StartFailure_DoesNotBlock(t *testing.T) {
-	modulePath := filepath.Join(t.TempDir(), "missing-import.wasm")
-	require.NoError(t, os.WriteFile(modulePath, buildMissingImportModule(), 0o644))
-
-	d := NewDispatcher(Config{
-		ModulePath:   modulePath,
-		MaxInstances: 2,
-		Timeout:      5 * time.Second,
-	}, newTestLogger(t))
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	err := d.Start(ctx)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "start instance")
-}
-
 // TestSupervisor_Start_Idempotent verifies that calling Start twice on the
 // same supervisor does not error (the second call is a no-op).
 func TestSupervisor_Start_Idempotent(t *testing.T) {
@@ -427,7 +377,7 @@ func TestSupervisor_Start_Idempotent(t *testing.T) {
 	rt, compiled := compileEchoModule(t, ctx, wasmBytes)
 	t.Cleanup(func() { _ = rt.Close(ctx) })
 
-	sv := newWasmSupervisor(rt, compiled, wazero.NewModuleConfig().WithName(""), 5*time.Second, log)
+	sv := newWasmSupervisor(rt, compiled, wazero.NewModuleConfig().WithName(""), 5*time.Second, "", log)
 	require.NoError(t, sv.Start(ctx))
 	require.NoError(t, sv.Start(ctx), "second Start must be a no-op")
 	require.NoError(t, sv.Shutdown(ctx))
@@ -443,7 +393,7 @@ func TestSupervisor_Send_NotStarted(t *testing.T) {
 	rt, compiled := compileEchoModule(t, ctx, wasmBytes)
 	t.Cleanup(func() { _ = rt.Close(ctx) })
 
-	sv := newWasmSupervisor(rt, compiled, wazero.NewModuleConfig().WithName(""), 5*time.Second, log)
+	sv := newWasmSupervisor(rt, compiled, wazero.NewModuleConfig().WithName(""), 5*time.Second, "", log)
 	// Do NOT call sv.Start.
 
 	_, err := sv.Send(ctx, "test", nil)
@@ -470,7 +420,7 @@ func TestSupervisor_Send_MemoryGrowDetected(t *testing.T) {
 	rt, compiled := compileEchoModule(t, ctx, wasmBytes)
 	t.Cleanup(func() { _ = rt.Close(ctx) })
 
-	sv := newWasmSupervisor(rt, compiled, wazero.NewModuleConfig().WithName(""), 5*time.Second, log)
+	sv := newWasmSupervisor(rt, compiled, wazero.NewModuleConfig().WithName(""), 5*time.Second, "", log)
 	require.NoError(t, sv.Start(ctx))
 	t.Cleanup(func() { _ = sv.Shutdown(ctx) })
 

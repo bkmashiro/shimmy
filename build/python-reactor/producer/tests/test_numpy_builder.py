@@ -11,6 +11,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MODULE_PATH = ROOT / "tools/build_numpy_core.py"
 PATCH_PATH = ROOT / "patches/numpy/static-core.json"
+LINK_PATH = ROOT / "build/link-reactor.mk"
 
 
 def load_module():
@@ -68,6 +69,12 @@ class NumPyBuilderTests(unittest.TestCase):
         self.assertNotIn("agent-python-runtime", source)
         self.assertNotIn("webassembly-language-runtimes", source)
         self.assertNotIn("github release", source)
+
+    def test_numpy_archive_precedes_cpython_library_without_linker_group(self) -> None:
+        text = LINK_PATH.read_text()
+        self.assertLess(text.index("$(SHIMMY_NUMPY_LINK)"), text.index("$(BLDLIBRARY)"))
+        self.assertNotIn("--start-group", text)
+        self.assertNotIn("--end-group", text)
 
 
 if __name__ == "__main__":

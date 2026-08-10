@@ -40,9 +40,7 @@ shimmy-python-runtime:
 		-Wl,--export=evaluate \
 		-o $(SHIMMY_OUTPUT) \
 		shimmy_python_runtime.o \
-		-Wl,--start-group \
-		$(BLDLIBRARY) $(LIBS) $(MODLIBS) $(SYSLIBS) \
 		$(SHIMMY_NUMPY_LINK) \
+		$(BLDLIBRARY) $(LIBS) $(MODLIBS) $(SYSLIBS) \
 		$(SHIMMY_WASI_VFS_LIBRARY) \
-		-Wl,--end-group \
 		$(SHIMMY_CXX_LIBS)

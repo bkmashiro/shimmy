@@ -1,0 +1,376 @@
+#!/usr/bin/env python3
+"""Bundle Lambda Feedback package-style Python evaluators into one script.
+
+The output is an optional evaluator-owned adapter: a single Python script that
+exports dispatch(method, payload). It embeds local package modules in an
+in-memory import loader, so runtime does not need the original fixture/package
+paths mounted.
+"""
+
+from __future__ import annotations
+
+import argparse
+import ast
+import importlib.util
+from pathlib import Path
+import pkgutil
+import sys
+import sysconfig
+from typing import Iterable
+
+
+DEFAULT_EXCLUDES = {
+    "__pycache__",
+}
+
+
+def module_name_from_file(root: Path, path: Path) -> str:
+    rel = path.relative_to(root)
+    parts = list(rel.with_suffix("").parts)
+    if parts[-1] == "__init__":
+        parts = parts[:-1]
+    return ".".join(parts)
+
+
+def is_package_file(path: Path) -> bool:
+    return path.name == "__init__.py"
+
+
+def iter_python_files(root: Path) -> Iterable[Path]:
+    for path in sorted(root.rglob("*.py")):
+        parts = set(path.relative_to(root).parts)
+        if parts & DEFAULT_EXCLUDES:
+            continue
+        yield path
+
+
+def normalise_source_for_bundle(source: str) -> str:
+    """Apply tiny compatibility rewrites for old pure-Python deps.
+
+    Some Lambda Feedback dependencies pin old pure-Python packages (notably
+    antlr4-python3-runtime 4.7.x) that import deprecated pseudo-submodules such
+    as `typing.io`. Those imports are gone in CPython 3.14, including the WASI
+    reactor build, but the names still live directly in `typing`.
+    """
+    return (
+        source.replace("from typing.io import ", "from typing import ")
+        .replace("from typing.re import ", "from typing import ")
+    )
+
+
+def collect_fixture_modules(root: Path) -> tuple[dict[str, str], set[str]]:
+    modules: dict[str, str] = {}
+    packages: set[str] = set()
+    for path in iter_python_files(root):
+        # Runtime bundles should not drag local unit tests/dev helpers by default.
+        if path.name.endswith("_test.py") or path.name.endswith("_tests.py") or path.name == "dev.py":
+            continue
+        name = module_name_from_file(root, path)
+        if not name:
+            continue
+        modules[name] = normalise_source_for_bundle(path.read_text())
+        if is_package_file(path):
+            packages.add(name)
+    return modules, packages
+
+
+def collect_adapter_modules(adapter_root: Path) -> tuple[dict[str, str], set[str]]:
+    modules: dict[str, str] = {}
+    packages: set[str] = set()
+
+    adapter_file = adapter_root / "lf_compat_adapter.py"
+    if not adapter_file.exists():
+        raise FileNotFoundError(f"adapter module not found: {adapter_file}")
+    modules["lf_compat_adapter"] = adapter_file.read_text()
+
+    toolkit_root = adapter_root / "lf_toolkit"
+    if toolkit_root.exists():
+        for path in iter_python_files(toolkit_root):
+            name = module_name_from_file(adapter_root, path)
+            if not name:
+                continue
+            modules[name] = normalise_source_for_bundle(path.read_text())
+            if is_package_file(path):
+                packages.add(name)
+    return modules, packages
+
+
+def module_part(entrypoint: str) -> str:
+    if ":" not in entrypoint:
+        raise ValueError(f"entrypoint must use module:function form: {entrypoint!r}")
+    mod, symbol = entrypoint.rsplit(":", 1)
+    if not mod or not symbol:
+        raise ValueError(f"entrypoint must use module:function form: {entrypoint!r}")
+    return mod
+
+
+def collect_import_targets(
+    module_name: str,
+    source: str,
+    packages: set[str],
+) -> set[str]:
+    """Return absolute import targets used by one bundled module."""
+    try:
+        tree = ast.parse(source, filename=f"<lf-bundle:{module_name}>")
+    except SyntaxError as exc:
+        raise ValueError(f"cannot parse bundled module {module_name!r}: {exc}") from exc
+
+    package = module_name if module_name in packages else module_name.rpartition(".")[0]
+    targets: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            targets.update(alias.name for alias in node.names)
+            continue
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        if node.level:
+            if not package:
+                raise ValueError(f"relative import in top-level module {module_name!r}")
+            relative = "." * node.level + (node.module or "")
+            base = importlib.util.resolve_name(relative, package)
+        else:
+            base = node.module or ""
+        if base:
+            targets.add(base)
+            targets.update(f"{base}.{alias.name}" for alias in node.names if alias.name != "*")
+    return targets
+
+
+def bundled_target(target: str, modules: dict[str, str]) -> str | None:
+    candidate = target
+    while candidate:
+        if candidate in modules:
+            return candidate
+        candidate = candidate.rpartition(".")[0]
+    return None
+
+
+def validate_dependencies(
+    modules: dict[str, str],
+    packages: set[str],
+    seeds: Iterable[str],
+    runtime_modules: Iterable[str],
+) -> None:
+    stdlib_names: set[str] = set(getattr(sys, "stdlib_module_names", ()))
+    if not stdlib_names:
+        stdlib_path = sysconfig.get_path("stdlib")
+        if stdlib_path:
+            stdlib_names.update(module.name for module in pkgutil.iter_modules([stdlib_path]))
+    runtime_roots = {name.split(".", 1)[0] for name in runtime_modules if name}
+    available_roots = stdlib_names | set(sys.builtin_module_names) | runtime_roots
+
+    pending = list(seeds)
+    visited: set[str] = set()
+    missing: dict[str, set[str]] = {}
+    while pending:
+        module_name = pending.pop()
+        if module_name in visited:
+            continue
+        if module_name not in modules:
+            raise ValueError(f"dependency seed {module_name!r} was not bundled")
+        visited.add(module_name)
+
+        parent = module_name.rpartition(".")[0]
+        while parent:
+            if parent in modules and parent not in visited:
+                pending.append(parent)
+            parent = parent.rpartition(".")[0]
+
+        for target in collect_import_targets(module_name, modules[module_name], packages):
+            internal = bundled_target(target, modules)
+            if internal is not None:
+                if internal not in visited:
+                    pending.append(internal)
+                continue
+            root = target.split(".", 1)[0]
+            if root not in available_roots:
+                missing.setdefault(root, set()).add(module_name)
+
+    if not missing:
+        return
+
+    details = "; ".join(
+        f"{name} (required by {', '.join(sorted(importers))})"
+        for name, importers in sorted(missing.items())
+    )
+    raise ValueError(
+        "unresolved imports: "
+        + details
+        + "; add pure-Python source with --include-root or declare an artifact/runtime capability with --runtime-module"
+    )
+
+
+def render_bundle(
+    modules: dict[str, str],
+    packages: set[str],
+    eval_entrypoint: str,
+    preview_entrypoint: str | None,
+    sys_path_entries: Iterable[str] = (),
+) -> str:
+    modules_literal = repr(modules)
+    packages_literal = repr(packages)
+    preview_literal = repr(preview_entrypoint or "")
+    sys_path_literal = repr(list(sys_path_entries))
+
+    return f'''# Generated by tools/lf-bundle-python/lf_bundle_python.py. Do not edit by hand.
+from __future__ import annotations
+
+import importlib.abc as _lf_abc
+import importlib.machinery as _lf_machinery
+import sys as _lf_sys
+
+_LF_BUNDLE_MODULES = {modules_literal}
+_LF_BUNDLE_PACKAGES = {packages_literal}
+_LF_BUNDLE_SYS_PATH = {sys_path_literal}
+
+for _lf_path in reversed(_LF_BUNDLE_SYS_PATH):
+    if _lf_path and _lf_path not in _lf_sys.path:
+        _lf_sys.path.insert(0, _lf_path)
+
+
+class _LambdaFeedbackBundleLoader(_lf_abc.MetaPathFinder, _lf_abc.Loader):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname not in _LF_BUNDLE_MODULES:
+            return None
+        spec = _lf_machinery.ModuleSpec(
+            fullname,
+            self,
+            is_package=fullname in _LF_BUNDLE_PACKAGES,
+        )
+        if fullname in _LF_BUNDLE_PACKAGES:
+            spec.submodule_search_locations = []
+        return spec
+
+    def create_module(self, spec):
+        return None
+
+    def exec_module(self, module):
+        name = module.__spec__.name
+        if name in _LF_BUNDLE_PACKAGES:
+            module.__path__ = []
+        source = _LF_BUNDLE_MODULES[name]
+        exec(compile(source, "<lf-bundle:" + name + ">", "exec"), module.__dict__)
+
+
+_lf_loader = _LambdaFeedbackBundleLoader()
+if not any(isinstance(loader, _LambdaFeedbackBundleLoader) for loader in _lf_sys.meta_path):
+    _lf_sys.meta_path.insert(0, _lf_loader)
+
+from lf_compat_adapter import call_function as _lf_call_function
+from lf_compat_adapter import load_entrypoint as _lf_load_entrypoint
+from lf_compat_adapter import normalize_result as _lf_normalize_result
+
+_LF_EVAL_ENTRYPOINT = {eval_entrypoint!r}
+_LF_PREVIEW_ENTRYPOINT = {preview_literal}
+
+
+def dispatch(method, payload):
+    if not isinstance(method, str) or not method:
+        raise ValueError("method must be a non-empty string")
+    if not isinstance(payload, dict):
+        raise TypeError("payload must be a dict")
+    if method == "eval":
+        entrypoint = _LF_EVAL_ENTRYPOINT
+    elif method == "preview" and _LF_PREVIEW_ENTRYPOINT:
+        entrypoint = _LF_PREVIEW_ENTRYPOINT
+    else:
+        raise LookupError("unsupported evaluator method: " + method)
+    fn = _lf_load_entrypoint(entrypoint)
+    return _lf_normalize_result(_lf_call_function(
+        fn,
+        method,
+        payload.get("response"),
+        payload.get("answer"),
+        payload.get("params", {{}}),
+    ))
+'''
+
+
+def build_bundle(
+    root: Path,
+    adapter_root: Path,
+    eval_entrypoint: str,
+    preview_entrypoint: str | None,
+    include_roots: Iterable[Path] = (),
+    sys_path_entries: Iterable[str] = (),
+    runtime_modules: Iterable[str] = (),
+) -> str:
+    root = root.resolve()
+    adapter_root = adapter_root.resolve()
+    modules, packages = collect_fixture_modules(root)
+    adapter_modules, adapter_packages = collect_adapter_modules(adapter_root)
+    modules.update(adapter_modules)
+    packages.update(adapter_packages)
+
+    for include_root in include_roots:
+        extra_modules, extra_packages = collect_fixture_modules(include_root.resolve())
+        modules.update(extra_modules)
+        packages.update(extra_packages)
+
+    for entrypoint in [eval_entrypoint, preview_entrypoint]:
+        if not entrypoint:
+            continue
+        mod = module_part(entrypoint)
+        if mod not in modules:
+            raise ValueError(f"entrypoint module {mod!r} was not collected from {root} or {adapter_root}")
+
+    dependency_seeds = ["lf_compat_adapter", module_part(eval_entrypoint)]
+    if preview_entrypoint:
+        dependency_seeds.append(module_part(preview_entrypoint))
+    validate_dependencies(modules, packages, dependency_seeds, runtime_modules)
+    return render_bundle(modules, packages, eval_entrypoint, preview_entrypoint, sys_path_entries)
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", required=True, type=Path, help="Evaluator package root, e.g. fixture dir containing evaluation_function/")
+    parser.add_argument("--adapter-root", required=True, type=Path, help="Adapter root containing lf_compat_adapter.py and lf_toolkit/")
+    parser.add_argument("--eval-entrypoint", required=True, help="module:function entrypoint for eval")
+    parser.add_argument("--preview-entrypoint", default="", help="module:function entrypoint for preview")
+    parser.add_argument(
+        "--include-root",
+        action="append",
+        default=[],
+        type=Path,
+        help="Additional pure-Python module root to embed, repeatable (for vendored deps such as mpmath)",
+    )
+    parser.add_argument(
+        "--sys-path",
+        action="append",
+        default=[],
+        help="Runtime ZIP/directory path to prepend to sys.path, repeatable; path must be available to the backend",
+    )
+    parser.add_argument(
+        "--runtime-module",
+        action="append",
+        default=[],
+        help="Top-level module supplied by the selected runtime artifact or runtime sys.path, repeatable",
+    )
+    parser.add_argument("--out", required=True, type=Path, help="Output single-file Python script")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(sys.argv[1:] if argv is None else argv)
+    try:
+        bundle = build_bundle(
+            root=args.root,
+            adapter_root=args.adapter_root,
+            eval_entrypoint=args.eval_entrypoint,
+            preview_entrypoint=args.preview_entrypoint or None,
+            include_roots=args.include_root,
+            sys_path_entries=args.sys_path,
+            runtime_modules=args.runtime_module,
+        )
+    except Exception as exc:
+        print(f"lf-bundle-python: {exc}", file=sys.stderr)
+        return 1
+
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(bundle)
+    print(str(args.out))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

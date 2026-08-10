@@ -44,6 +44,14 @@ The check starts Shimmy with the configuration above, sends two `eval` requests
 and one `preview` request, and verifies that prepared guest state is restored
 between requests.
 
+Package-shaped evaluators remain external inputs. Build a single trusted script
+with [`lf-bundle-python`](../tools/lf-bundle-python/README.md), then point
+`FUNCTION_WASM_PYTHON_SCRIPT` at that output. The bundler embeds reachable
+pure-Python modules, requires artifact-provided modules such as NumPy to be
+declared explicitly, and fails before writing output when a required module is
+unresolved. `scripts/e2e-python-reactor-lf-packages.sh` exercises pinned external
+repositories without copying their source into this repository.
+
 ## Pyodide compatibility
 
 ```bash

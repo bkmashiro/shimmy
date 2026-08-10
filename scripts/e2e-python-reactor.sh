@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WASM="${SHIMMY_PYTHON_REACTOR_WASM:?set SHIMMY_PYTHON_REACTOR_WASM to a Producer artifact}"
 MANIFEST="${SHIMMY_PYTHON_REACTOR_MANIFEST:?set SHIMMY_PYTHON_REACTOR_MANIFEST to its manifest.json}"
 EVALUATOR="${SHIMMY_E2E_EVALUATOR:-${ROOT}/tests/e2e/python-reactor/evaluator.py}"
+EXPECTATION="${SHIMMY_E2E_EXPECTATION:-state-reset}"
 HOST="127.0.0.1"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/shimmy-python-reactor-e2e.XXXXXX")"
 PORT="${SHIMMY_E2E_PORT:-}"
@@ -99,11 +100,29 @@ request() {
     --data "${body}"
 }
 
-EVAL_OK="$(request eval '{"response":"42","answer":"42","params":{"tolerance":0}}')"
-EVAL_BAD="$(request eval '{"response":"41","answer":"42","params":{"tolerance":0}}')"
-PREVIEW="$(request preview '{"response":"41","params":{}}')"
+case "${EXPECTATION}" in
+  state-reset)
+    EVAL_OK="$(request eval '{"response":"42","answer":"42","params":{"tolerance":0}}')"
+    EVAL_BAD="$(request eval '{"response":"41","answer":"42","params":{"tolerance":0}}')"
+    PREVIEW="$(request preview '{"response":"41","params":{}}')"
+    ;;
+  boilerplate)
+    EVAL_OK="$(request eval '{"response":"2","answer":"2","params":{}}')"
+    EVAL_BAD="$(request eval '{"response":"1","answer":"2","params":{}}')"
+    PREVIEW="$(request preview '{"response":"x + 1","params":{}}')"
+    ;;
+  array-equal)
+    EVAL_OK="$(request eval '{"response":[1,2,3],"answer":[1,2,3],"params":{}}')"
+    EVAL_BAD="$(request eval '{"response":[1,2,4],"answer":[1,2,3],"params":{}}')"
+    PREVIEW=""
+    ;;
+  *)
+    echo "unsupported SHIMMY_E2E_EXPECTATION: ${EXPECTATION}" >&2
+    exit 1
+    ;;
+esac
 
-EVAL_OK="${EVAL_OK}" EVAL_BAD="${EVAL_BAD}" PREVIEW="${PREVIEW}" python3 - <<'PY'
+EVAL_OK="${EVAL_OK}" EVAL_BAD="${EVAL_BAD}" PREVIEW="${PREVIEW}" EXPECTATION="${EXPECTATION}" python3 - <<'PY'
 import json
 import os
 
@@ -115,19 +134,25 @@ def result(name):
 
 ok = result("EVAL_OK")
 bad = result("EVAL_BAD")
-preview = result("PREVIEW")
+expectation = os.environ["EXPECTATION"]
+preview = result("PREVIEW") if os.environ["PREVIEW"] else None
 checks = [
     (ok.get("is_correct") is True, "correct eval result"),
     (bad.get("is_correct") is False, "incorrect eval result"),
-    (preview.get("preview") == "submitted: 41", "preview result"),
-    (ok.get("invocation_count") == 1, "first request starts from prepared state"),
-    (bad.get("invocation_count") == 1, "second request is reset"),
-    (preview.get("invocation_count") == 1, "preview request is reset"),
 ]
+if expectation == "state-reset":
+    checks.extend([
+        (preview.get("preview") == "submitted: 41", "preview result"),
+        (ok.get("invocation_count") == 1, "first request starts from prepared state"),
+        (bad.get("invocation_count") == 1, "second request is reset"),
+        (preview.get("invocation_count") == 1, "preview request is reset"),
+    ])
+elif expectation == "boilerplate":
+    checks.append((preview == {"preview": {"sympy": "x + 1"}}, "boilerplate preview result"))
 failed = [label for passed, label in checks if not passed]
 if failed:
     raise SystemExit("failed checks: " + ", ".join(failed))
-print(json.dumps({"eval_correct": ok, "eval_incorrect": bad, "preview": preview}, sort_keys=True))
+print(json.dumps({"expectation": expectation, "eval_correct": ok, "eval_incorrect": bad, "preview": preview}, sort_keys=True))
 PY
 
 printf 'PASS: Linux Python Reactor HTTP E2E\n'

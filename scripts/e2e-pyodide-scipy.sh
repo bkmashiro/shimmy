@@ -72,7 +72,13 @@ done
 [[ "${ready}" == true ]] || { echo "Shimmy did not become ready" >&2; sed -n '1,240p' "${LOG}" >&2; exit 1; }
 
 request() {
-  curl -fsS -X POST "${BASE_URL}/" -H 'Content-Type: application/json' -H "Command: $1" --data "$2"
+  local output
+  if ! output="$(curl --fail-with-body -sS -X POST "${BASE_URL}/" -H 'Content-Type: application/json' -H "Command: $1" --data "$2")"; then
+    printf '%s\n' "${output}" >&2
+    sed -n '1,240p' "${LOG}" >&2
+    return 1
+  fi
+  printf '%s' "${output}"
 }
 OK="$(request eval '{"response":"0","answer":0.5,"params":{"tolerance":1e-12}}')"
 BAD="$(request eval '{"response":"1","answer":0.5,"params":{"tolerance":1e-12}}')"

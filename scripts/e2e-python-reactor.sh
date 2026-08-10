@@ -94,10 +94,16 @@ done
 request() {
   local command="$1"
   local body="$2"
-  curl -fsS -X POST "${BASE_URL}/" \
+  local output
+  if ! output="$(curl --fail-with-body -sS -X POST "${BASE_URL}/" \
     -H 'Content-Type: application/json' \
     -H "Command: ${command}" \
-    --data "${body}"
+    --data "${body}")"; then
+    printf '%s\n' "${output}" >&2
+    sed -n '1,240p' "${LOG}" >&2
+    return 1
+  fi
+  printf '%s' "${output}"
 }
 
 case "${EXPECTATION}" in

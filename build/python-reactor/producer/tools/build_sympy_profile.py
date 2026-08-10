@@ -166,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     bundled_lock = dist / br.LOCK_PATH.name
     shutil.copy2(br.LOCK_PATH, bundled_lock)
-    br._write_notices(json.loads(br.LOCK_PATH.read_text()), dist / "THIRD_PARTY_NOTICES.md")
+    br._write_notices(dist / "THIRD_PARTY_NOTICES.md", entries)
     paths = [artifact, manifest_path, shape_path, bundled_lock]
     (dist / "SHA256SUMS").write_text(
         "".join(

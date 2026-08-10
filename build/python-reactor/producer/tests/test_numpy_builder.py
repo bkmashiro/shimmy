@@ -52,6 +52,7 @@ class NumPyBuilderTests(unittest.TestCase):
         self.assertIn("wc.verify_shape(", source)
         self.assertNotIn("wc.validate_shape(", source)
         self.assertNotIn("_load_verifier", source)
+        self.assertIn('br._write_notices(dist / "THIRD_PARTY_NOTICES.md", entries)', source)
 
     def test_cross_file_uses_wasi_compilers_and_target_python_shim(self) -> None:
         text = self.module.render_cross_file(

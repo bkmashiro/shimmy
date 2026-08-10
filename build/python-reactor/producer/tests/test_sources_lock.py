@@ -41,6 +41,7 @@ class SourceLockTests(unittest.TestCase):
         self.assertEqual(entries["wasmtime-linux-x86-64"]["version"], "47.0.2")
         self.assertEqual(entries["sympy"]["version"], "1.14.0")
         self.assertEqual(entries["mpmath"]["version"], "1.3.0")
+        self.assertEqual(entries["packaging"]["version"], "26.2")
 
     def test_rejects_external_yuzhe_runtime_repository(self) -> None:
         mutated = json.loads(json.dumps(self.lock))

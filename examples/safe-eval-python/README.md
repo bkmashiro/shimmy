@@ -55,7 +55,7 @@ shimmy serve --host 127.0.0.1 --port 8080
 ```
 
 The evaluator is below the 1 MiB trusted-script limit and only uses the standard
-library. Package availability comes from the verified artifact profile, never
+library. Package availability comes from the manifest-validated artifact profile, never
 from runtime pip or network installation:
 
 | Student-code requirement | Backend/artifact |
@@ -68,6 +68,10 @@ from runtime pip or network installation:
 
 Do not silently fall back between these paths. Switching the module, manifest,
 and runner is deployment configuration.
+
+Runtime manifest validation establishes digest, ABI, imports/exports, and
+capability consistency. Artifact authenticity, trusted Producer commit policy,
+and digital-signature verification remain deployment-system responsibilities.
 
 ## Request examples
 
@@ -138,7 +142,7 @@ parameters:
 | Limit | Value |
 |---|---:|
 | Student code | 64 KiB |
-| Captured output per execution | 64 KiB |
+| Captured stdout/stderr retained in memory per stream/execution | 64 KiB, enforced while writing |
 | Input per test | 64 KiB |
 | Tests per request | 32 |
 

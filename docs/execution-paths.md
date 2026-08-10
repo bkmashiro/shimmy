@@ -86,11 +86,15 @@ scripts/e2e-pyodide-scipy.sh
 [`examples/safe-eval-python`](../examples/safe-eval-python/README.md) is a
 backend-level Python Reactor example for executing student Python in `demo`,
 `io_test`, `unit_test`, and `preview` modes. It uses wazero's WASM capability
-boundary, request deadline, verified artifact manifest, and snapshot reset; it
+boundary, request deadline, manifest integrity/ABI validation, and snapshot reset; it
 does not depend on nsjail, privileged Lambda configuration, Node, or Docker.
 
+Manifest validation checks digest and capability consistency. Artifact
+authenticity, trusted Producer commit policy, and digital-signature verification
+remain deployment-system responsibilities.
+
 Source checks are feedback and defense in depth, not the sandbox. Student code
-that needs NumPy or SymPy selects the corresponding verified Reactor artifact;
+that needs NumPy or SymPy selects the corresponding manifest-validated Reactor artifact;
 trusted SciPy evaluator logic remains on the Pyodide compatibility path.
 Backend selection is explicit, and Shimmy never redirects an existing evaluator
 to this example automatically:

@@ -93,9 +93,65 @@ class SafeEvalTest(unittest.TestCase):
 
     def test_output_is_truncated(self):
         limits = {**LIMITS, "max_output_bytes": 32}
-        result = invoke("print('x' * 100)", limits=limits)
+        result = invoke("print('x' * (1024 * 1024))", limits=limits)
         self.assertTrue(result["truncated"])
         self.assertLessEqual(len(result["stdout"].encode()), 32)
+
+    def test_output_writer_retains_at_most_the_byte_limit(self):
+        writer = SAFE_EVAL._BoundedTextWriter(31)
+        writer.write("λ" * (1024 * 1024))
+        self.assertEqual(writer.retained_bytes, 31)
+        self.assertTrue(writer.truncated)
+        self.assertLessEqual(len(writer.getvalue().encode()), 31)
+
+    def test_unit_test_output_is_bounded_while_running(self):
+        limits = {**LIMITS, "max_output_bytes": 32}
+        result = invoke(
+            "def square(value):\n    return value * value",
+            {
+                "mode": "unit_test",
+                "test_code": (
+                    "print('x' * (1024 * 1024))\n"
+                    "def test_square():\n"
+                    "    print('y' * (1024 * 1024))\n"
+                    "    assert square(5) == 25"
+                ),
+            },
+            limits=limits,
+        )
+        self.assertTrue(result["is_correct"])
+    def test_io_test_detail_strings_share_one_output_budget(self):
+        limits = {**LIMITS, "max_output_bytes": 32}
+        result = invoke(
+            "print('x' * 32)",
+            {"mode": "io_test", "tests": [
+                {"expected_output": "x" * 32},
+                {"expected_output": "x" * 32},
+            ]},
+            limits=limits,
+        )
+        retained = sum(
+            len(detail.get(key, "").encode())
+            for detail in result["tests"]
+            for key in ("actual", "expected", "error")
+        )
+        self.assertLessEqual(retained, 32)
+        self.assertTrue(result["truncated"])
+
+    def test_unit_test_errors_share_one_output_budget(self):
+        limits = {**LIMITS, "max_output_bytes": 32}
+        test_code = "\n".join(
+            f"def test_{index}():\n    raise AssertionError('x' * 1000)"
+            for index in range(32)
+        )
+        result = invoke("pass", {"mode": "unit_test", "test_code": test_code}, limits=limits)
+        retained = sum(
+            len(detail.get(key, "").encode())
+            for detail in result["tests"]
+            for key in ("name", "error")
+        )
+        self.assertLessEqual(retained, 32)
+        self.assertTrue(result["truncated"])
 
 
 if __name__ == "__main__":

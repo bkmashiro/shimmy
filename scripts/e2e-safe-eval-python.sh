@@ -17,6 +17,9 @@ cleanup() {
     kill "${SERVER_PID}" 2>/dev/null || true
     wait "${SERVER_PID}" 2>/dev/null || true
   fi
+  if [[ -n "${SHIMMY_E2E_SERVER_LOG:-}" && -f "${LOG:-}" ]]; then
+    cp "${LOG}" "${SHIMMY_E2E_SERVER_LOG}"
+  fi
   rm -rf "${TMP}"
 }
 trap cleanup EXIT
@@ -55,7 +58,7 @@ LOG="${TMP}/server.log"
 (
   cd "${ROOT}"
   exec env \
-    LOG_LEVEL=error \
+    LOG_LEVEL="${SHIMMY_E2E_LOG_LEVEL:-error}" \
     FUNCTION_INTERFACE=wasm \
     FUNCTION_WASM_PROFILE=python-reactor \
     FUNCTION_WASM_MODULE="${WASM}" \
@@ -66,7 +69,7 @@ LOG="${TMP}/server.log"
     FUNCTION_WASM_ALLOWED_PATHS= \
     FUNCTION_MAX_PROCS=1 \
     FUNCTION_WORKER_SEND_TIMEOUT=2s \
-    "${BIN}" serve --host "${HOST}" --port "${PORT}"
+    "${BIN}" --worker-send-timeout 2s serve --host "${HOST}" --port "${PORT}"
 ) >"${LOG}" 2>&1 &
 SERVER_PID="$!"
 BASE_URL="http://${HOST}:${PORT}"
@@ -124,14 +127,16 @@ print(json.dumps({"demo": demo, "io_test": io_result, "unit_test": unit, "previe
 PY
 
 TIMEOUT_BODY="${TMP}/timeout.json"
-TIMEOUT_STATUS="$(curl -sS -o "${TIMEOUT_BODY}" -w '%{http_code}' -X POST "${BASE_URL}/" \
+TIMEOUT_META="$(curl --max-time 10 -sS -o "${TIMEOUT_BODY}" -w '%{http_code} %{time_total}' -X POST "${BASE_URL}/" \
   -H 'Content-Type: application/json' -H 'Command: eval' \
   --data '{"response":"while True:\n    pass","answer":"","params":{"mode":"demo"}}')"
+read -r TIMEOUT_STATUS TIMEOUT_SECONDS <<<"${TIMEOUT_META}"
 case "${TIMEOUT_STATUS}" in
   5??) ;;
   *) echo "expected timeout 5xx, got ${TIMEOUT_STATUS}" >&2; exit 1 ;;
 esac
 echo "timeout_http_status=${TIMEOUT_STATUS}"
+echo "timeout_seconds=${TIMEOUT_SECONDS}"
 python3 - "${TIMEOUT_BODY}" <<'PY'
 import json, pathlib, sys
 body = json.loads(pathlib.Path(sys.argv[1]).read_text())
@@ -139,13 +144,29 @@ text = json.dumps(body).lower()
 assert any(term in text for term in ("deadline", "timeout", "closed")), body
 PY
 
-RECOVERY="$(request eval '{"response":"print(7 * 6)","answer":"","params":{"mode":"demo"}}')"
-python3 - "${RECOVERY}" <<'PY'
-import json, sys
-value = json.loads(sys.argv[1])
+RECOVERY_BODY="${TMP}/recovery.json"
+RECOVERY_READY=0
+RECOVERY_ATTEMPTS=0
+for _ in $(seq 1 12); do
+  RECOVERY_ATTEMPTS=$((RECOVERY_ATTEMPTS + 1))
+  RECOVERY_STATUS="$(curl --max-time 10 -sS -o "${RECOVERY_BODY}" -w '%{http_code}' -X POST "${BASE_URL}/" \
+    -H 'Content-Type: application/json' -H 'Command: eval' \
+    --data '{"response":"print(7 * 6)","answer":"","params":{"mode":"demo"}}' || true)"
+  if [[ "${RECOVERY_STATUS}" == 200 ]]; then
+    RECOVERY_READY=1
+    break
+  fi
+  sleep 1
+done
+test "${RECOVERY_READY}" = 1
+python3 - "${RECOVERY_BODY}" <<'PY'
+import json, pathlib, sys
+value = json.loads(pathlib.Path(sys.argv[1]).read_text())
 value = value.get("result", value)
 assert value["stdout"] == "42\n"
 PY
+
+echo "timeout_recovery_attempts=${RECOVERY_ATTEMPTS}"
 
 echo "timeout_recovery=PASS"
 echo "safe_eval_python_reactor_e2e=PASS"

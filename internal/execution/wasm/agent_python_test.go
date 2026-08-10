@@ -459,6 +459,7 @@ func TestAcquireAgentPythonSnapshotSlotReplenishesMissingSlot(t *testing.T) {
 		context.Background(),
 		prepared,
 		closed,
+		nil,
 		func(context.Context) (*agentPythonModuleSlot, error) {
 			calls++
 			return want, nil
@@ -479,12 +480,41 @@ func TestAcquireAgentPythonSnapshotSlotReturnsReplenishFailure(t *testing.T) {
 		context.Background(),
 		prepared,
 		closed,
+		nil,
 		func(context.Context) (*agentPythonModuleSlot, error) {
 			return nil, wantErr
 		},
 	)
 
 	require.ErrorIs(t, err, wantErr)
+}
+
+func TestAcquireAgentPythonSnapshotSlotWaitsForInFlightRefill(t *testing.T) {
+	prepared := make(chan *agentPythonModuleSlot, 1)
+	closed := make(chan struct{})
+	want := &agentPythonModuleSlot{snapshotSelected: "memcpy"}
+	createCalls := 0
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		prepared <- want
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	got, err := acquireAgentPythonSnapshotSlot(
+		ctx,
+		prepared,
+		closed,
+		func() bool { return true },
+		func(context.Context) (*agentPythonModuleSlot, error) {
+			createCalls++
+			return nil, errors.New("must not construct a duplicate slot")
+		},
+	)
+
+	require.NoError(t, err)
+	assert.Same(t, want, got)
+	assert.Zero(t, createCalls)
 }
 
 func TestRestoreAgentPythonSnapshotRejectsMemoryGrowth(t *testing.T) {
@@ -625,10 +655,13 @@ def dispatch(method, payload):
 	eventsMu.Unlock()
 
 	timeoutContext, timeoutCancel := context.WithTimeout(context.Background(), time.Second)
+	timeoutStarted := time.Now()
 	_, err = dispatcher.Send(timeoutContext, "eval", map[string]any{"response": "loop", "answer": "x"})
+	timeoutElapsed := time.Since(timeoutStarted)
 	timeoutCancel()
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Less(t, timeoutElapsed, 5*time.Second, "request must not wait for snapshot replacement")
 	assert.Contains(t, err.Error(), "cow-timeout-loop-entered", "the guest must enter the target execution segment before cancellation")
 	eventsMu.Lock()
 	timeoutEvents := append([]AgentPythonPhaseEvent(nil), events...)
@@ -658,6 +691,58 @@ def dispatch(method, payload):
 	health, err = dispatcher.Send(context.Background(), "healthcheck", nil)
 	require.NoError(t, err)
 	assert.Equal(t, 1, health["result"].(map[string]any)["prepared_ready"])
+}
+
+func TestAgentPythonDispatcherProducerTimeoutReturnsBeforeSnapshotRefill(t *testing.T) {
+	wasmPath := os.Getenv("AGENT_PYTHON_RUNTIME_WASM")
+	manifestPath := os.Getenv("AGENT_PYTHON_RUNTIME_MANIFEST")
+	evaluatorPath := os.Getenv("SAFE_EVAL_PYTHON_SCRIPT")
+	if wasmPath == "" || manifestPath == "" || evaluatorPath == "" {
+		t.Skip("AGENT_PYTHON_RUNTIME_WASM, AGENT_PYTHON_RUNTIME_MANIFEST, and SAFE_EVAL_PYTHON_SCRIPT are required")
+	}
+
+	dispatcher := NewAgentPythonDispatcher(Config{
+		ModulePath:              wasmPath,
+		AgentPythonManifestPath: manifestPath,
+		PythonScriptPath:        evaluatorPath,
+		PythonLifecycle:         "snapshot",
+		SnapshotMode:            "memcpy",
+		MaxInstances:            1,
+		MaxMemoryPages:          8192,
+		Timeout:                 2 * time.Second,
+	}, zap.NewNop())
+	startContext, startCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer startCancel()
+	require.NoError(t, dispatcher.Start(startContext))
+	t.Cleanup(func() {
+		shutdownContext, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		_ = dispatcher.Shutdown(shutdownContext)
+	})
+
+	started := time.Now()
+	_, err := dispatcher.Send(context.Background(), "eval", map[string]any{
+		"response": "while True:\n    pass", "answer": "", "params": map[string]any{"mode": "demo"},
+	})
+	elapsed := time.Since(started)
+	t.Logf("timeout request returned in %s", elapsed)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Less(t, elapsed, 10*time.Second, "request must not wait for close or snapshot refill")
+
+	require.Eventually(t, func() bool {
+		health, healthErr := dispatcher.Send(context.Background(), "healthcheck", nil)
+		if healthErr != nil {
+			return false
+		}
+		return health["result"].(map[string]any)["prepared_ready"] == 1
+	}, time.Minute, 100*time.Millisecond)
+
+	recovered, err := dispatcher.Send(context.Background(), "eval", map[string]any{
+		"response": "print(7 * 6)", "answer": "", "params": map[string]any{"mode": "demo"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "42\n", recovered["result"].(map[string]any)["stdout"])
 }
 
 func TestAgentPythonDispatcherSingleUsePreparedRefillsNeverServedCandidates(t *testing.T) {

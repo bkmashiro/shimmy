@@ -89,14 +89,81 @@ def _bounded_text(value: Any, name: str, limit: int) -> str:
     return text
 
 
-def _trim_output(value: str, limit: int) -> tuple[str, bool]:
-    encoded = value.encode("utf-8")
-    if len(encoded) <= limit:
-        return value, False
-    suffix = "\n[output truncated]"
-    budget = max(0, limit - len(suffix.encode("utf-8")))
-    trimmed = encoded[:budget].decode("utf-8", errors="ignore") + suffix
-    return trimmed, True
+class _BoundedTextWriter(io.TextIOBase):
+    """Text sink that never retains more than limit UTF-8 bytes."""
+
+    def __init__(self, limit: int) -> None:
+        super().__init__()
+        self._limit = max(0, limit)
+        self._buffer = bytearray()
+        self.truncated = False
+
+    @property
+    def retained_bytes(self) -> int:
+        return len(self._buffer)
+
+    def writable(self) -> bool:
+        return True
+
+    def write(self, value: str) -> int:
+        if not isinstance(value, str):
+            raise TypeError("write() argument must be str")
+        if not value:
+            return 0
+        remaining = self._limit - len(self._buffer)
+        if remaining <= 0:
+            self.truncated = True
+            return len(value)
+
+        offset = 0
+        while offset < len(value) and remaining > 0:
+            chunk = value[offset : offset + min(4096, remaining)]
+            encoded = chunk.encode("utf-8")
+            available = remaining
+            self._buffer.extend(encoded[:available])
+            offset += len(chunk)
+            remaining = self._limit - len(self._buffer)
+            if len(encoded) > available:
+                self.truncated = True
+                break
+        if offset < len(value):
+            self.truncated = True
+        return len(value)
+
+    def getvalue(self) -> str:
+        if not self.truncated:
+            return bytes(self._buffer).decode("utf-8", errors="ignore")
+        return _render_truncated(bytes(self._buffer), self._limit)
+
+
+def _render_truncated(encoded: bytes, limit: int) -> str:
+    suffix = b"\n[output truncated]"
+    if limit <= len(suffix):
+        return suffix[:limit].decode("utf-8", errors="ignore")
+    budget = limit - len(suffix)
+    return encoded[:budget].decode("utf-8", errors="ignore") + suffix.decode()
+
+
+def _bounded_traceback(limit: int) -> tuple[str, bool]:
+    writer = _BoundedTextWriter(limit)
+    traceback.print_exc(file=writer)
+    return writer.getvalue(), writer.truncated
+
+
+class _TextBudget:
+    """Shared UTF-8 budget for dynamic strings in one structured result."""
+
+    def __init__(self, limit: int) -> None:
+        self.remaining = max(0, limit)
+        self.truncated = False
+
+    def take(self, value: str) -> str:
+        writer = _BoundedTextWriter(self.remaining)
+        writer.write(value)
+        rendered = writer.getvalue()
+        self.remaining -= len(rendered.encode("utf-8"))
+        self.truncated = self.truncated or writer.truncated
+        return rendered
 
 
 def _execute(source: str, stdin: str, inject: dict[str, Any], output_limit: int) -> dict[str, Any]:
@@ -115,32 +182,29 @@ def _execute(source: str, stdin: str, inject: dict[str, Any], output_limit: int)
             raise EOFError("input exhausted") from exc
 
     namespace: dict[str, Any] = {"__name__": "__student__", **inject}
-    stdout = io.StringIO()
-    stderr = io.StringIO()
+    stdout = _BoundedTextWriter(output_limit)
+    stderr = _BoundedTextWriter(output_limit)
     original_input = builtins.input
     try:
         builtins.input = safe_input
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             exec(compile(source, "<student>", "exec"), namespace, namespace)
-        out, out_truncated = _trim_output(stdout.getvalue(), output_limit)
-        err, err_truncated = _trim_output(stderr.getvalue(), output_limit)
         return {
             "ok": True,
             "namespace": namespace,
-            "stdout": out,
-            "stderr": err,
-            "truncated": out_truncated or err_truncated,
+            "stdout": stdout.getvalue(),
+            "stderr": stderr.getvalue(),
+            "truncated": stdout.truncated or stderr.truncated,
         }
     except BaseException:
-        out, out_truncated = _trim_output(stdout.getvalue(), output_limit)
-        error, err_truncated = _trim_output(traceback.format_exc(), output_limit)
+        error, traceback_truncated = _bounded_traceback(output_limit)
         return {
             "ok": False,
             "kind": "runtime",
             "error": error,
-            "stdout": out,
+            "stdout": stdout.getvalue(),
             "stderr": "",
-            "truncated": out_truncated or err_truncated,
+            "truncated": stdout.truncated or stderr.truncated or traceback_truncated,
         }
     finally:
         builtins.input = original_input
@@ -164,6 +228,7 @@ def _io_test(code: str, tests: list[Any], limits: dict[str, int]) -> dict[str, A
         raise ValidationError(f"tests exceeds {limits['max_tests']} entries")
     details = []
     passed = 0
+    result_budget = _TextBudget(limits["max_output_bytes"])
     for index, raw_test in enumerate(tests, 1):
         if not isinstance(raw_test, dict):
             raise ValidationError(f"test {index} must be an object")
@@ -179,9 +244,9 @@ def _io_test(code: str, tests: list[Any], limits: dict[str, int]) -> dict[str, A
         hidden = bool(raw_test.get("hidden", False))
         detail: dict[str, Any] = {"index": index, "passed": correct, "hidden": hidden}
         if not hidden:
-            detail.update({"actual": actual, "expected": expected.rstrip()})
+            detail.update({"actual": result_budget.take(actual), "expected": result_budget.take(expected.rstrip())})
         if not run["ok"]:
-            detail["error"] = run["error"] if not hidden else "hidden test failed"
+            detail["error"] = result_budget.take(run["error"] if not hidden else "hidden test failed")
         details.append(detail)
     total = len(tests)
     return {
@@ -190,6 +255,7 @@ def _io_test(code: str, tests: list[Any], limits: dict[str, int]) -> dict[str, A
         "passed": passed,
         "total": total,
         "tests": details,
+        "truncated": result_budget.truncated,
     }
 
 
@@ -202,27 +268,32 @@ def _unit_test(code: str, test_code: str, limits: dict[str, int]) -> dict[str, A
         return {"is_correct": False, "feedback": "\n".join(violations), "kind": "validation"}
 
     namespace = student["namespace"]
-    test_stdout = io.StringIO()
-    test_stderr = io.StringIO()
+    test_stdout = _BoundedTextWriter(limits["max_output_bytes"])
+    test_stderr = _BoundedTextWriter(limits["max_output_bytes"])
     try:
         with contextlib.redirect_stdout(test_stdout), contextlib.redirect_stderr(test_stderr):
             exec(compile(test_code, "<tests>", "exec"), namespace, namespace)
     except BaseException:
-        error, _ = _trim_output(traceback.format_exc(), limits["max_output_bytes"])
+        error, _ = _bounded_traceback(limits["max_output_bytes"])
         return {"is_correct": False, "feedback": error, "kind": "test_setup"}
 
     tests = sorted((name, value) for name, value in namespace.items() if name.startswith("test_") and callable(value))
     if len(tests) > limits["max_tests"]:
         raise ValidationError(f"unit tests exceeds {limits['max_tests']} entries")
     details = []
+    result_budget = _TextBudget(limits["max_output_bytes"])
     for name, test in tests:
         try:
             with contextlib.redirect_stdout(test_stdout), contextlib.redirect_stderr(test_stderr):
                 test()
-            details.append({"name": name, "passed": True})
+            details.append({"name": result_budget.take(name), "passed": True})
         except BaseException:
-            error, _ = _trim_output(traceback.format_exc(), limits["max_output_bytes"])
-            details.append({"name": name, "passed": False, "error": error})
+            error, _ = _bounded_traceback(limits["max_output_bytes"])
+            details.append({
+                "name": result_budget.take(name),
+                "passed": False,
+                "error": result_budget.take(error),
+            })
     passed = sum(int(item["passed"]) for item in details)
     return {
         "is_correct": bool(details) and passed == len(details),
@@ -230,6 +301,7 @@ def _unit_test(code: str, test_code: str, limits: dict[str, int]) -> dict[str, A
         "passed": passed,
         "total": len(details),
         "tests": details,
+        "truncated": result_budget.truncated or test_stdout.truncated or test_stderr.truncated,
     }
 
 

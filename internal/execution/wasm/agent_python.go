@@ -311,6 +311,7 @@ func (d *AgentPythonDispatcher) Start(ctx context.Context) error {
 		zap.String("producer_commit", artifact.ProducerCommit),
 		zap.String("artifact_profile", artifact.Profile),
 		zap.Int("max_instances", d.cfg.MaxInstances),
+		zap.Duration("request_timeout", d.cfg.Timeout),
 		zap.String("lifecycle", d.cfg.PythonLifecycle),
 		zap.String("snapshot_mode", d.cfg.SnapshotMode),
 		zap.String("reset_mode", d.resetMode()),
@@ -389,6 +390,7 @@ func (d *AgentPythonDispatcher) Send(ctx context.Context, method string, params 
 			runContext,
 			d.prepared,
 			d.closedCh,
+			d.snapshotRefillInFlight,
 			func(createContext context.Context) (*agentPythonModuleSlot, error) {
 				return d.newPreparedModuleSlot(createContext, true, AgentPythonPurposeReplacement, requestID)
 			},
@@ -464,9 +466,9 @@ func (d *AgentPythonDispatcher) Send(ctx context.Context, method string, params 
 		}
 		if callErr != nil || restoreErr != nil {
 			diagnostic := slot.diagnostic.String()
-			_ = slot.close(context.Background())
-			replacementErr := d.replaceSnapshotSlot(requestID)
-			return nil, withAgentPythonDiagnostic(errors.Join(callErr, restoreErr, replacementErr), diagnostic)
+			d.discardSnapshotSlotAsync(slot, requestID)
+			d.scheduleSnapshotRefill(requestID)
+			return nil, withAgentPythonDiagnostic(errors.Join(callErr, restoreErr), diagnostic)
 		}
 		slot.diagnostic.Reset()
 		d.prepared <- slot
@@ -497,6 +499,7 @@ func acquireAgentPythonSnapshotSlot(
 	ctx context.Context,
 	prepared <-chan *agentPythonModuleSlot,
 	closed <-chan struct{},
+	refillInFlight func() bool,
 	create func(context.Context) (*agentPythonModuleSlot, error),
 ) (*agentPythonModuleSlot, error) {
 	select {
@@ -509,6 +512,18 @@ func acquireAgentPythonSnapshotSlot(
 	case <-ctx.Done():
 		return nil, fmt.Errorf("python-reactor: acquire prepared module: %w", ctx.Err())
 	default:
+	}
+	if refillInFlight != nil && refillInFlight() {
+		select {
+		case slot := <-prepared:
+			if slot != nil {
+				return slot, nil
+			}
+		case <-closed:
+			return nil, errors.New("python-reactor: dispatcher is shut down")
+		case <-ctx.Done():
+			return nil, fmt.Errorf("python-reactor: wait for snapshot refill: %w", ctx.Err())
+		}
 	}
 
 	slot, err := create(ctx)
@@ -782,35 +797,79 @@ func agentPythonSnapshotStrategyName(strategy SnapshotStrategy) string {
 	}
 }
 
-func (d *AgentPythonDispatcher) replaceSnapshotSlot(requestID uint64) error {
-	d.mu.Lock()
-	closed := d.closed
-	d.mu.Unlock()
-	if closed {
-		return nil
+func (d *AgentPythonDispatcher) discardSnapshotSlotAsync(slot *agentPythonModuleSlot, requestID uint64) {
+	// Send already holds one pending count, so this Add cannot race Shutdown's
+	// Wait. Closing a context-cancelled wazero module or its snapshot strategy
+	// can block and must not extend the request deadline.
+	d.pending.Add(1)
+	go func() {
+		defer d.pending.Done()
+		phaseStart := time.Now()
+		closeErr := slot.close(context.Background())
+		d.observeAgentPythonPhase(AgentPythonPhaseObservation{
+			Phase: AgentPythonPhaseClose, Purpose: AgentPythonPurposeRequest,
+			RequestID: requestID, SlotID: slot.id, Started: phaseStart,
+			Outcome: agentPythonPhaseOutcome(closeErr), Err: closeErr,
+		})
+	}()
+}
+
+func (d *AgentPythonDispatcher) snapshotRefillInFlight() bool {
+	d.refillMu.Lock()
+	defer d.refillMu.Unlock()
+	return d.refillInFlight > 0
+}
+
+func (d *AgentPythonDispatcher) scheduleSnapshotRefill(requestID uint64) {
+	if d.refillCtx == nil || d.prepared == nil {
+		return
 	}
-	timeout := d.cfg.Timeout
-	if timeout < 30*time.Second {
-		timeout = 30 * time.Second
+	d.refillMu.Lock()
+	if len(d.prepared)+d.refillInFlight >= cap(d.prepared) {
+		d.refillMu.Unlock()
+		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	slot, err := d.newPreparedModuleSlot(ctx, true, AgentPythonPurposeReplacement, requestID)
-	if err != nil {
-		return fmt.Errorf("python-reactor: replace prepared snapshot slot: %w", err)
-	}
-	if slot.snapshotSelected != d.snapshotSelected {
-		_ = slot.close(context.Background())
-		return fmt.Errorf("python-reactor: replacement selected snapshot strategy %q, want %q", slot.snapshotSelected, d.snapshotSelected)
-	}
-	d.mu.Lock()
-	closed = d.closed
-	d.mu.Unlock()
-	if closed {
-		return slot.close(context.Background())
-	}
-	d.prepared <- slot
-	return nil
+	d.refillInFlight++
+	d.refills.Add(1)
+	refillCtx := d.refillCtx
+	d.refillMu.Unlock()
+
+	go func() {
+		defer d.refills.Done()
+		defer func() {
+			d.refillMu.Lock()
+			d.refillInFlight--
+			d.refillMu.Unlock()
+		}()
+
+		timeout := d.cfg.Timeout
+		if timeout < 30*time.Second {
+			timeout = 30 * time.Second
+		}
+		ctx, cancel := context.WithTimeout(refillCtx, timeout)
+		defer cancel()
+		slot, err := d.newPreparedModuleSlot(ctx, true, AgentPythonPurposeReplacement, requestID)
+		if err != nil {
+			if refillCtx.Err() == nil {
+				d.log.Warn("agent-python snapshot refill failed", zap.Error(err))
+			}
+			return
+		}
+		if slot.snapshotSelected != d.snapshotSelected {
+			_ = slot.close(context.Background())
+			d.log.Warn("agent-python snapshot refill selected inconsistent strategy",
+				zap.String("selected", slot.snapshotSelected),
+				zap.String("expected", d.snapshotSelected),
+			)
+			return
+		}
+		select {
+		case d.prepared <- slot:
+			d.preparedRefills.Add(1)
+		case <-refillCtx.Done():
+			_ = slot.close(context.Background())
+		}
+	}()
 }
 
 func (d *AgentPythonDispatcher) scheduleSingleUseRefill(requestID uint64) {
@@ -1004,7 +1063,9 @@ func callAgentPythonWithBytes(ctx context.Context, module api.Module, name strin
 	}
 	results, err := function.Call(ctx, uint64(pointer), uint64(uint32(len(data))))
 	if err != nil {
-		release()
+		// A failed guest call is followed by module disposal in every caller.
+		// Calling guest dealloc here can itself consume another deadline and
+		// delay the timeout response without reclaiming reusable memory.
 		return nil, nil, fmt.Errorf("python-reactor: call %s: %w", name, err)
 	}
 	return results, release, nil

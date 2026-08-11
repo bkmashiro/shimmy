@@ -249,6 +249,13 @@ The shim also sets the following environment variables:
 
 > Using the file interface is recommended for large payloads such as base64-encoded images.
 
+### QEMU ultimate fallback
+
+Evaluators that require Linux process semantics can be run through an explicit,
+opt-in QEMU VM wrapper. QEMU is never selected as an automatic retry or silent
+fallback. See [QEMU ultimate fallback](docs/qemu-fallback.md) for the image
+contract, reset policies, limits and validation workflow.
+
 For example, a Wolfram Language evaluation function in `evaluation.wl` would be invoked as:
 
 ```shell

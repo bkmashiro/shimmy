@@ -37,12 +37,17 @@ type Params struct {
 }
 
 func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
-	switch params.Config.Supervisor.IO.Interface {
+	supervisorCfg, err := applyQEMUFallbackConfig(params.Config.Supervisor)
+	if err != nil {
+		return nil, err
+	}
+
+	switch supervisorCfg.IO.Interface {
 	case supervisor.RpcIO:
 		return dispatcher.NewDedicatedDispatcher(
 			dispatcher.DedicatedDispatcherParams{
 				Config: dispatcher.DedicatedDispatcherConfig{
-					Supervisor: params.Config.Supervisor,
+					Supervisor: supervisorCfg,
 				},
 				Context: params.Context,
 				Log:     params.Log,
@@ -56,9 +61,9 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 		}
 
 		cfg := wasm.Config{
-			ModulePath:   params.Config.Supervisor.StartParams.Cmd,
+			ModulePath:   supervisorCfg.StartParams.Cmd,
 			MaxInstances: params.Config.MaxWorkers,
-			Timeout:      params.Config.Supervisor.SendParams.Timeout,
+			Timeout:      supervisorCfg.SendParams.Timeout,
 		}
 		switch wasmProfile {
 		case "generic":
@@ -84,7 +89,7 @@ func NewDispatcher(params Params) (dispatcher.Dispatcher, error) {
 		return dispatcher.NewPooledDispatcher(
 			dispatcher.PooledDispatcherParams{
 				Config: dispatcher.PooledDispatcherConfig{
-					Supervisor: params.Config.Supervisor,
+					Supervisor: supervisorCfg,
 					MaxWorkers: params.Config.MaxWorkers,
 				},
 				Context: params.Context,

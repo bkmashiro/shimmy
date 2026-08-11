@@ -17,9 +17,17 @@ type StopConfig struct {
 
 // SendConfig describes the configuration for sending messages to the worker.
 type SendConfig struct {
-	// Timeout is the timeout for sending a message to the worker.
+	// Timeout is the timeout for sending a message.
 	Timeout time.Duration
 }
+
+// WorkerLifecycle optionally narrows a process-backed worker to one invocation.
+type WorkerLifecycle string
+
+const (
+	WorkerLifecycleAutomatic  WorkerLifecycle = ""
+	WorkerLifecycleInvocation WorkerLifecycle = "invocation"
+)
 
 // IOInterface describes the interface used to communicate with the worker.
 type IOConfig struct {
@@ -60,6 +68,10 @@ type Config struct {
 	// SendParams are the parameters to pass to the worker when
 	// sending a message.
 	SendParams SendConfig `conf:"send"`
+
+	// WorkerLifecycle leaves historical behavior unchanged unless an isolation
+	// wrapper explicitly requires a fresh worker for every request.
+	WorkerLifecycle WorkerLifecycle `conf:"worker_lifecycle"`
 
 	// Sandbox holds the nsjail sandbox configuration. When Sandbox.Enabled
 	// is false (the default), behaviour is identical to an unsandboxed worker.

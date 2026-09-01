@@ -211,6 +211,11 @@ To try Python Reactor without assembling requests by hand, follow the
 It includes runnable base, NumPy, and SymPy fixtures plus both passing and
 failing student-code examples.
 
+For SciPy, headless matplotlib, and Lambda Feedback package evaluators, use the
+Node/Pyodide worker described in [`examples/eval-pyodide`](examples/eval-pyodide/README.md)
+with the same `rpc`/stdio interface. The concise examples and bundle-preparation
+command are in [`docs/python-examples.md`](docs/python-examples.md).
+
 The shim injects the following environment variables into the evaluation function process so it can identify the transport it should listen on:
 
 | Variable | Value |
